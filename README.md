@@ -1,2 +1,2 @@
 # JW-Renderer
-Just Works WebGL Renderer
+Just Works Renderer
