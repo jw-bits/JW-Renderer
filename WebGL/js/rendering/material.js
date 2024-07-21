@@ -1,125 +1,3 @@
-class MaterialAttributes
-{
-    // 2-component
-    static kUV0 = "a_uv0";
-    static kUV1 = "a_uv1";
-    static kUV2 = "a_uv2";
-    static kUV3 = "a_uv3";
-
-    // 3-component
-    static kPosition = "a_pos";
-    static kNormal = "a_norm";
-
-    static allAttribs = [];
-
-    static componentCount(name)
-    {
-        for (let i = 0; i < this.allAttribs.length; ++i)
-        {
-            let n = this.allAttribs[i];
-
-            if (n === name)
-            {
-                if (i <= 3)
-                    return 2;
-                else
-                    return 3; 
-            }
-        }
-
-        return 0;
-    }
-
-    static {
-        this.allAttribs.push(MaterialAttributes.kUV0);
-        this.allAttribs.push(MaterialAttributes.kUV1);
-        this.allAttribs.push(MaterialAttributes.kUV2);
-        this.allAttribs.push(MaterialAttributes.kUV3);
-        this.allAttribs.push(MaterialAttributes.kPosition);
-        this.allAttribs.push(MaterialAttributes.kNormal);
-    }
-}
-
-class MaterialUniforms
-{
-    // 1-component
-    static kTexture0 = "u_tex0";
-    static kTexture1 = "u_tex1";
-    static kTexture2 = "u_tex2";
-    static kTexture3 = "u_tex3";
-    static #kOneEnd = 4;
-
-    // 2-component
-    static kUVTile = "u_uvTile"; // (X, Y) => (U = U * X, V = V * Y)
-    static kUVOffset = "u_uvOffset"; // (X, Y) => (U = U + X, V = V + Y)
-    static kResolution = "u_res"; // (W, H)
-    static #kTwoEnd = 7;
-
-    // 3-component
-    static kScale = "u_scale"; // (SX, SY, SZ)
-    static kEulerRotation = "u_euler"; // (EX, EY, EZ) as radians
-    static #kThreeEnd = 9;
-
-    // 4-component
-    static kColor = "u_color"; // (R, G, B, A) as floats
-    static kVector0 = "u_vec0"; // (X, Y, Z, W) as floats
-    static kVector1 = "u_vec1"; // (X, Y, Z, W) as floats
-    static kVector2 = "u_vec2"; // (X, Y, Z, W) as floats
-    static kVector3 = "u_vec3"; // (X, Y, Z, W) as floats
-    
-    static allUniforms = [];
-
-    static componentCount(name)
-    {
-        for (let i = 0; i < this.allUniforms.length; ++i)
-        {
-            let n = this.allUniforms[i];
-
-            if (n === name)
-            {
-                if (i < MaterialUniforms.#kOneEnd)
-                    return 1;
-                else if (i < MaterialUniforms.#kTwoEnd)
-                    return 2;
-                else if (i < MaterialUniforms.#kThreeEnd)
-                    return 3;
-                else
-                    return 4;
-            }
-        }
-
-        return 0;
-    }
-
-    static {
-        this.allUniforms.push(MaterialUniforms.kTexture0);
-        this.allUniforms.push(MaterialUniforms.kTexture1);
-        this.allUniforms.push(MaterialUniforms.kTexture2);
-        this.allUniforms.push(MaterialUniforms.kTexture3);
-        this.allUniforms.push(MaterialUniforms.kUVTile);
-        this.allUniforms.push(MaterialUniforms.kUVOffset);
-        this.allUniforms.push(MaterialUniforms.kResolution);
-        this.allUniforms.push(MaterialUniforms.kScale);
-        this.allUniforms.push(MaterialUniforms.kEulerRotation);
-        this.allUniforms.push(MaterialUniforms.kColor);
-        this.allUniforms.push(MaterialUniforms.kVector0);
-        this.allUniforms.push(MaterialUniforms.kVector1);
-        this.allUniforms.push(MaterialUniforms.kVector2);
-        this.allUniforms.push(MaterialUniforms.kVector3);
-    }
-}
-
-class MaterialMember
-{
-    constructor()
-    {
-        this.name = "";
-        this.location = -1;
-        this.componentCount = 0;
-        this.value = null;
-    }
-}
-
 class Material
 {
     #shader;
@@ -191,7 +69,20 @@ class Material
         this.#uniforms = [];
     }
 
-    setMemberValue(_name, _value)
+    setAttributeValue(_name, _value)
+    {
+        let m = this.#attribs.find((member) => member.name === _name);
+
+        if (m !== undefined)
+        {
+            m.value = _value;
+                return true;
+        }
+
+        return false;
+    }
+
+    setUniformValue(_name, _value)
     {
         let m = this.#uniforms.find((member) => member.name === _name);
 
@@ -216,19 +107,25 @@ class Material
         }
     }
 
-    bind()
+    bindShader()
     {
         this.#shader.bind();
+    }
 
+    bindAttributes(dataType = WGL.context.FLOAT)
+    {
         for (let i = 0; i < this.#attribs.length; ++i)
         {
             let a = this.#attribs[i];
 
             WGL.context.enableVertexAttribArray(a.location);
             WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, a.value);
-            WGL.context.vertexAttribPointer(a.location, a.componentCount, WGL.context.FLOAT, false, 0, 0);
+            WGL.context.vertexAttribPointer(a.location, a.componentCount, dataType, false, 0, 0);
         }
+    }
 
+    bindUniforms()
+    {
         for (let i = 0; i < this.#uniforms.length; ++i)
         {
             let u = this.#uniforms[i];
@@ -253,21 +150,24 @@ class Material
         }        
     }
 
+    getRenderAttributes() { return this.#attribs; }
+    getRenderUniforms() { return this.#uniforms; }
+
     // *** Internal Methods ***
 
     #setupAttributes()
     {
-        for (let i = 0; i < MaterialAttributes.allAttribs.length; ++i)
+        for (let i = 0; i < RenderAttributes.allAttribs.length; ++i)
         {
-            let aName = MaterialAttributes.allAttribs[i];
+            let aName = RenderAttributes.allAttribs[i];
             let idx = this.#shader.getAttrib(aName);
 
             if (idx !== -1)
             {
-                let m = new MaterialMember();
+                let m = new RenderMapping();
                 m.name = aName;
                 m.location = idx;
-                m.componentCount = MaterialAttributes.componentCount(aName);
+                m.componentCount = RenderAttributes.componentCount(aName);
 
                 this.#attribs.push(m);
             }
@@ -278,17 +178,17 @@ class Material
 
     #setupUniforms()
     {
-        for (let i = 0; i < MaterialUniforms.allUniforms.length; ++i)
+        for (let i = 0; i < RenderUniforms.allUniforms.length; ++i)
         {
-            let uName = MaterialUniforms.allUniforms[i];
+            let uName = RenderUniforms.allUniforms[i];
             let idx = this.#shader.getUniform(uName);
 
             if (idx !== null)
             {
-                let m = new MaterialMember();
+                let m = new RenderMapping();
                 m.name = uName;
                 m.location = idx;
-                m.componentCount = MaterialUniforms.componentCount(uName);
+                m.componentCount = RenderUniforms.componentCount(uName);
 
                 if (m.componentCount === 1)
                 {

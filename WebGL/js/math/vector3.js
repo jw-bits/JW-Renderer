@@ -14,19 +14,6 @@ class Vector3
 		this.z = _z;
 	}
 	
-	// // Overloaded Operators
-	// Vector3& operator =(const Vector3 &vec);
-	// Vector3 operator +(const Vector3 &vec) const;
-	// Vector3 operator -(const Vector3 &vec) const;
-	// Vector3 operator *(real s) const;
-	// Vector3 operator *(const Matrix3 &mat) const;
-	// Vector3& operator +=(const Vector3 &vec);
-	// Vector3& operator -=(const Vector3 &vec);
-	// Vector3& operator *=(real s);
-	// Vector3 operator -() const;
-	// bool operator ==(const Vector3 &vec) const;
-    // bool operator !=(const Vector3 &vec) const;
-	
 	// Methods
 	dot(vec)
     {
@@ -73,17 +60,6 @@ class Vector3
     {
 	    return ((this.x * this.x) + (this.y * this.y) + (this.z * this.z));
     }
-
-    // *** Static Methods ***
-
-	// static Vector3 Project(const Vector3 &a, const Vector3 &ontoB);
-	// static Point3 Rotate(const Point3 &pt, const Point3 &pivotPt, const Matrix3 &rotation);
-	// static Vector3 PerpendicularProject(const Vector3 &a, const Vector3 &ontoB);
-	// static Vector3 Reflect(const Vector3 &vec, const Vector3 &norm);
-
-	// // If areUnitLength == true, both vectors lengths are assumed to = 1
-	// // Otherwise, their lengths are calculated and used
-	// static real AngleBetween(const Vector3 &vec1, const Vector3 &vec2, bool areUnitLength);
 
     // *** Static Vars ***
 

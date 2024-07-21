@@ -111,28 +111,25 @@ class Rect2D
             return false;
 
         this.#mesh = new StaticMesh();
-        
-        let meshResult = this.#mesh.loadPositionBuffer(Shapes.pos);
-        meshResult |= this.#mesh.loadUVBuffer(Shapes.uvs, 0);
-        meshResult |= this.#mesh.loadIndexBuffer(Shapes.indices);
 
-        if (meshResult === false)
-            return false;
+        let b = true;
 
-        this.#material.setAttributeValuesFromMesh(this.#mesh); 
+        b |= this.#mesh.loadVertexData(RenderAttributes.kPosition, Shapes.pos);
+        b |= this.#mesh.loadVertexData(RenderAttributes.kUV0, Shapes.uvs);
+        b |= this.#mesh.loadIndexBuffer(Shapes.indices);
         
         // Set other default values 
         let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
-        this.#material.setMemberValue("u_res", res);
+        b |= this.#material.setUniformValue("u_res", res);
 
         let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
-        this.#material.setMemberValue("u_scale", scaleAndRotZ);
+        b |= this.#material.setUniformValue("u_scale", scaleAndRotZ);
 
         let rectPos = new Vector4(0, 0, this.#width / 2.0, this.#height / 2.0);
-        this.#material.setMemberValue("u_vec0", rectPos);
+        b |= this.#material.setUniformValue("u_vec0", rectPos);
 
-        this.#isLoaded = true;
-            return true;      
+        this.#isLoaded = b;
+            return b;      
     }
     
     setPos(x, y)
@@ -140,14 +137,14 @@ class Rect2D
         this.#position.set(x,y);
 
         let rectPos = new Vector4(this.#position.x, this.#position.y, this.#width / 2.0, this.#height / 2.0);
-        this.#material.setMemberValue("u_vec0", rectPos);
+        this.#material.setUniformValue("u_vec0", rectPos);
     }
 
     setRotation(rotZ)
     {
         this.#rotZ = rotZ;        
         let scaleAndRotZ = new Vector3(this.#scaleX, this.#scaleY, this.#rotZ);
-        this.#material?.setMemberValue("u_scale", scaleAndRotZ);
+        this.#material?.setUniformValue("u_scale", scaleAndRotZ);
     }
 
     render()
@@ -158,11 +155,19 @@ class Rect2D
                 return;
         }
 
-        this.#material.bind();
+        this.#material.bindShader();
+
+        let raa = this.#material.getRenderAttributes();
+
+        for (let i = 0; i < raa.length; ++i)
+        {
+            this.#mesh.bindVertexAttribute(raa[i]);
+        }
+
+        this.#material.bindUniforms();
         this.#mesh.render();
     }
 
     // *** Internal methods ***
-
 
 }

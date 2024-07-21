@@ -87,26 +87,6 @@ class Texture
 
     bind() { WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texId); }
 
-
-    // bind(shaderUniform = -1, samplerIndex = 0)
-    // {
-    //     if (shaderUniform === -1)
-    //         return false;
-
-    //     switch (samplerIndex)
-    //     {
-    //         case 0: WGL.context.activeTexture(WGL.context.TEXTURE0); break;
-    //         case 1: WGL.context.activeTexture(WGL.context.TEXTURE1); break;
-    //         case 2: WGL.context.activeTexture(WGL.context.TEXTURE2); break;
-    //         case 3: WGL.context.activeTexture(WGL.context.TEXTURE3); break;
-    //         default: console.error("Only 4 texture units supported"); return false;
-    //     }
-
-    //     WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texId);
-    //     WGL.context.uniform1(shaderUniform, samplerIndex);
-    //         return true;
-    // }
-
     unload()
     {
         if (this.#texId === 0)

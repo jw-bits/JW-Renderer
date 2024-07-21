@@ -1,29 +1,4 @@
 "use strict";
-
-/*
-
- +Y
-  |
-  |
-  |
-(0,0)----+X
-
-*/
-class Alignment
-{
-    static kBottomLeft = 0;
-    static kMiddleLeft = 1;
-    static kTopLeft = 2;
-
-    static kBottomCenter = 3;
-    static kMiddleCenter = 4;
-    static kTopCenter = 5;
-
-    static kBottomRight = 6;
-    static kMiddleRight = 7;
-    static kTopRight = 8;
-}
-
 class Util
 {
     static isPowerOfTwo(x)
@@ -63,8 +38,6 @@ class Shapes
         Shapes.clearData();
 
         let lx = 0;
-        let rx = 0;
-        let ty = 0;
         let by = 0;
 
         switch (align)
@@ -72,8 +45,6 @@ class Shapes
             case Alignment.kBottomLeft:
             {
                 lx = x;
-                rx = x + w;
-                ty = y + h;
                 by = y;
             }
             break;
@@ -81,24 +52,64 @@ class Shapes
             case Alignment.kMiddleLeft:
             {
                 lx = x;
-                rx = x + w;
                 by = y - (h / 2.0);
-                ty = by + h;                
             }
             break;
 
             case Alignment.kTopLeft:
             {
                 lx = x;
-                rx = x + w;
-                ty = y;
+                by = y - h;     
+            }
+            break;
+
+            case Alignment.kBottomCenter:
+            {
+                lx = x - (w / 2.0);
+                by = y;
+            }
+            break;
+
+            case Alignment.kMiddleCenter:
+            {
+                lx = x - (w / 2.0);
+                by = y - (h / 2.0);               
+            }
+            break;
+
+            case Alignment.kTopCenter:
+            {
+                lx = x - (w / 2.0);
                 by = y - h;
-                                
+            }
+            break;
+
+            case Alignment.kBottomRight:
+            {
+                lx = x - w;
+                by = y;
+            }
+            break;
+
+            case Alignment.kMiddleRight:
+            {
+                lx = x - w;
+                by = y - (h / 2.0);               
+            }
+            break;
+
+            case Alignment.kTopRight:
+            {
+                lx = x - w;
+                by = y - h;
             }
             break;
 
             default: return false;
         }
+
+        let rx = lx + w;
+        let ty = by + h;
 
         Shapes.vertexCount = 4;
         Shapes.pos = new Float32Array([
