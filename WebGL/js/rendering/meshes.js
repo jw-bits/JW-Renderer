@@ -95,54 +95,27 @@ class IndexBuffer
 class PointsMesh
 {
     #vertexBuffer;
-    #points;
     #count;
 
     constructor()
     {
-        this.#vBuffer = null;
-        this.#points = null;        
+        this.#vertexBuffer = new VertexFloatBuffer(true);
         this.#count = 0;
     }
 
-    create(_count)
-    {
-        if (_count <= 0)
-            return false;
-        else if (this.#count !== 0)
-            return false; // Alredy created
-
-        this.#vertexBuffer = new VertexFloatBuffer(true);        
-        this.#points = new Float32Array(_count);
-        this.#count = _count;
-            return true;
-    }
-
-    load(_positions)
+    set(_positions)
     {
         if (_positions == null || _positions.length === 0)
             return false;
-        else if (this.#count !== 0)
-            return false; // Already created
 
-        this.#vertexBuffer = new VertexFloatBuffer(true);
-        this.#points = new Float32Array(_positions);
-        this.#count = this.#points.length;
-
-        this.#vertexBuffer.setDynamicVertexData(this.#points);
+        this.#vertexBuffer.setVertexData(_positions);
+        this.#count = _positions.length;
     }
 
-    unload()
+    render()
     {
-        if (this.#vertexBuffer !== null)
-            this.#vertexBuffer.unload();
-
-        this.#vertexBuffer = null;
-        this.#points = null;
-        this.#count = 0;
+        WGL.context.drawArrays(WGL.context.POINTS, 0, this.#count);
     }
-
-    getPoints() { return this.#points; }
 }
 
 class StaticMesh

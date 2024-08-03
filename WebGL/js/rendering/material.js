@@ -95,18 +95,6 @@ class Material
         return false;
     }
 
-    setAttributeValuesFromMesh(mesh)
-    {
-        for (let i = 0; i < this.#attribs.length; ++i)
-        {
-            let m = this.#attribs[i];
-            let buff = mesh.getBuffer(m.name);
-
-            if (buff !== null)
-                m.value = buff;
-        }
-    }
-
     bindShader()
     {
         this.#shader.bind();

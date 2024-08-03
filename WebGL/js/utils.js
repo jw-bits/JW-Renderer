@@ -15,6 +15,13 @@ class Util
     {
         return d * (Math.PI / 180.0);
     }
+
+    static randomFloat(minF, maxF)
+    {
+        let r = Math.random();
+        let f = (r * (maxF - minF)) + minF;
+            return f;
+    }
 }
 
 class Shapes

@@ -171,3 +171,156 @@ class Rect2D
     // *** Internal methods ***
 
 }
+
+class Particles2D
+{
+    static #VS = `
+        attribute vec3 a_pos;
+        
+        uniform vec2 u_res;
+
+        void main() {
+            vec2 zTo1 = a_pos.xy / u_res;
+            vec2 cs = (zTo1 * 2.0) - 1.0;
+
+            gl_Position = vec4(cs, 0.0, 1.0);
+        }
+    `;
+
+    static #FS = `
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+        uniform vec4 u_color;
+
+        void main() {
+            vec4 c = texture2D(u_tex0, gl_PointCoord);
+            gl_FragColor = c * u_color;
+        }    
+    `;
+
+     // Shader
+     static #kShader = null;
+     
+     #material;
+     #mesh;
+
+     #emitPosition;
+     #duration;
+     #useGravity;     
+     #isLoaded;
+     #isRunning;
+
+     #deltaTime;
+     #positions;
+     #velocities;    
+     
+     constructor()
+     {
+         this.#material = null;
+         this.#mesh = null;
+
+         this.#emitPosition = Vector2.kZero;
+         this.#duration = 0.0;
+         this.#useGravity = false;
+         this.#isLoaded = false;
+         this.#isRunning = false;
+
+         this.#deltaTime = 0.0;
+         this.#positions = [];
+         this.#velocities = [];
+     }
+
+     load(_particleCount, _texture, _emitPosition, _duration, _useGravity)
+     {
+        if (Particles2D.#kShader === null)
+        {
+            Particles2D.#kShader = new Shader();
+
+            if (Particles2D.#kShader.load(Particles2D.#VS, Particles2D.#FS) === false)
+                return false;
+        }
+
+        let ta = [_texture];
+        this.#material = new Material();
+        this.#mesh = new PointsMesh();
+
+        if (this.#material.load(Particles2D.#kShader, ta) === false)
+            return false;
+
+        this.#positions = new Float32Array(_particleCount * 3);
+        this.#positions.fill(0.0);
+        
+        this.#velocities = new Array(_particleCount);
+
+        if (this.#mesh.set(this.#positions) === false)
+            return false;
+
+        this.#emitPosition = _emitPosition;
+        this.#duration = _duration;
+        this.#useGravity = _useGravity;
+        
+     }
+
+     // Takes a function to do the initilization logic for the positions/veleociies of the particles
+     // initFunc
+     // (   
+     //     origin, -- A Vector2 of where the particles should emit from  
+     //     poistions[], -- A Float32Array[] of (x,y) tightly packed
+     //     velocities[] -- An array of Vector2
+     // )
+     start(initFunc)
+     {
+        if (this.#isLoaded === false || this.#isRunning === true)
+            return false;
+
+        initFunc(this.#emitPosition, this.#positions, this.#velocities);
+
+        this.#isRunning = true;
+        this.#deltaTime = 0.0;
+     }
+
+     stop()
+     {
+        this.#isRunning = false;
+     }
+
+     update(dt)
+     {
+        if (this.#isRunning === true)
+        {
+            this.#deltaTime += dt;
+
+            if (this.#deltaTime > this.#duration)
+                this.stop();
+            else
+            {
+                let pIdx = 0;
+                let gravityForce = (this.#useGravity) ? -9.8 : 0.0;
+
+
+                for (let i = 0; i < this.#velocities.length; ++i)
+                {
+                    let v = this.#velocities[i];
+
+                    this.#positions[pIdx + 0] += (v.x * dt);
+                    this.#positions[pIdx + 1] += ((v.y * dt) + (gravityForce * dt));
+
+                    pIdx += 2;
+                }
+            }
+        }
+     }
+
+     render()
+     {
+        if (this.#isRunning)
+        {
+            this.#material.bindShader();
+            this.#material.bindUniforms();
+
+            this.#mesh.set(this.#positions);
+            this.#mesh.render();
+        }
+     }
+}
