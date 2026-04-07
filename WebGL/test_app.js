@@ -2,9 +2,9 @@ let prevTS = Date.now();
 let dt = 0.0;
 let rotZ = 0;
 
-let gTex = null
-let gRect = null;
-let gParticles = null;
+let gTex = null;
+let gCube = null;
+let gCamera = null;
 
 window.onload = () => {
 
@@ -27,23 +27,22 @@ window.onresize = () => {
 function appSetup()
 {
     WGL.context.clearColor(1.0, 0.0, 0.0, 1.0);
+    WGL.context.enable(WGL.context.DEPTH_TEST);
+
+    gCamera = new Camera();
+    gCamera.setEye(0, 1.0, 5.0);
+    gCamera.setTarget(0, 0, 0);
 
     gTex = new Texture();
-    gRect = new Rect2D();
-    gParticles = new Particles2D();
-
+    gCube = new Model();
     gTex.load("./textures/test_up.png", appOnTextureLoad);
 }
 
 
 function appOnTextureLoad()
 {
-    gRect.load(gTex);
-    gRect.setPos(20, 20);
-
-    let pos = new Vector2(256, 256);
-    gParticles.load(64, gTex, pos, 2.5, true);
-    gParticles.start(particleInit);
+    gCube.load(Shapes.makeCube(1.0), gTex);
+    gCube.setPos(0, 0, -3); // Move into view
 }
 
 function appMain()
@@ -65,31 +64,34 @@ function appMain()
 
 function appUpdate(dt)
 {
-    rotZ += dt;
-    gRect.setRotation(rotZ);
-    gParticles.update(dt);
+    gCube.rotate(0, dt * 0.5, 0); // Rotate around Y
 }
 
 function appRender()
 {
-    gRect.render();
-    gParticles.render();
+    let aspect = WGL.context.canvas.width / WGL.context.canvas.height;
+    let proj = Matrix4.perspectiveMatrix(Util.degToRad(45), aspect, 0.1, 100.0);
+    let view = gCamera.getViewMatrix();
+    let viewProj = Matrix4.multiply(proj, view);
+
+    gCube.render(viewProj);
 }
 
-function particleInit(emitPos, f32PosArray, velArray)
+function particleInit(emitPos, posArray, velArray)
 {
     let pIdx = 0;
 
-    for (let i = 0; i < posf32Array.length; ++i)
+    for (let i = 0; i < velArray.length; ++i)
     {
         let xxx = Util.randomFloat(-2.0, 2.0);
         let yyy = Util.randomFloat(1.0, 4.0);
 
         let v = new Vector2(xxx, yyy);
 
-        f32PosArray[pIdx + 0] = emitPos.x + v.x; 
-        f32PosArray[pIdx + 1] = emitPos.y + v.y;
-        pIdx += 2; 
+        posArray[pIdx + 0] = emitPos.x + v.x; 
+        posArray[pIdx + 1] = emitPos.y + v.y;
+        posArray[pIdx + 2] = 0.0;
+        pIdx += 3; 
 
         velArray[i] = v;
     }

@@ -1,14 +1,14 @@
 class Rect2D
 {
-    static #VS = `
-        attribute vec3 a_pos;
-        attribute vec2 a_uv0;
+    static #VS = `#version 300 es
+        layout(location = 4) in vec3 a_pos;
+        layout(location = 0) in vec2 a_uv0;
         
         uniform vec2 u_res;
         uniform vec3 u_scale;
         uniform vec4 u_vec0;
 
-        varying vec2 v_uv0;
+        out vec2 v_uv0;
 
         void main() {
             vec2 ssPos = ((a_pos.xy + u_vec0.xy) - u_vec0.zw) * u_scale.xy;
@@ -28,16 +28,17 @@ class Rect2D
         }
     `;
 
-    static #FS = `
+    static #FS = `#version 300 es
         precision highp float;
 
         uniform sampler2D u_tex0;
 
-        varying vec2 v_uv0;
+        in vec2 v_uv0;
+        out vec4 fragColor;
 
         void main() {
-            vec4 c = texture2D(u_tex0, v_uv0);
-            gl_FragColor = c;
+            vec4 c = texture(u_tex0, v_uv0);
+            fragColor = c;
         }    
     `;
 
@@ -107,18 +108,11 @@ class Rect2D
         if (this.#material.load(Rect2D.#kShader, ta) === false)
             return false;
 
-        if (Shapes.makeQuad(0, 0, 0, this.#width, this.#height, Alignment.kBottomLeft) === false)
-            return false;
-
-        this.#mesh = new StaticMesh();
-
-        let b = true;
-
-        b |= this.#mesh.loadVertexData(RenderAttributes.kPosition, Shapes.pos);
-        b |= this.#mesh.loadVertexData(RenderAttributes.kUV0, Shapes.uvs);
-        b |= this.#mesh.loadIndexBuffer(Shapes.indices);
+        this.#mesh = Shapes.makeQuad(0, 0, 0, this.#width, this.#height, Alignment.kBottomLeft);
+        if (this.#mesh === null) return false;
         
-        // Set other default values 
+        this.#mesh.bindMaterial(this.#material);
+        let b = true;
         let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
         b |= this.#material.setUniformValue("u_res", res);
 
@@ -157,13 +151,6 @@ class Rect2D
 
         this.#material.bindShader();
 
-        let raa = this.#material.getRenderAttributes();
-
-        for (let i = 0; i < raa.length; ++i)
-        {
-            this.#mesh.bindVertexAttribute(raa[i]);
-        }
-
         this.#material.bindUniforms();
         this.#mesh.render();
     }
@@ -174,8 +161,8 @@ class Rect2D
 
 class Particles2D
 {
-    static #VS = `
-        attribute vec3 a_pos;
+    static #VS = `#version 300 es
+        layout(location = 4) in vec3 a_pos;
         
         uniform vec2 u_res;
 
@@ -183,21 +170,31 @@ class Particles2D
             vec2 zTo1 = a_pos.xy / u_res;
             vec2 cs = (zTo1 * 2.0) - 1.0;
 
+            gl_PointSize = 64.0;
             gl_Position = vec4(cs, 0.0, 1.0);
         }
     `;
 
-    static #FS = `
+    static #FS = `#version 300 es
         precision highp float;
 
         uniform sampler2D u_tex0;
         uniform vec4 u_color;
+        out vec4 fragColor;
 
         void main() {
-            vec4 c = texture2D(u_tex0, gl_PointCoord);
-            gl_FragColor = c * u_color;
+            vec4 c = texture(u_tex0, gl_PointCoord);
+            fragColor = c * u_color;
         }    
     `;
+
+    //  static #FS = `
+    //      precision highp float;
+
+    //      void main() {
+    //          gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+    //      }    
+    //  `;
 
      // Shader
      static #kShader = null;
@@ -259,14 +256,15 @@ class Particles2D
         this.#emitPosition = _emitPosition;
         this.#duration = _duration;
         this.#useGravity = _useGravity;
-        
+        this.#isLoaded = true;
+            return true;
      }
 
      // Takes a function to do the initilization logic for the positions/veleociies of the particles
      // initFunc
      // (   
      //     origin, -- A Vector2 of where the particles should emit from  
-     //     poistions[], -- A Float32Array[] of (x,y) tightly packed
+     //     poistions[], -- A Float32Array[] of (x,y,z) tightly packed
      //     velocities[] -- An array of Vector2
      // )
      start(initFunc)
@@ -276,8 +274,11 @@ class Particles2D
 
         initFunc(this.#emitPosition, this.#positions, this.#velocities);
 
+        this.#mesh.set(this.#positions);
+
         this.#isRunning = true;
         this.#deltaTime = 0.0;
+            return true;
      }
 
      stop()
@@ -296,8 +297,7 @@ class Particles2D
             else
             {
                 let pIdx = 0;
-                let gravityForce = (this.#useGravity) ? -9.8 : 0.0;
-
+                let gravityForce = (this.#useGravity === true) ? -9.8 : 0.0;
 
                 for (let i = 0; i < this.#velocities.length; ++i)
                 {
@@ -305,22 +305,113 @@ class Particles2D
 
                     this.#positions[pIdx + 0] += (v.x * dt);
                     this.#positions[pIdx + 1] += ((v.y * dt) + (gravityForce * dt));
+                    this.#positions[pIdx + 2] = 0.0;
 
-                    pIdx += 2;
+                    pIdx += 3;
                 }
+
+                this.#mesh.set(this.#positions);
             }
         }
      }
 
      render()
      {
-        if (this.#isRunning)
+        if (this.#isRunning === true)
         {
+            let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
+            this.#material.setUniformValue("u_res", res);
+            this.#material.setUniformValue("u_color", Vector4.kWhite);
+            
             this.#material.bindShader();
-            this.#material.bindUniforms();
 
-            this.#mesh.set(this.#positions);
+            this.#material.bindUniforms();
             this.#mesh.render();
         }
      }
+}
+
+class Model {
+    static #VS = `#version 300 es
+        layout (location = 4) in vec3 a_pos;
+        layout (location = 0) in vec2 a_uv0;
+        uniform mat4 u_mvp;
+        out vec2 v_uv0;
+        void main() {
+            gl_Position = u_mvp * vec4(a_pos, 1.0);
+            v_uv0 = a_uv0;
+        }
+    `;
+
+    static #FS = `#version 300 es
+        precision highp float;
+        uniform sampler2D u_tex0;
+        in vec2 v_uv0;
+        out vec4 fragColor;
+        void main() {
+            fragColor = texture(u_tex0, v_uv0);
+        }
+    `;
+
+    static #kShader = null;
+    
+    #material;
+    #mesh;
+    #pos;
+    #rot;
+    #scale;
+    #isLoaded = false;
+
+    constructor() {
+        this.#pos = new Vector3(0, 0, 0);
+        this.#rot = new Vector3(0, 0, 0);
+        this.#scale = new Vector3(1, 1, 1);
+    }
+
+    load(_mesh, _texture) {
+        if (Model.#kShader === null) {
+            Model.#kShader = new Shader();
+            if (!Model.#kShader.load(Model.#VS, Model.#FS)) return false;
+        }
+        this.#mesh = _mesh;
+        this.#material = new Material();
+
+        if (!this.#material.load(Model.#kShader, [_texture])) 
+            return false;
+
+        this.#mesh.bindMaterial(this.#material);        
+        this.#isLoaded = true;
+            return true;
+    }
+
+    setPos(x, y, z) { this.#pos.set(x, y, z); }
+    setRotation(x, y, z) { this.#rot.set(x, y, z); }
+    setScale(x, y, z) { this.#scale.set(x, y, z); }
+
+    translate(x, y, z) {
+        this.#pos.x += x; this.#pos.y += y; this.#pos.z += z;
+    }
+
+    rotate(x, y, z) {
+        this.#rot.x += x; this.#rot.y += y; this.#rot.z += z;
+    }
+
+    render(viewProj) {
+        if (!this.#isLoaded) return;
+
+        let mTranslation = Matrix4.fromTranslation(this.#pos.x, this.#pos.y, this.#pos.z);
+        let mRotX = Matrix4.fromRotationX(this.#rot.x);
+        let mRotY = Matrix4.fromRotationY(this.#rot.y);
+        let mRotZ = Matrix4.fromRotationZ(this.#rot.z);
+        let mScale = Matrix4.fromScaling(this.#scale.x, this.#scale.y, this.#scale.z);
+
+        let model = Matrix4.multiply(mTranslation, Matrix4.multiply(mRotZ, Matrix4.multiply(mRotY, Matrix4.multiply(mRotX, mScale))));
+        let mvp = Matrix4.multiply(viewProj, model);
+
+        this.#material.setUniformValue("u_mvp", mvp);
+        this.#material.bindShader();
+        
+        this.#material.bindUniforms();
+        this.#mesh.render();
+    }
 }

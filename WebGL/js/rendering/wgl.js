@@ -20,8 +20,8 @@ class WGL
                 return false;
         }
 
-        let contextAttributes = {antialias: false, depth: false};
-        let contextNames = ["webgl", "experimental-webgl", "webkit-3d", "moz-webgl"];
+        let contextAttributes = {antialias: false, depth: true};
+        let contextNames = ["webgl2"];
 
         for (let i = 0; i < contextNames.length; ++i)
         {
@@ -43,6 +43,9 @@ class WGL
 
     static resizeToWindow()
     {
+        if (WGL.context === null)
+            return;
+
         let c = WGL.context.canvas;
 
         const w = window.innerWidth;

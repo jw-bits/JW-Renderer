@@ -34,33 +34,35 @@ class RenderAttributes
     static kPosition = "a_pos";
     static kNormal = "a_norm";
 
-    static allAttribs = [];
+    static allAttribs = new Map();
+
+    static getLocation(name) {
+        switch(name) {
+            case RenderAttributes.kUV0: return 0;
+            case RenderAttributes.kUV1: return 1;
+            case RenderAttributes.kUV2: return 2;
+            case RenderAttributes.kUV3: return 3;
+            case RenderAttributes.kPosition: return 4;
+            case RenderAttributes.kNormal: return 5;
+            default: return -1;
+        }
+    }
 
     static componentCount(name)
     {
-        for (let i = 0; i < this.allAttribs.length; ++i)
-        {
-            let n = this.allAttribs[i];
-
-            if (n === name)
-            {
-                if (i <= 3)
-                    return 2;
-                else
-                    return 3; 
-            }
-        }
-
-        return 0;
+        if (this.allAttribs.has(name))
+            return this.allAttribs.get(name);
+        else
+            return 0;
     }
 
     static {
-        this.allAttribs.push(RenderAttributes.kUV0);
-        this.allAttribs.push(RenderAttributes.kUV1);
-        this.allAttribs.push(RenderAttributes.kUV2);
-        this.allAttribs.push(RenderAttributes.kUV3);
-        this.allAttribs.push(RenderAttributes.kPosition);
-        this.allAttribs.push(RenderAttributes.kNormal);
+        this.allAttribs.set(RenderAttributes.kUV0, 2);
+        this.allAttribs.set(RenderAttributes.kUV1, 2);
+        this.allAttribs.set(RenderAttributes.kUV2, 2);
+        this.allAttribs.set(RenderAttributes.kUV3, 2);
+        this.allAttribs.set(RenderAttributes.kPosition, 3);
+        this.allAttribs.set(RenderAttributes.kNormal, 3);
     }
 }
 
@@ -90,6 +92,11 @@ class RenderUniforms
     static kVector1 = "u_vec1"; // (X, Y, Z, W) as floats
     static kVector2 = "u_vec2"; // (X, Y, Z, W) as floats
     static kVector3 = "u_vec3"; // (X, Y, Z, W) as floats
+    static #kFourEnd = 14;
+
+    // Matrix
+    static kMVP = "u_mvp";
+    static #kMatrixEnd = 15;
     
     static allUniforms = [];
 
@@ -107,8 +114,10 @@ class RenderUniforms
                     return 2;
                 else if (i < RenderUniforms.#kThreeEnd)
                     return 3;
-                else
+                else if (i < RenderUniforms.#kFourEnd)
                     return 4;
+                else
+                    return 16;
             }
         }
 
@@ -130,6 +139,7 @@ class RenderUniforms
         this.allUniforms.push(RenderUniforms.kVector1);
         this.allUniforms.push(RenderUniforms.kVector2);
         this.allUniforms.push(RenderUniforms.kVector3);
+        this.allUniforms.push(RenderUniforms.kMVP);
     }
 }
 
@@ -143,4 +153,3 @@ class RenderMapping
         this.value = null; // Data value for uniforms
     }
 }
-

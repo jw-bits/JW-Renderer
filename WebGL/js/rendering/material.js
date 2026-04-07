@@ -33,10 +33,10 @@ class Material
         this.#shader = _shader;
 
         if (this.#setupAttributes() === false)
-            return false;
+             return false;
 
         if (this.#setupUniforms() === false)
-            return false;
+             return false;
 
         return true;
     }
@@ -69,18 +69,18 @@ class Material
         this.#uniforms = [];
     }
 
-    setAttributeValue(_name, _value)
-    {
-        let m = this.#attribs.find((member) => member.name === _name);
+    // setAttributeValue(_name, _value)
+    // {
+    //     let m = this.#attribs.find((member) => member.name === _name);
 
-        if (m !== undefined)
-        {
-            m.value = _value;
-                return true;
-        }
+    //     if (m !== undefined)
+    //     {
+    //         m.value = _value;
+    //             return true;
+    //     }
 
-        return false;
-    }
+    //     return false;
+    // }
 
     setUniformValue(_name, _value)
     {
@@ -98,6 +98,16 @@ class Material
     bindShader()
     {
         this.#shader.bind();
+    }
+
+    getAttribLocation(name)
+    {
+        return this.#shader.getAttrib(name);
+    }
+
+    getUniformLocation(name)
+    {
+        return this.#shader.getUniform(name);
     }
 
     bindAttributes(dataType = WGL.context.FLOAT)
@@ -125,7 +135,7 @@ class Material
                     if (u.value < this.#textures.length)
                     {
                         this.#bindTexture(u.value);
-                        WGL.context.uniform1f(u.location, u.value); 
+                        WGL.context.uniform1i(u.location, u.value); 
                     }                    
                 } 
                 break;                
@@ -133,6 +143,7 @@ class Material
                 case 2:  WGL.context.uniform2f(u.location, u.value.x, u.value.y); break;
                 case 3:  WGL.context.uniform3f(u.location, u.value.x, u.value.y, u.value.z); break;
                 case 4:  WGL.context.uniform4f(u.location, u.value.x, u.value.y, u.value.z, u.value.w); break;
+                case 16: WGL.context.uniformMatrix4fv(u.location, false, u.value.m); break;
                 default: console.log("Unsupported uniform"); break;
             }
         }        
@@ -145,9 +156,9 @@ class Material
 
     #setupAttributes()
     {
-        for (let i = 0; i < RenderAttributes.allAttribs.length; ++i)
+        for (const [key, value] of RenderAttributes.allAttribs)
         {
-            let aName = RenderAttributes.allAttribs[i];
+            let aName = key;
             let idx = this.#shader.getAttrib(aName);
 
             if (idx !== -1)
@@ -155,13 +166,13 @@ class Material
                 let m = new RenderMapping();
                 m.name = aName;
                 m.location = idx;
-                m.componentCount = RenderAttributes.componentCount(aName);
+                m.componentCount = value;
 
                 this.#attribs.push(m);
             }
         }
 
-        return (this.#attribs.length > 0);
+        return true; 
     }
 
     #setupUniforms()
@@ -192,11 +203,13 @@ class Material
                         m.value = 0;
                 }                    
                 else if (m.componentCount === 2)
-                    m.value = Vector2.kZero;
+                    m.value = new Vector2();
                 else if (m.componentCount === 3)
-                    m.value = Vector3.kZero;
+                    m.value = new Vector3();
                 else if (m.componentCount === 4)
-                    m.value = Vector4.kBlack;
+                    m.value = new Vector4();
+                else if (m.componentCount === 16)
+                    m.value = new Matrix4();
                 else
                     return false;
                 
@@ -205,7 +218,7 @@ class Material
             }
         }
     
-        return (this.#uniforms.length > 0);
+        return true;
     }
 
     #bindTexture(textureIndex)

@@ -8,7 +8,7 @@ class Util
         else if (x <= 0)
             return false; // Only check positive numbers
         else
-            ((x & (x - 1)) === 0);
+            return ((x & (x - 1)) === 0);
     }
 
     static degToRad(d)
@@ -26,14 +26,6 @@ class Util
 
 class Shapes
 {
-    static pos = [];
-    static normals = [];
-    static uvs = [];
-    static vertexCount = 0;
-
-    static indices = [];
-    static indexCount = 0;
-
     /*
         3 ----- 2
         |       |
@@ -42,8 +34,6 @@ class Shapes
     */
     static makeQuad(x, y, z, w, h, align = Alignment.kBottomLeft)
     {
-        Shapes.clearData();
-
         let lx = 0;
         let by = 0;
 
@@ -118,38 +108,71 @@ class Shapes
         let rx = lx + w;
         let ty = by + h;
 
-        Shapes.vertexCount = 4;
-        Shapes.pos = new Float32Array([
+        let pos = new Float32Array([
             lx, by, z,
             rx, by, z,
             rx, ty, z,
             lx, ty, z
         ]);
 
-        Shapes.uvs = new Float32Array([
+        let uvs = new Float32Array([
             0.0, 0.0,
             1.0, 0.0,
             1.0, 1.0,
             0.0, 1.0
         ]); 
 
-        Shapes.indexCount = 6;
-        Shapes.indices = new Uint8Array([
+        let indices = new Uint8Array([
             0, 1, 2,
             2, 3, 0
         ]);
 
-        return true;
+        let mesh = new StaticMesh();
+        mesh.loadVertexData(RenderAttributes.kPosition, pos);
+        mesh.loadVertexData(RenderAttributes.kUV0, uvs);
+        mesh.loadIndexBuffer(indices);
+        return mesh;
     }
 
-    static clearData()
-    {
-        Shapes.pos.length = 0;
-        Shapes.normals.length = 0;
-        Shapes.uvs.length = 0;
-        Shapes.vertexCount = 0;
+    static makeCube(size = 1.0) {
+        let s = size / 2.0;
+        let pos = new Float32Array([
+            // Front face
+            -s, -s,  s,  s, -s,  s,  s,  s,  s, -s,  s,  s,
+            // Back face
+            -s, -s, -s, -s,  s, -s,  s,  s, -s,  s, -s, -s,
+            // Top face
+            -s,  s, -s, -s,  s,  s,  s,  s,  s,  s,  s, -s,
+            // Bottom face
+            -s, -s, -s,  s, -s, -s,  s, -s,  s, -s, -s,  s,
+            // Right face
+             s, -s, -s,  s,  s, -s,  s,  s,  s,  s, -s,  s,
+            // Left face
+            -s, -s, -s, -s, -s,  s, -s,  s,  s, -s,  s, -s,
+        ]);
 
-        Shapes.indices.length = 0;
-        Shapes.indexCount = 0;
+        let uvs = new Float32Array([
+            0,0, 1,0, 1,1, 0,1,
+            1,0, 1,1, 0,1, 0,0,
+            0,1, 0,0, 1,0, 1,1,
+            1,1, 0,1, 0,0, 1,0,
+            1,0, 1,1, 0,1, 0,0,
+            0,0, 1,0, 1,1, 0,1,
+        ]);
+
+        let indices = new Uint8Array([
+            0,  1,  2,      0,  2,  3,    // front
+            4,  5,  6,      4,  6,  7,    // back
+            8,  9,  10,     8,  10, 11,   // top
+            12, 13, 14,     12, 14, 15,   // bottom
+            16, 17, 18,     16, 18, 19,   // right
+            20, 21, 22,     20, 22, 23,   // left
+        ]);
+
+        let mesh = new StaticMesh();
+        mesh.setVertexData(RenderAttributes.kPosition, pos);
+        mesh.setVertexData(RenderAttributes.kUV0, uvs);
+        mesh.setIndexData(indices);
+        return mesh;
     }
 }

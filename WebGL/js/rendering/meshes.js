@@ -10,7 +10,7 @@ class VertexFloatBuffer
         this.#bufferId = WGL.context.createBuffer();               
     }
 
-    setVertexData(_data)
+    set(_data)
     {
         try
         {
@@ -23,16 +23,18 @@ class VertexFloatBuffer
         }
 
         WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#bufferId);
-        WGL.context.bufferData(WGL.context.ARRAY_BUFFER, _data, (this.#isDynamic === true) ? WGL.context.DYNAMIC_ARRAY : WGL.context.STATIC_DRAW);
+        WGL.context.bufferData(WGL.context.ARRAY_BUFFER, _data, (this.#isDynamic === true) ? WGL.context.DYNAMIC_DRAW : WGL.context.STATIC_DRAW);
             return true;
     }
 
-    enableAttribute(shaderLocation, numberOfComponents)
-    {
-        WGL.context.enableVertexAttribArray(shaderLocation);
-        WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#bufferId);
-        WGL.context.vertexAttribPointer(shaderLocation, numberOfComponents, WGL.context.FLOAT, false, 0, 0);
-    }
+    getBufferId() { return this.#bufferId; } 
+
+    // bind(shaderLocation, numberOfComponents)
+    // {
+    //     WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#bufferId);
+    //     WGL.context.vertexAttribPointer(shaderLocation, numberOfComponents, WGL.context.FLOAT, false, 0, 0);
+    //     WGL.context.enableVertexAttribArray(shaderLocation);
+    // }
 }
 
 class IndexBuffer
@@ -48,7 +50,7 @@ class IndexBuffer
         this.#indexCount = 0;
     }
 
-    setStaticIndexData(_data)
+    set(_data)
     {
         if (this.#indexCount !== 0)
             return false; // Already set
@@ -73,14 +75,22 @@ class IndexBuffer
                 return true;
         }
         else
-            return false; // Too large
+        {
+            WGL.context.bufferData(WGL.context.ELEMENT_ARRAY_BUFFER, _data, WGL.context.STATIC_DRAW);
+            this.#glDataType = WGL.context.UNSIGNED_INT;
+                return true;
+        }
     }
 
-    render(primType)
-    {
-        WGL.context.bindBuffer(WGL.context.ELEMENT_ARRAY_BUFFER, this.#bufferId);
-        WGL.context.drawElements(primType, this.#indexCount, this.#glDataType, 0);
-    }
+    getBufferId() { return this.#bufferId; }
+    getDataType() { return this.#glDataType; }
+    getIndexCount() { return this.#indexCount; }
+
+    // render(primType)
+    // {
+    //     WGL.context.bindBuffer(WGL.context.ELEMENT_ARRAY_BUFFER, this.#bufferId);
+    //     WGL.context.drawElements(primType, this.#indexCount, this.#glDataType, 0);
+    // }
 
     unload()
     {
@@ -96,11 +106,13 @@ class PointsMesh
 {
     #vertexBuffer;
     #count;
+    #vao;
 
     constructor()
     {
         this.#vertexBuffer = new VertexFloatBuffer(true);
         this.#count = 0;
+        this.#vao = WGL.context.createVertexArray();
     }
 
     set(_positions)
@@ -108,13 +120,29 @@ class PointsMesh
         if (_positions == null || _positions.length === 0)
             return false;
 
-        this.#vertexBuffer.setVertexData(_positions);
-        this.#count = _positions.length;
+        this.#vertexBuffer.set(_positions);
+        this.#count = _positions.length / 3;
+
+        WGL.context.bindVertexArray(this.#vao);
+        WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#vertexBuffer.getBufferId());
+        WGL.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kPosition), 3, WGL.context.FLOAT, false, 0, 0);
+        WGL.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kPosition));
+        WGL.context.bindVertexArray(null);
+    }
+
+    bindVertexAttribute(renderMapping)
+    {
+        if (renderMapping.name === "a_pos")
+        {
+            this.#vertexBuffer.enableAttribute(renderMapping.location, renderMapping.componentCount);       
+        }
     }
 
     render()
     {
+        WGL.context.bindVertexArray(this.#vao);
         WGL.context.drawArrays(WGL.context.POINTS, 0, this.#count);
+        WGL.context.bindVertexArray(null);
     }
 }
 
@@ -122,6 +150,7 @@ class StaticMesh
 {
     #vertexBuffers;
     #indexBuffer;
+    #vao;
 
     #primitiveType;
     #count;
@@ -130,14 +159,15 @@ class StaticMesh
     {
         this.#vertexBuffers = new Map();
         this.#indexBuffer = null;
+        this.#vao = WGL.context.createVertexArray();
 
         this.#primitiveType = _primitiveType;
         this.#count = 0;        
     }
 
-    loadVertexData(materialAttribName, data)
+    setVertexData(materialAttribName, data)
     {
-        if (RenderAttributes.allAttribs.includes(materialAttribName) === false)
+        if (RenderAttributes.allAttribs.has(materialAttribName) === false)
             return false;
 
         if (data == null)
@@ -145,17 +175,24 @@ class StaticMesh
 
         let vb = new VertexFloatBuffer();
 
-        if (vb.setVertexData(data) === false)
+        if (vb.set(data) === false)
             return false;
 
-        if (materialAttribName === RenderAttributes.kPosition)
-            this.#count = data.length;
+        if (this.#count === 0)
+            this.#count = data.length / RenderAttributes.componentCount(materialAttribName);
+        else
+        {
+            const c = data.length / RenderAttributes.componentCount(materialAttribName);
+            
+            if (this.#count !== c)
+                return false;
+        }
 
         this.#vertexBuffers.set(materialAttribName, vb);
             return true;
     }
 
-    loadIndexBuffer(indices)
+    setIndexData(indices)
     {
         if (indices == null)
             return false;
@@ -163,7 +200,11 @@ class StaticMesh
             return false;
 
         this.#indexBuffer = new IndexBuffer();
-            return this.#indexBuffer.setStaticIndexData(indices);
+        const success = this.#indexBuffer.set(indices);
+        
+        WGL.context.bindVertexArray(this.#vao);
+        // Index buffer binding is part of VAO state
+        return success;
     }
 
     unload()
@@ -171,25 +212,46 @@ class StaticMesh
 
     }
 
-    bindVertexAttribute(renderMapping)
+    bindMaterial(material)
     {
-        if (this.#vertexBuffers.has(renderMapping.name) === true)
-        {
-            let vb = this.#vertexBuffers.get(renderMapping.name);
-            vb.enableAttribute(renderMapping.location, renderMapping.componentCount);
+        // Bind to VAO
+        WGL.context.bindVertexArray(this.#vao);
+
+        for (const [key, value] of this.#vertexBuffers) {
+            const materialAttribName = key;
+            const vb = value;
+            
+            WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, vb.getBufferId());
+    
+            const numberOfComponents = RenderAttributes.componentCount(materialAttribName);
+            const shaderLocation = RenderAttributes.getLocation(materialAttribName);
+    
+            if (shaderLocation !== -1) {
+                WGL.context.vertexAttribPointer(shaderLocation, numberOfComponents, WGL.context.FLOAT, false, 0, 0);
+                WGL.context.enableVertexAttribArray(shaderLocation);
+            }
         }
+
+        if (this.#indexBuffer !== null)
+            WGL.context.bindBuffer(WGL.context.ELEMENT_ARRAY_BUFFER, this.#indexBuffer.getBufferId());
+
+        WGL.context.bindVertexArray(null);
     }
 
     render()
     {
+        WGL.context.bindVertexArray(this.#vao);
+
         if (this.#indexBuffer !== null)
         {
-            this.#indexBuffer.render(this.#primitiveType);
+            WGL.context.drawElements(this.#primitiveType, this.#indexBuffer.getIndexCount(), this.#indexBuffer.getDataType(), 0);
         }
         else
         {
             WGL.context.drawArrays(this.#primitiveType, 0, this.#count);
         }
+
+        WGL.context.bindVertexArray(null);
     }
 }
 
