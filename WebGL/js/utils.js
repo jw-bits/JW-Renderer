@@ -128,9 +128,9 @@ class Shapes
         ]);
 
         let mesh = new StaticMesh();
-        mesh.loadVertexData(RenderAttributes.kPosition, pos);
-        mesh.loadVertexData(RenderAttributes.kUV0, uvs);
-        mesh.loadIndexBuffer(indices);
+        mesh.setVertexData(RenderAttributes.kPosition, pos);
+        mesh.setVertexData(RenderAttributes.kUV0, uvs);
+        mesh.setIndexData(indices);
         return mesh;
     }
 
