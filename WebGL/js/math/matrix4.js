@@ -183,4 +183,27 @@ class Matrix4
 
         return mat;
     }
+
+    static multiplyVector4(mat, vec) {
+        let m = mat.m;
+        let x = vec.x, y = vec.y, z = vec.z, w = vec.w;
+
+        let outX = m[0] * x + m[4] * y + m[8] * z + m[12] * w;
+        let outY = m[1] * x + m[5] * y + m[9] * z + m[13] * w;
+        let outZ = m[2] * x + m[6] * y + m[10] * z + m[14] * w;
+        let outW = m[3] * x + m[7] * y + m[11] * z + m[15] * w;
+
+        return new Vector4(outX, outY, outZ, outW);
+    }
+
+    static multiplyVector3(mat, vec) {
+        let m = mat.m;
+        let x = vec.x, y = vec.y, z = vec.z;
+
+        let outX = m[0] * x + m[4] * y + m[8] * z + m[12];
+        let outY = m[1] * x + m[5] * y + m[9] * z + m[13];
+        let outZ = m[2] * x + m[6] * y + m[10] * z + m[14];
+
+        return new Vector3(outX, outY, outZ);
+    }
 }

@@ -37,3 +37,38 @@ const GlowShaderSource = {
         }
     `
 };
+
+const Standard3DShaderSource = {
+    VS: `#version 300 es
+        layout (location = 4) in vec3 a_pos;
+        layout (location = 0) in vec2 a_uv0;
+        uniform mat4 u_mvp;
+        out vec2 v_uv0;
+        void main() {
+            gl_Position = u_mvp * vec4(a_pos, 1.0);
+            v_uv0 = a_uv0;
+        }
+    `,
+    FS: `#version 300 es
+        precision highp float;
+        uniform sampler2D u_tex0;
+        uniform vec4 u_color;
+        in vec2 v_uv0;
+        out vec4 fragColor;
+        void main() {
+            fragColor = texture(u_tex0, v_uv0) * u_color;
+        }
+    `
+};
+
+const MaskShaderSource = {
+    VS: Standard3DShaderSource.VS,
+    FS: `#version 300 es
+        precision highp float;
+        out vec4 fragColor;
+        void main() {
+            // We don't care about color, only stencil/depth
+            fragColor = vec4(1.0);
+        }
+    `
+};

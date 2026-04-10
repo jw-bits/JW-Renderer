@@ -3,14 +3,12 @@ class Material
     #shader;
     #textures;
     
-    #attribs;
     #uniforms;
 
     constructor()
     {
         this.#shader = null;
         this.#textures = [];
-        this.#attribs = [];
         this.#uniforms = [];
     }
 
@@ -31,9 +29,6 @@ class Material
         }
 
         this.#shader = _shader;
-
-        if (this.#setupAttributes() === false)
-             return false;
 
         if (this.#setupUniforms() === false)
              return false;
@@ -65,7 +60,6 @@ class Material
                 this.#textures = [];            
         }
 
-        this.#attribs = [];
         this.#uniforms = [];
     }
 
@@ -95,6 +89,15 @@ class Material
         return false;
     }
 
+    getUniformValue(_name)
+    {
+        let m = this.#uniforms.find((member) => member.name === _name);
+        if (m !== undefined) {
+            return m.value;
+        }
+        return null;
+    }
+
     bindShader()
     {
         this.#shader.bind();
@@ -108,18 +111,6 @@ class Material
     getUniformLocation(name)
     {
         return this.#shader.getUniform(name);
-    }
-
-    bindAttributes(dataType = WGL.context.FLOAT)
-    {
-        for (let i = 0; i < this.#attribs.length; ++i)
-        {
-            let a = this.#attribs[i];
-
-            WGL.context.enableVertexAttribArray(a.location);
-            WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, a.value);
-            WGL.context.vertexAttribPointer(a.location, a.componentCount, dataType, false, 0, 0);
-        }
     }
 
     bindUniforms()
@@ -149,31 +140,9 @@ class Material
         }        
     }
 
-    getRenderAttributes() { return this.#attribs; }
     getRenderUniforms() { return this.#uniforms; }
 
     // *** Internal Methods ***
-
-    #setupAttributes()
-    {
-        for (const [key, value] of RenderAttributes.allAttribs)
-        {
-            let aName = key;
-            let idx = this.#shader.getAttrib(aName);
-
-            if (idx !== -1)
-            {
-                let m = new RenderMapping();
-                m.name = aName;
-                m.location = idx;
-                m.componentCount = value;
-
-                this.#attribs.push(m);
-            }
-        }
-
-        return true; 
-    }
 
     #setupUniforms()
     {

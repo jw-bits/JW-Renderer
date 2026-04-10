@@ -332,27 +332,6 @@ class Particles2D
 }
 
 class Model {
-    static #VS = `#version 300 es
-        layout (location = 4) in vec3 a_pos;
-        layout (location = 0) in vec2 a_uv0;
-        uniform mat4 u_mvp;
-        out vec2 v_uv0;
-        void main() {
-            gl_Position = u_mvp * vec4(a_pos, 1.0);
-            v_uv0 = a_uv0;
-        }
-    `;
-
-    static #FS = `#version 300 es
-        precision highp float;
-        uniform sampler2D u_tex0;
-        in vec2 v_uv0;
-        out vec4 fragColor;
-        void main() {
-            fragColor = texture(u_tex0, v_uv0);
-        }
-    `;
-
     static #kShader = null;
     
     #material;
@@ -360,24 +339,28 @@ class Model {
     #pos;
     #rot;
     #scale;
+    #color;
     #isLoaded = false;
 
     constructor() {
         this.#pos = new Vector3(0, 0, 0);
         this.#rot = new Vector3(0, 0, 0);
         this.#scale = new Vector3(1, 1, 1);
+        this.#color = new Vector4(1, 1, 1, 1);
     }
 
     load(_mesh, _texture) {
         if (Model.#kShader === null) {
             Model.#kShader = new Shader();
-            if (!Model.#kShader.load(Model.#VS, Model.#FS)) return false;
+            if (!Model.#kShader.load(Standard3DShaderSource.VS, Standard3DShaderSource.FS)) return false;
         }
         this.#mesh = _mesh;
         this.#material = new Material();
 
         if (!this.#material.load(Model.#kShader, [_texture])) 
             return false;
+
+        this.#material.setUniformValue("u_color", this.#color);
 
         this.#mesh.bindMaterial(this.#material);        
         this.#isLoaded = true;
@@ -387,6 +370,13 @@ class Model {
     setPos(x, y, z) { this.#pos.set(x, y, z); }
     setRotation(x, y, z) { this.#rot.set(x, y, z); }
     setScale(x, y, z) { this.#scale.set(x, y, z); }
+    setColor(c) { this.#color = c; }
+    setAlpha(a) { this.#color.w = a; }
+
+    getPos() { return this.#pos; }
+    getRotation() { return this.#rot; }
+    getScale() { return this.#scale; }
+    getColor() { return this.#color; }
 
     translate(x, y, z) {
         this.#pos.x += x; this.#pos.y += y; this.#pos.z += z;
@@ -396,16 +386,37 @@ class Model {
         this.#rot.x += x; this.#rot.y += y; this.#rot.z += z;
     }
 
-    render(viewProj) {
-        if (!this.#isLoaded) return;
-
+    getModelMatrix() {
         let mTranslation = Matrix4.fromTranslation(this.#pos.x, this.#pos.y, this.#pos.z);
         let mRotX = Matrix4.fromRotationX(this.#rot.x);
         let mRotY = Matrix4.fromRotationY(this.#rot.y);
         let mRotZ = Matrix4.fromRotationZ(this.#rot.z);
         let mScale = Matrix4.fromScaling(this.#scale.x, this.#scale.y, this.#scale.z);
 
-        let model = Matrix4.multiply(mTranslation, Matrix4.multiply(mRotZ, Matrix4.multiply(mRotY, Matrix4.multiply(mRotX, mScale))));
+        return Matrix4.multiply(mTranslation, Matrix4.multiply(mRotZ, Matrix4.multiply(mRotY, Matrix4.multiply(mRotX, mScale))));
+    }
+
+    renderWithShader(viewProj, shader) {
+        if (!this.#isLoaded) return;
+
+        let model = this.getModelMatrix();
+        let mvp = Matrix4.multiply(viewProj, model);
+
+        shader.bind();
+        let uMvpLoc = shader.getUniform("u_mvp");
+        if (uMvpLoc) {
+            WGL.context.uniformMatrix4fv(uMvpLoc, false, mvp.m);
+        }
+
+        this.#mesh.render();
+    }
+
+    render(viewProj) {
+        if (!this.#isLoaded) return;
+
+        this.#material.setUniformValue("u_color", this.#color);
+
+        let model = this.getModelMatrix();
         let mvp = Matrix4.multiply(viewProj, model);
 
         this.#material.setUniformValue("u_mvp", mvp);
@@ -413,5 +424,34 @@ class Model {
         
         this.#material.bindUniforms();
         this.#mesh.render();
+    }
+}
+
+class Quad extends Model {
+    constructor() {
+        super();
+    }
+
+    load(_texture, size = 0.2) {
+        // Quads in 3D are usually centered at 0,0,0
+        const mesh = Shapes.makeQuad(-size/2, -size/2, 0, size, size, Alignment.kBottomLeft);
+        return super.load(mesh, _texture);
+    }
+
+    // Helper to align quad to a specific cube face
+    alignToFace(faceIndex, offset = 0.501) {
+        this.setPos(0, 0, 0);
+        this.setRotation(0, 0, 0);
+        
+        const randomOffset = () => Util.randomFloat(-0.3, 0.3);
+
+        switch(faceIndex) {
+            case 0: this.setPos(randomOffset(), randomOffset(), offset); break; // Front
+            case 1: this.setPos(randomOffset(), randomOffset(), -offset); this.setRotation(0, Math.PI, 0); break; // Back
+            case 2: this.setPos(offset, randomOffset(), randomOffset()); this.setRotation(0, Math.PI/2, 0); break; // Right
+            case 3: this.setPos(-offset, randomOffset(), randomOffset()); this.setRotation(0, -Math.PI/2, 0); break; // Left
+            case 4: this.setPos(randomOffset(), offset, randomOffset()); this.setRotation(-Math.PI/2, 0, 0); break; // Top
+            case 5: this.setPos(randomOffset(), -offset, randomOffset()); this.setRotation(Math.PI/2, 0, 0); break; // Bottom
+        }
     }
 }

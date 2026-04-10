@@ -4,7 +4,7 @@ class WGL
 {
     static context = null;
 
-    static init(canvasId)
+    static init(canvasId, ctxAttributes = null)
     {
         if (canvasId == null)
             return false;
@@ -20,14 +20,16 @@ class WGL
                 return false;
         }
 
-        let contextAttributes = {antialias: false, depth: true};
+        const defaultAttributes = {antialias: true, depth: true, stencil: false, premultipledAlpha: true, alpha: true};
+        const contextAttributes = (ctxAttributes !== null) ? ctxAttributes : defaultAttributes;
+       
         let contextNames = ["webgl2"];
 
         for (let i = 0; i < contextNames.length; ++i)
         {
             try
             {
-                WGL.context = c.getContext(contextNames[i]);
+                WGL.context = c.getContext(contextNames[i], contextAttributes);
             }
             catch(e)
             {

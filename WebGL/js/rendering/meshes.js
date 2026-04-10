@@ -28,13 +28,6 @@ class VertexFloatBuffer
     }
 
     getBufferId() { return this.#bufferId; } 
-
-    // bind(shaderLocation, numberOfComponents)
-    // {
-    //     WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#bufferId);
-    //     WGL.context.vertexAttribPointer(shaderLocation, numberOfComponents, WGL.context.FLOAT, false, 0, 0);
-    //     WGL.context.enableVertexAttribArray(shaderLocation);
-    // }
 }
 
 class IndexBuffer
@@ -128,14 +121,6 @@ class PointsMesh
         WGL.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kPosition), 3, WGL.context.FLOAT, false, 0, 0);
         WGL.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kPosition));
         WGL.context.bindVertexArray(null);
-    }
-
-    bindVertexAttribute(renderMapping)
-    {
-        if (renderMapping.name === "a_pos")
-        {
-            this.#vertexBuffer.enableAttribute(renderMapping.location, renderMapping.componentCount);       
-        }
     }
 
     render()
