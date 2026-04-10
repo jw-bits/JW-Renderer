@@ -2,8 +2,8 @@
 
 const GlowShaderSource = {
     VS: `#version 300 es
-        layout(location = 4) in vec3 a_pos;
-        layout(location = 0) in vec2 a_uv0;
+        layout(location = 5) in vec3 a_pos;
+        layout(location = 1) in vec2 a_uv0;
 
         out vec2 v_uv0;
 
@@ -40,8 +40,8 @@ const GlowShaderSource = {
 
 const Standard3DShaderSource = {
     VS: `#version 300 es
-        layout (location = 4) in vec3 a_pos;
-        layout (location = 0) in vec2 a_uv0;
+        layout (location = 5) in vec3 a_pos;
+        layout (location = 1) in vec2 a_uv0;
         uniform mat4 u_mvp;
         out vec2 v_uv0;
         void main() {

@@ -24,6 +24,9 @@ class Alignment
 
 class RenderAttributes
 {
+    // 1-component
+    static kPtSize = "a_ptSize";
+
     // 2-component
     static kUV0 = "a_uv0";
     static kUV1 = "a_uv1";
@@ -33,17 +36,21 @@ class RenderAttributes
     // 3-component
     static kPosition = "a_pos";
     static kNormal = "a_norm";
+    static kColor = "a_color";
 
     static allAttribs = new Map();
 
     static getLocation(name) {
         switch(name) {
-            case RenderAttributes.kUV0: return 0;
-            case RenderAttributes.kUV1: return 1;
-            case RenderAttributes.kUV2: return 2;
-            case RenderAttributes.kUV3: return 3;
-            case RenderAttributes.kPosition: return 4;
-            case RenderAttributes.kNormal: return 5;
+            case RenderAttributes.kPtSize: return 0;
+            case RenderAttributes.kUV0: return 1;
+            case RenderAttributes.kUV1: return 2;
+            case RenderAttributes.kUV2: return 3;
+            case RenderAttributes.kUV3: return 4;
+            case RenderAttributes.kPosition: return 5;
+            case RenderAttributes.kNormal: return 6;
+            case RenderAttributes.kColor: return 7;
+            
             default: return -1;
         }
     }
@@ -63,6 +70,8 @@ class RenderAttributes
         this.allAttribs.set(RenderAttributes.kUV3, 2);
         this.allAttribs.set(RenderAttributes.kPosition, 3);
         this.allAttribs.set(RenderAttributes.kNormal, 3);
+        this.allAttribs.set(RenderAttributes.kColor, 4);
+        this.allAttribs.set(RenderAttributes.kPtSize, 1);
     }
 }
 
@@ -91,7 +100,11 @@ class RenderUniforms
     static kVector3 = "u_vec3"; // (X, Y, Z, W) as floats
 
     // Matrix
-    static kMVP = "u_mvp";
+    static kModel = "u_model"; // World 
+    static kView = "u_view"; // Camera 
+    static kProjection = "u_proj"; // Projection to 2D  
+    static kViewProj = "u_viewProj"; // View * Projection
+    static kMVP = "u_mvp"; // Model * View * Projection
     
     static allUniforms = new Map();
 
@@ -118,6 +131,10 @@ class RenderUniforms
         this.allUniforms.set(RenderUniforms.kVector1, 4);
         this.allUniforms.set(RenderUniforms.kVector2, 4);
         this.allUniforms.set(RenderUniforms.kVector3, 4);
+        this.allUniforms.set(RenderUniforms.kModel, 16);
+        this.allUniforms.set(RenderUniforms.kView, 16);
+        this.allUniforms.set(RenderUniforms.kProjection, 16);
+        this.allUniforms.set(RenderUniforms.kViewProj, 16);
         this.allUniforms.set(RenderUniforms.kMVP, 16);
     }
 }
