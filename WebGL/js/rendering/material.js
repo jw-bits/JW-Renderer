@@ -146,9 +146,8 @@ class Material
 
     #setupUniforms()
     {
-        for (let i = 0; i < RenderUniforms.allUniforms.length; ++i)
+        for (const [uName, componentCount] of RenderUniforms.allUniforms)
         {
-            let uName = RenderUniforms.allUniforms[i];
             let idx = this.#shader.getUniform(uName);
 
             if (idx !== null)
@@ -156,7 +155,7 @@ class Material
                 let m = new RenderMapping();
                 m.name = uName;
                 m.location = idx;
-                m.componentCount = RenderUniforms.componentCount(uName);
+                m.componentCount = componentCount;
 
                 if (m.componentCount === 1)
                 {
@@ -182,7 +181,6 @@ class Material
                 else
                     return false;
                 
-
                 this.#uniforms.push(m);
             }
         }

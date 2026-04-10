@@ -73,18 +73,15 @@ class RenderUniforms
     static kTexture1 = "u_tex1";
     static kTexture2 = "u_tex2";
     static kTexture3 = "u_tex3";
-    static #kOneEnd = 4;
 
     // 2-component
     static kUVTile = "u_uvTile"; // (X, Y) => (U = U * X, V = V * Y)
     static kUVOffset = "u_uvOffset"; // (X, Y) => (U = U + X, V = V + Y)
     static kResolution = "u_res"; // (W, H)
-    static #kTwoEnd = 7;
 
     // 3-component
     static kScale = "u_scale"; // (SX, SY, SZ)
     static kEulerRotation = "u_euler"; // (EX, EY, EZ) as radians
-    static #kThreeEnd = 9;
 
     // 4-component
     static kColor = "u_color"; // (R, G, B, A) as floats
@@ -92,54 +89,36 @@ class RenderUniforms
     static kVector1 = "u_vec1"; // (X, Y, Z, W) as floats
     static kVector2 = "u_vec2"; // (X, Y, Z, W) as floats
     static kVector3 = "u_vec3"; // (X, Y, Z, W) as floats
-    static #kFourEnd = 14;
 
     // Matrix
     static kMVP = "u_mvp";
-    static #kMatrixEnd = 15;
     
-    static allUniforms = [];
+    static allUniforms = new Map();
 
     static componentCount(name)
     {
-        for (let i = 0; i < this.allUniforms.length; ++i)
-        {
-            let n = this.allUniforms[i];
-
-            if (n === name)
-            {
-                if (i < RenderUniforms.#kOneEnd)
-                    return 1;
-                else if (i < RenderUniforms.#kTwoEnd)
-                    return 2;
-                else if (i < RenderUniforms.#kThreeEnd)
-                    return 3;
-                else if (i < RenderUniforms.#kFourEnd)
-                    return 4;
-                else
-                    return 16;
-            }
-        }
-
-        return 0;
+        if (this.allUniforms.has(name))
+            return this.allUniforms.get(name);
+        else
+            return 0;
     }
 
     static {
-        this.allUniforms.push(RenderUniforms.kTexture0);
-        this.allUniforms.push(RenderUniforms.kTexture1);
-        this.allUniforms.push(RenderUniforms.kTexture2);
-        this.allUniforms.push(RenderUniforms.kTexture3);
-        this.allUniforms.push(RenderUniforms.kUVTile);
-        this.allUniforms.push(RenderUniforms.kUVOffset);
-        this.allUniforms.push(RenderUniforms.kResolution);
-        this.allUniforms.push(RenderUniforms.kScale);
-        this.allUniforms.push(RenderUniforms.kEulerRotation);
-        this.allUniforms.push(RenderUniforms.kColor);
-        this.allUniforms.push(RenderUniforms.kVector0);
-        this.allUniforms.push(RenderUniforms.kVector1);
-        this.allUniforms.push(RenderUniforms.kVector2);
-        this.allUniforms.push(RenderUniforms.kVector3);
-        this.allUniforms.push(RenderUniforms.kMVP);
+        this.allUniforms.set(RenderUniforms.kTexture0, 1);
+        this.allUniforms.set(RenderUniforms.kTexture1, 1);
+        this.allUniforms.set(RenderUniforms.kTexture2, 1);
+        this.allUniforms.set(RenderUniforms.kTexture3, 1);
+        this.allUniforms.set(RenderUniforms.kUVTile, 2);
+        this.allUniforms.set(RenderUniforms.kUVOffset, 2);
+        this.allUniforms.set(RenderUniforms.kResolution, 2);
+        this.allUniforms.set(RenderUniforms.kScale, 3);
+        this.allUniforms.set(RenderUniforms.kEulerRotation, 3);
+        this.allUniforms.set(RenderUniforms.kColor, 4);
+        this.allUniforms.set(RenderUniforms.kVector0, 4);
+        this.allUniforms.set(RenderUniforms.kVector1, 4);
+        this.allUniforms.set(RenderUniforms.kVector2, 4);
+        this.allUniforms.set(RenderUniforms.kVector3, 4);
+        this.allUniforms.set(RenderUniforms.kMVP, 16);
     }
 }
 
