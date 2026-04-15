@@ -1,47 +1,5 @@
 class Rect2D
 {
-    static #VS = `#version 300 es
-        layout(location = 5) in vec3 a_pos;
-        layout(location = 1) in vec2 a_uv0;
-        
-        uniform vec2 u_res;
-        uniform vec3 u_scale;
-        uniform vec4 u_vec0;
-
-        out vec2 v_uv0;
-
-        void main() {
-            vec2 ssPos = ((a_pos.xy + u_vec0.xy) - u_vec0.zw) * u_scale.xy;
-
-            float sa = sin(u_scale.z);
-            float ca = cos(u_scale.z);
-
-            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
-                             ssPos.x * -sa + ssPos.y * ca);
-
-            vec2 zTo1 = (rPos + u_vec0.zw) / u_res;
-            vec2 cs = (zTo1 * 2.0) - 1.0;
-
-            gl_Position = vec4(cs, 0.0, 1.0);
-
-            v_uv0 = a_uv0;
-        }
-    `;
-
-    static #FS = `#version 300 es
-        precision highp float;
-
-        uniform sampler2D u_tex0;
-
-        in vec2 v_uv0;
-        out vec4 fragColor;
-
-        void main() {
-            vec4 c = texture(u_tex0, v_uv0);
-            fragColor = c;
-        }    
-    `;
-
     // Shader
     static #kShader = null; 
 
@@ -55,6 +13,7 @@ class Rect2D
     #scaleX;
     #scaleY;
     #rotZ;
+    #color;
     #isLoaded;
 
     
@@ -69,6 +28,7 @@ class Rect2D
         this.#scaleX = 1.0;
         this.#scaleY = 1.0;
         this.#rotZ = 0.0;
+        this.#color = new Vector4(1, 1, 1, 1);
         this.#isLoaded = false;
     }
 
@@ -84,7 +44,7 @@ class Rect2D
         {
             Rect2D.#kShader = new Shader();
             
-            if (Rect2D.#kShader.load(Rect2D.#VS, Rect2D.#FS) === false)
+            if (Rect2D.#kShader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
             {
                 Rect2D.#kShader = null;
                     return false;
@@ -119,6 +79,8 @@ class Rect2D
         let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
         b |= this.#material.setUniformValue("u_scale", scaleAndRotZ);
 
+        b |= this.#material.setUniformValue("u_color", this.#color);
+
         let rectPos = new Vector4(0, 0, this.#width / 2.0, this.#height / 2.0);
         b |= this.#material.setUniformValue("u_vec0", rectPos);
 
@@ -139,6 +101,12 @@ class Rect2D
         this.#rotZ = rotZ;        
         let scaleAndRotZ = new Vector3(this.#scaleX, this.#scaleY, this.#rotZ);
         this.#material?.setUniformValue("u_scale", scaleAndRotZ);
+    }
+
+    setColor(color)
+    {
+        this.#color.set(color.x, color.y, color.z, color.w);
+        this.#material?.setUniformValue("u_color", this.#color);
     }
 
     render()
