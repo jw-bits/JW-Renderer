@@ -29,6 +29,20 @@ class Vector3
         return v;
     }
 
+    add(vec)
+    {
+        this.x += vec.x;
+        this.y += vec.y;
+        this.z += vec.z;
+    }
+
+    subtract(vec)
+    {
+        this.x -= vec.x;
+        this.y -= vec.y;
+        this.z -= vec.z;
+    }
+
 	scale(sx, sy, sz)
     {
         this.x *= sx;
@@ -59,6 +73,17 @@ class Vector3
 	lengthSquared()
     {
 	    return ((this.x * this.x) + (this.y * this.y) + (this.z * this.z));
+    }
+
+    // <== Static Methods ==>
+    static add(v1, v2)
+    {
+        return new Vector3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+    }
+
+    static subtract(v1, v2)
+    {       
+        return new Vector3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
     }
 
     // *** Static Vars ***
