@@ -25,7 +25,8 @@ class Texture
         this.#initTexture();
     }
 
-    load(imageUrl, onLoadSuccessCB = null)
+    // Loads an image. onLoadFailCB is called if the image can't be loaded (the texture is unloaded first).
+    load(imageUrl, onLoadSuccessCB = null, onLoadFailCB = null)
     {
         if (imageUrl == null)
             return false; // Nothing to load
@@ -74,10 +75,40 @@ class Texture
         img.onerror = () => {
             console.error("Can't load texture: " + this.#url);
             this.unload();
+
+            if (onLoadFailCB !== null)
+                onLoadFailCB();
         };
 
         img.src = imageUrl; // Load it
             return true; // Loading...
+    }
+
+    // Loads raw RGBA pixels (a Uint8Array of width * height * 4). Ready right away.
+    loadPixels(width, height, rgbaPixels)
+    {
+        if (this.#isLoaded === true)
+            return false; // Already loaded... free first
+
+        if (rgbaPixels == null || rgbaPixels.length !== width * height * 4)
+            return false;
+
+        if (this.#texId === 0)
+            this.#initTexture();
+
+        const colorFormat = WGL.context.RGBA;
+
+        WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texId);
+        WGL.context.pixelStorei(WGL.context.UNPACK_FLIP_Y_WEBGL, this.#flipY);
+        WGL.context.texImage2D(WGL.context.TEXTURE_2D, 0, colorFormat, width, height, 0, colorFormat, WGL.context.UNSIGNED_BYTE, rgbaPixels);
+        WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MAG_FILTER, WGL.context.NEAREST);
+        WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MIN_FILTER, WGL.context.NEAREST);
+        WGL.context.bindTexture(WGL.context.TEXTURE_2D, null);
+
+        this.#width = width;
+        this.#height = height;
+        this.#isLoaded = true;
+            return true;
     }
 
     isLoaded() { return this.#isLoaded; }

@@ -32,6 +32,14 @@ const BOT_THINK_DELAY = 0.6;    // Seconds the bot "thinks" before moving
 const BOT_STEP_DELAY = 0.35;    // Seconds between each hop of the bot's move
 
 const FONT_FAMILY = "'Segoe UI', Arial, sans-serif";
+const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
+
+// The app's single manager instances, created in loadAssets() after WGL.init()
+let gTextureManager = null;
+let gFontManager = null;
+
+let gUIFont = null;    // System font for all menu text (the FontManager's default)
+let gTitleFont = null; // The title's font file, or the default font if it couldn't be loaded
 
 class GameScreen
 {
@@ -127,6 +135,20 @@ function appSetup()
     // darken the scene instead of letting the white page show through the canvas
     WGL.context.blendFuncSeparate(WGL.context.SRC_ALPHA, WGL.context.ONE_MINUS_SRC_ALPHA, WGL.context.ONE, WGL.context.ONE_MINUS_SRC_ALPHA);
 
+    loadAssets().then(appOnAssetsLoaded);
+
+    WGL.context.canvas.addEventListener("mousedown", onMouseDown);
+    WGL.context.canvas.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("keydown", onKeyDown);
+}
+
+// Failed loads come back as the managers' default texture / font, so this always finishes
+async function loadAssets()
+{
+    gTextureManager = new TextureManager();
+    gFontManager = new FontManager(FONT_FAMILY);
+    gUIFont = gFontManager.getDefault();
+
     const files = {
         square: "./textures/square.png",
         piece: "./textures/checker_piece.png",
@@ -135,25 +157,16 @@ function appSetup()
     };
 
     const names = Object.keys(files);
-    let loadedCount = 0;
+    const [textures, titleFont] = await Promise.all([
+        Promise.all(names.map((name) => gTextureManager.load(files[name]))),
+        gFontManager.load(TITLE_FONT_URL)
+    ]);
 
-    for (const name of names)
-    {
-        gTextures[name] = new Texture();
-        gTextures[name].load(files[name], () => {
-            loadedCount++;
-
-            if (loadedCount === names.length)
-                appOnTexturesLoaded();
-        });
-    }
-
-    WGL.context.canvas.addEventListener("mousedown", onMouseDown);
-    WGL.context.canvas.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("keydown", onKeyDown);
+    names.forEach((name, i) => { gTextures[name] = textures[i]; });
+    gTitleFont = titleFont;
 }
 
-function appOnTexturesLoaded()
+function appOnAssetsLoaded()
 {
     gIsReady = true;
     resetGame();
@@ -239,7 +252,7 @@ function appLayout()
     gRects.overlay.setPos(0, 0);
 
     // Title screen
-    gTexts.title = makeText("CHECKERS", unit * 0.15, "bold", Colors.kTitle, w / 2, h * 0.70);
+    gTexts.title = makeText("CHECKERS", unit * 0.15, "normal", Colors.kTitle, w / 2, h * 0.70, Alignment.kMiddleCenter, gTitleFont);
     gTexts.subtitle = makeText("You play Red against the computer", unit * 0.035, "normal", Colors.kTextDim, w / 2, h * 0.57);
     gButtons.start = new Button("Start Game", w / 2, h * 0.42, unit * 0.38, unit * 0.10, unit * 0.045, unit * 0.035);
     gTexts.titleHint = makeText("Enter - Start      Esc - Menu", unit * 0.028, "normal", Colors.kTextDim, w / 2, h * 0.27);
@@ -284,9 +297,9 @@ function makeRoundedRect(texture, w, h, radius, color)
     return r;
 }
 
-function makeText(text, fontSize, weight, color, x, y, align = Alignment.kMiddleCenter)
+function makeText(text, fontSize, weight, color, x, y, align = Alignment.kMiddleCenter, font = gUIFont)
 {
-    let t = new Text2D(Math.max(8, Math.round(fontSize)), FONT_FAMILY, weight);
+    let t = new Text2D(font, Math.max(8, Math.round(fontSize)), weight);
     t.setColor(color);
     t.setPos(Math.round(x), Math.round(y), align);
     t.setText(text);

@@ -14,12 +14,18 @@
     Text2D again (or call setText with new text).
 
     Usage:
-        let t = new Text2D(32, "Arial", "bold");
+        const font = await gFontManager.load("./fonts/MyFont-Regular.ttf"); // The app's FontManager
+        let t = new Text2D(font, 32, "bold");
         t.setColor(new Vector4(1, 1, 0, 1));
         t.setPos(400, 300, Alignment.kMiddleCenter);
         t.setText("Hello");
         ...
         t.render();
+
+    The Font is the only way to choose what Text2D draws with; use
+    fontManager.loadFromSystem("Arial") for a font the browser already has.
+    If the Font hasn't finished loading, setText() waits for it before
+    rasterizing. If it fails to load, the text is drawn in sans-serif.
 */
 class Text2D
 {
@@ -27,8 +33,8 @@ class Text2D
     static #kPadding = 4; // Pixels around the text so anti-aliased edges aren't clipped
 
     #text;
+    #font;
     #fontSize;
-    #fontFamily;
     #fontWeight;
 
     #texture;
@@ -43,11 +49,20 @@ class Text2D
     #height;
     #loadId;
 
-    constructor(_fontSize = 32, _fontFamily = "sans-serif", _fontWeight = "normal")
+    // _font is a Font, usually from the app's FontManager
+    constructor(_font, _fontSize = 32, _fontWeight = "normal")
     {
         this.#text = null;
+        this.#font = _font;
+
+        if (this.#font == null)
+        {
+            console.error("Text2D needs a Font; using sans-serif");
+            this.#font = new Font();
+            this.#font.loadFromSystem("sans-serif");
+        }
+
         this.#fontSize = _fontSize;
-        this.#fontFamily = _fontFamily;
         this.#fontWeight = _fontWeight;
 
         this.#texture = null;
@@ -72,51 +87,17 @@ class Text2D
             return true; // Nothing changed
 
         this.#text = _text;
-
-        // Rasterize the text in white
-        const c = Text2D.#getCanvas();
-        let ctx = c.getContext("2d");
-        const font = `${this.#fontWeight} ${this.#fontSize}px ${this.#fontFamily}`;
-        const pad = Text2D.#kPadding;
-
-        ctx.font = font;
-        const w = Math.max(1, Math.ceil(ctx.measureText(_text).width) + (pad * 2));
-        const h = Math.ceil(this.#fontSize * 1.3) + (pad * 2);
-
-        c.width = w; // Resizing clears the canvas and resets the context state
-        c.height = h;
-
-        ctx.font = font;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(_text, w / 2.0, h / 2.0);
-
-        const url = c.toDataURL("image/png");
         const loadId = ++this.#loadId;
-        let tex = new Texture();
 
-        tex.load(url, () => {
-            if (loadId !== this.#loadId)
-            {
-                tex.unload(); // A newer setText() or unload() replaced this one
-                    return;
-            }
-
-            if (this.#texture !== null)
-                this.#texture.unload();
-
-            this.#texture = tex;
-            this.#width = w;
-            this.#height = h;
-            this.#buildRect();
-
-            if (onLoadSuccessCB !== null)
-                onLoadSuccessCB();
-        });
+        if (this.#font.isLoaded() === true)
+            this.#rasterize(_text, loadId, onLoadSuccessCB);
+        else
+            this.#rasterizeWhenFontLoads(_text, loadId, onLoadSuccessCB);
 
         return true; // Loading...
     }
+
+    getFont() { return this.#font; }
 
     // (x, y) is the anchor point; align says which part of the text sits on it
     setPos(x, y, align = Alignment.kBottomLeft)
@@ -161,6 +142,58 @@ class Text2D
     }
 
     // *** Internal Methods ***
+
+    async #rasterizeWhenFontLoads(_text, loadId, onLoadSuccessCB)
+    {
+        await this.#font.waitForLoad(); // On failure the Font falls back to sans-serif
+
+        if (loadId === this.#loadId) // Skip if a newer setText() or unload() came first
+            this.#rasterize(_text, loadId, onLoadSuccessCB);
+    }
+
+    #rasterize(_text, loadId, onLoadSuccessCB)
+    {
+        // Rasterize the text in white
+        const c = Text2D.#getCanvas();
+        let ctx = c.getContext("2d");
+        const font = this.#font.toCss(this.#fontSize, this.#fontWeight);
+        const pad = Text2D.#kPadding;
+
+        ctx.font = font;
+        const w = Math.max(1, Math.ceil(ctx.measureText(_text).width) + (pad * 2));
+        const h = Math.ceil(this.#fontSize * 1.3) + (pad * 2);
+
+        c.width = w; // Resizing clears the canvas and resets the context state
+        c.height = h;
+
+        ctx.font = font;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(_text, w / 2.0, h / 2.0);
+
+        const url = c.toDataURL("image/png");
+        let tex = new Texture();
+
+        tex.load(url, () => {
+            if (loadId !== this.#loadId)
+            {
+                tex.unload(); // A newer setText() or unload() replaced this one
+                    return;
+            }
+
+            if (this.#texture !== null)
+                this.#texture.unload();
+
+            this.#texture = tex;
+            this.#width = w;
+            this.#height = h;
+            this.#buildRect();
+
+            if (onLoadSuccessCB !== null)
+                onLoadSuccessCB();
+        });
+    }
 
     static #getCanvas()
     {
