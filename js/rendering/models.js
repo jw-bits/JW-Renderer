@@ -19,7 +19,7 @@ class Rect2D
     
     constructor()
     {
-        this.#position = Vector2.kZero;
+        this.#position = new Vector2();
         this.#width = 0;
         this.#height = 0;
         this.#material = null;
@@ -185,7 +185,7 @@ class Particles2D
          this.#material = null;
          this.#mesh = null;
 
-         this.#emitPosition = Vector2.kZero;
+         this.#emitPosition = new Vector2();
          this.#duration = 0.0;
          this.#useGravity = false;
          this.#isLoaded = false;
@@ -411,7 +411,7 @@ class Quad extends Model {
         this.setPos(0, 0, 0);
         this.setRotation(0, 0, 0);
         
-        const randomOffset = () => Util.randomFloat(-0.3, 0.3);
+        const randomOffset = () => MathUtil.randomFloat(-0.3, 0.3);
 
         switch(faceIndex) {
             case 0: this.setPos(randomOffset(), randomOffset(), offset); break; // Front

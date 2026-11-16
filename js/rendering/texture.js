@@ -52,7 +52,7 @@ class Texture
             WGL.context.pixelStorei(WGL.context.UNPACK_FLIP_Y_WEBGL, this.#flipY);
             WGL.context.texImage2D(WGL.context.TEXTURE_2D, 0, colorFormat, colorFormat, WGL.context.UNSIGNED_BYTE, img);
 
-            if (Util.isPowerOfTwo(this.#width) && Util.isPowerOfTwo(this.#height))
+            if (MathUtil.isPowerOfTwo(this.#width) && MathUtil.isPowerOfTwo(this.#height))
             {
                 WGL.context.generateMipmap(WGL.context.TEXTURE_2D);
                 WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MAG_FILTER, WGL.context.LINEAR);

@@ -88,6 +88,19 @@ class Vector3
 
     // *** Static Vars ***
 
-    static kZero = new Vector3();
-    static kOne = new Vector3(1.0, 1.0, 1.0);
+    // Shared, read-only constants: frozen, and the class property can't be reassigned.
+    // To get a vector you can change, call the matching static method (e.g. Vector3.zero()).
+    static kZero = Object.freeze(new Vector3());
+    static kOne = Object.freeze(new Vector3(1.0, 1.0, 1.0));
+
+    static
+    {
+        for (const name of ["kZero", "kOne"])
+            Object.defineProperty(Vector3, name, { writable: false, configurable: false });
+    }
+
+    // *** Static Methods: new, changeable copies of the constants ***
+
+    static zero() { return new Vector3(); }
+    static one() { return new Vector3(1.0, 1.0, 1.0); }
 };

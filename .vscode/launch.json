@@ -8,7 +8,7 @@
             "type": "chrome",
             "request": "launch",
             "name": "test_app",
-            "file": "${workspaceFolder}\\index.html",
+            "file": "${workspaceFolder}\\checkers.html",
             "runtimeArgs": [
                 "--disable-web-security"
             ]
