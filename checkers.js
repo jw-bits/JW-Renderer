@@ -241,7 +241,7 @@ function appLayout()
     // Title screen
     gTexts.title = makeText("CHECKERS", unit * 0.15, "bold", Colors.kTitle, w / 2, h * 0.70);
     gTexts.subtitle = makeText("You play Red against the computer", unit * 0.035, "normal", Colors.kTextDim, w / 2, h * 0.57);
-    gButtons.start = new Button("Start Game", w / 2, h * 0.42, unit * 0.38, unit * 0.10, unit * 0.045);
+    gButtons.start = new Button("Start Game", w / 2, h * 0.42, unit * 0.38, unit * 0.10, unit * 0.045, unit * 0.035);
     gTexts.titleHint = makeText("Enter - Start      Esc - Menu", unit * 0.028, "normal", Colors.kTextDim, w / 2, h * 0.27);
 
     // Game screen
@@ -276,6 +276,14 @@ function makeRect(texture, w, h, color)
     return r;
 }
 
+function makeRoundedRect(texture, w, h, radius, color)
+{
+    let r = new RoundedRect2D();
+    r.load(texture, Math.round(w), Math.round(h), radius);
+    r.setColor(color);
+    return r;
+}
+
 function makeText(text, fontSize, weight, color, x, y, align = Alignment.kMiddleCenter)
 {
     let t = new Text2D(Math.max(8, Math.round(fontSize)), FONT_FAMILY, weight);
@@ -294,15 +302,18 @@ class Button
     #w;
     #h;
 
-    // (cx, cy) is the center of the button
-    constructor(_text, _cx, _cy, _w, _h, _fontSize)
+    // (cx, cy) is the center of the button; a _cornerRadius > 0 gives it rounded corners
+    constructor(_text, _cx, _cy, _w, _h, _fontSize, _cornerRadius = 0)
     {
         this.#w = Math.round(_w);
         this.#h = Math.round(_h);
         this.#x = Math.round(_cx - (this.#w / 2));
         this.#y = Math.round(_cy - (this.#h / 2));
 
-        this.#bg = makeRect(gTextures.square, this.#w, this.#h, Colors.kButton);
+        if (_cornerRadius > 0)
+            this.#bg = makeRoundedRect(gTextures.square, this.#w, this.#h, _cornerRadius, Colors.kButton);
+        else
+            this.#bg = makeRect(gTextures.square, this.#w, this.#h, Colors.kButton);
         this.#bg.setPos(this.#x, this.#y);
         this.#label = makeText(_text, _fontSize, "bold", Colors.kText, _cx, _cy);
     }

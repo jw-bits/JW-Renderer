@@ -127,6 +127,319 @@ class Rect2D
 
 }
 
+// Same API and shader as Rect2D, but the corners are rounded with geometry
+class RoundedRect2D
+{
+    // Shader
+    static #kShader = null;
+
+    #position;
+    #width;
+    #height;
+    #radius;
+
+    #material;
+    #mesh;
+
+    #scaleX;
+    #scaleY;
+    #rotZ;
+    #color;
+    #isLoaded;
+
+    constructor()
+    {
+        this.#position = new Vector2();
+        this.#width = 0;
+        this.#height = 0;
+        this.#radius = 0;
+        this.#material = null;
+        this.#mesh = null;
+
+        this.#scaleX = 1.0;
+        this.#scaleY = 1.0;
+        this.#rotZ = 0.0;
+        this.#color = new Vector4(1, 1, 1, 1);
+        this.#isLoaded = false;
+    }
+
+    // _radius is clamped to half the shortest side; _segments is the number of triangles per corner
+    load(_texture, _width, _height, _radius, _segments = 8)
+    {
+        if (this.#isLoaded === true)
+            return false; // Unload first
+
+        if (_texture.isLoaded() === false)
+            return false; // Invalid texture
+
+        if (RoundedRect2D.#kShader === null)
+        {
+            RoundedRect2D.#kShader = new Shader();
+
+            if (RoundedRect2D.#kShader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
+            {
+                RoundedRect2D.#kShader = null;
+                    return false;
+            }
+        }
+
+        if (_width !== undefined)
+            this.#width = _width;
+        else
+            this.#width = _texture.getWidth();
+
+        if (_height !== undefined)
+            this.#height = _height;
+        else
+            this.#height = _texture.getHeight();
+
+        if (_radius !== undefined)
+            this.#radius = Math.max(0, Math.min(_radius, this.#width / 2.0, this.#height / 2.0));
+        else
+            this.#radius = Math.min(this.#width, this.#height) * 0.25;
+
+        let ta = [_texture];
+
+        this.#material = new Material();
+
+        if (this.#material.load(RoundedRect2D.#kShader, ta) === false)
+            return false;
+
+        this.#mesh = Shapes.makeRoundedRect(0, 0, 0, this.#width, this.#height, this.#radius, _segments);
+        if (this.#mesh === null) return false;
+
+        this.#mesh.bindMaterial(this.#material);
+        let b = true;
+        let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
+        b |= this.#material.setUniformValue("u_res", res);
+
+        let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
+        b |= this.#material.setUniformValue("u_scale", scaleAndRotZ);
+
+        b |= this.#material.setUniformValue("u_color", this.#color);
+
+        let rectPos = new Vector4(0, 0, this.#width / 2.0, this.#height / 2.0);
+        b |= this.#material.setUniformValue("u_vec0", rectPos);
+
+        this.#isLoaded = b;
+            return b;
+    }
+
+    setPos(x, y)
+    {
+        this.#position.set(x, y);
+
+        let rectPos = new Vector4(this.#position.x, this.#position.y, this.#width / 2.0, this.#height / 2.0);
+        this.#material.setUniformValue("u_vec0", rectPos);
+    }
+
+    setRotation(rotZ)
+    {
+        this.#rotZ = rotZ;
+        let scaleAndRotZ = new Vector3(this.#scaleX, this.#scaleY, this.#rotZ);
+        this.#material?.setUniformValue("u_scale", scaleAndRotZ);
+    }
+
+    setColor(color)
+    {
+        this.#color.set(color.x, color.y, color.z, color.w);
+        this.#material?.setUniformValue("u_color", this.#color);
+    }
+
+    getRadius() { return this.#radius; }
+
+    render()
+    {
+        if (this.#isLoaded === false)
+        {
+            console.log("Not loaded, skipping render");
+                return;
+        }
+
+        this.#material.bindShader();
+
+        this.#material.bindUniforms();
+        this.#mesh.render();
+    }
+}
+
+/*
+    Nine-slice (9-patch) rectangle. Same API and shader as Rect2D.
+
+    The texture is split into a 3x3 grid by a center UVRect:
+        Corners (1, 3, 7, 9) keep their size in texture pixels.
+        Edges (2, 8) stretch horizontally, (4, 6) stretch vertically.
+        Center (5) stretches both ways to fill the rest.
+
+    If the rectangle is smaller than the corners, all borders are shrunk by
+    the same factor so the corners never overlap and keep their shape.
+*/
+class NinePatch2D
+{
+    // Shader
+    static #kShader = null;
+
+    #position;
+    #width;
+    #height;
+    #centerUV;
+
+    #material;
+    #mesh;
+
+    #scaleX;
+    #scaleY;
+    #rotZ;
+    #color;
+    #isLoaded;
+
+    constructor()
+    {
+        this.#position = new Vector2();
+        this.#width = 0;
+        this.#height = 0;
+        this.#centerUV = new UVRect();
+        this.#material = null;
+        this.#mesh = null;
+
+        this.#scaleX = 1.0;
+        this.#scaleY = 1.0;
+        this.#rotZ = 0.0;
+        this.#color = new Vector4(1, 1, 1, 1);
+        this.#isLoaded = false;
+    }
+
+    // _centerUV is a UVRect for the stretchable center; the 8 surrounding areas come from what's left around it.
+    // Without one the whole texture is the center (a plain stretched rect).
+    load(_texture, _width, _height, _centerUV)
+    {
+        if (this.#isLoaded === true)
+            return false; // Unload first
+
+        if (_texture.isLoaded() === false)
+            return false; // Invalid texture
+
+        if (NinePatch2D.#kShader === null)
+        {
+            NinePatch2D.#kShader = new Shader();
+
+            if (NinePatch2D.#kShader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
+            {
+                NinePatch2D.#kShader = null;
+                    return false;
+            }
+        }
+
+        if (_width !== undefined)
+            this.#width = _width;
+        else
+            this.#width = _texture.getWidth();
+
+        if (_height !== undefined)
+            this.#height = _height;
+        else
+            this.#height = _texture.getHeight();
+
+        if (_centerUV !== undefined)
+            this.#centerUV.set(_centerUV.getX(), _centerUV.getY(), _centerUV.getWidth(), _centerUV.getHeight());
+        else
+            this.#centerUV.set(0.0, 0.0, 1.0, 1.0);
+
+        let ta = [_texture];
+
+        this.#material = new Material();
+
+        if (this.#material.load(NinePatch2D.#kShader, ta) === false)
+            return false;
+
+        this.#mesh = this.#buildMesh(_texture.getWidth(), _texture.getHeight());
+        if (this.#mesh === null) return false;
+
+        this.#mesh.bindMaterial(this.#material);
+        let b = true;
+        let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
+        b |= this.#material.setUniformValue("u_res", res);
+
+        let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
+        b |= this.#material.setUniformValue("u_scale", scaleAndRotZ);
+
+        b |= this.#material.setUniformValue("u_color", this.#color);
+
+        let rectPos = new Vector4(0, 0, this.#width / 2.0, this.#height / 2.0);
+        b |= this.#material.setUniformValue("u_vec0", rectPos);
+
+        this.#isLoaded = b;
+            return b;
+    }
+
+    setPos(x, y)
+    {
+        this.#position.set(x, y);
+
+        let rectPos = new Vector4(this.#position.x, this.#position.y, this.#width / 2.0, this.#height / 2.0);
+        this.#material.setUniformValue("u_vec0", rectPos);
+    }
+
+    setRotation(rotZ)
+    {
+        this.#rotZ = rotZ;
+        let scaleAndRotZ = new Vector3(this.#scaleX, this.#scaleY, this.#rotZ);
+        this.#material?.setUniformValue("u_scale", scaleAndRotZ);
+    }
+
+    setColor(color)
+    {
+        this.#color.set(color.x, color.y, color.z, color.w);
+        this.#material?.setUniformValue("u_color", this.#color);
+    }
+
+    getCenterUV() { return this.#centerUV; }
+
+    render()
+    {
+        if (this.#isLoaded === false)
+        {
+            console.log("Not loaded, skipping render");
+                return;
+        }
+
+        this.#material.bindShader();
+
+        this.#material.bindUniforms();
+        this.#mesh.render();
+    }
+
+    // *** Internal methods ***
+
+    #buildMesh(texWidth, texHeight)
+    {
+        const c = this.#centerUV;
+
+        // Border sizes in pixels, taken from the texture areas around the center
+        let left = c.getLeft() * texWidth;
+        let right = (1.0 - c.getRight()) * texWidth;
+        let bottom = c.getBottom() * texHeight;
+        let top = (1.0 - c.getTop()) * texHeight;
+
+        // Shrink the borders if they don't fit, by the same amount on both axes so the corners keep their shape
+        const s = Math.min(NinePatch2D.#fitScale(left + right, this.#width), NinePatch2D.#fitScale(bottom + top, this.#height));
+        left *= s; right *= s;
+        bottom *= s; top *= s;
+
+        const xs = [0, left, this.#width - right, this.#width];
+        const ys = [0, bottom, this.#height - top, this.#height];
+        const us = [0, c.getLeft(), c.getRight(), 1];
+        const vs = [0, c.getBottom(), c.getTop(), 1];
+
+        return Shapes.makeNinePatch(0, xs, ys, us, vs);
+    }
+
+    static #fitScale(borderTotal, size)
+    {
+        return (borderTotal > size && borderTotal > 0) ? (size / borderTotal) : 1.0;
+    }
+}
+
 class Particles2D
 {
     static #VS = `#version 300 es

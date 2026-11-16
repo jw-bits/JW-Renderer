@@ -79,12 +79,6 @@ class IndexBuffer
     getDataType() { return this.#glDataType; }
     getIndexCount() { return this.#indexCount; }
 
-    // render(primType)
-    // {
-    //     WGL.context.bindBuffer(WGL.context.ELEMENT_ARRAY_BUFFER, this.#bufferId);
-    //     WGL.context.drawElements(primType, this.#indexCount, this.#glDataType, 0);
-    // }
-
     unload()
     {
         if (this.#bufferId !== null)

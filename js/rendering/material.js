@@ -63,19 +63,6 @@ class Material
         this.#uniforms = [];
     }
 
-    // setAttributeValue(_name, _value)
-    // {
-    //     let m = this.#attribs.find((member) => member.name === _name);
-
-    //     if (m !== undefined)
-    //     {
-    //         m.value = _value;
-    //             return true;
-    //     }
-
-    //     return false;
-    // }
-
     setUniformValue(_name, _value)
     {
         let m = this.#uniforms.find((member) => member.name === _name);
