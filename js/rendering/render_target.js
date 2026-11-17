@@ -89,8 +89,7 @@ class RenderTarget {
     }
 
     unbind() {
-        WGL.context.bindFramebuffer(WGL.context.FRAMEBUFFER, null);
-        WGL.resizeToWindow();
+        WGL.restoreView(); // Back to the canvas, through the design view
     }
 
     bindAsTexture(unit = 0) {

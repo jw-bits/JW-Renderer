@@ -6,3 +6,8 @@ body
     height: 100%;
     overflow: hidden;
 }
+
+canvas
+{
+    display: block; /* No inline gap under the canvas; WGL sizes it to the window */
+}

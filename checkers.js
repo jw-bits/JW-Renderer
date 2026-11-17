@@ -69,7 +69,9 @@ const Colors = {
     kText: new Vector4(0.94, 0.94, 0.94, 1.0),
     kTextDim: new Vector4(0.65, 0.65, 0.65, 1.0),
     kWin: new Vector4(0.45, 0.95, 0.45, 1.0),
-    kLose: new Vector4(1.0, 0.40, 0.35, 1.0)
+    kLose: new Vector4(1.0, 0.40, 0.35, 1.0),
+    kBackground: new Vector4(0.12, 0.10, 0.09, 1.0),
+    kBars: new Vector4(0.0, 0.0, 0.0, 1.0)  // Fills the window outside the design area
 };
 
 // *** Globals ***
@@ -79,13 +81,12 @@ let dt = 0.0;
 
 let gTextures = {};
 let gIsReady = false;
-let gResizeTimer = null;
 
 let gScreen = GameScreen.kTitle;
 let gScreenBeforeMenu = GameScreen.kTitle;
 let gMouse = new Vector2(-1, -1);
 
-// Layout (rebuilt whenever the window size changes)
+// Layout, in design units (WGL's fixed design resolution), so it's built once
 let gLayout = { w: 0, h: 0, sq: 0, boardX: 0, boardY: 0 };
 let gRects = {};
 let gTexts = {};
@@ -100,6 +101,7 @@ let gLastMove = [];         // Squares visited by the last move
 let gWinner = EMPTY;
 let gBotTimer = 0.0;
 let gBotPlan = null;        // Squares the bot's current move walks through
+let gGameTime = 0.0;        // Seconds played this game; paused while the menu is open
 
 // *** App ***
 
@@ -110,25 +112,18 @@ window.onload = () => {
             return;
     }
 
+    WGL.setDesignResolution(1920, 1080);
+    WGL.setBarColor(Colors.kBars);
+    WGL.setClearColor(Colors.kBackground);
     WGL.resizeToWindow();
     appSetup();
 };
 
-window.onresize = () => {
-    // Rect2D captures the canvas resolution when it loads, so rebuild the layout once resizing settles
-    clearTimeout(gResizeTimer);
-
-    gResizeTimer = setTimeout(() => {
-        WGL.resizeToWindow();
-
-        if (gIsReady === true)
-            appLayout();
-    }, 150);
-};
+// The layout is in design units, so a resize only refits the view (text re-rasterizes itself)
+window.onresize = () => WGL.resizeToWindow();
 
 function appSetup()
 {
-    WGL.context.clearColor(0.12, 0.10, 0.09, 1.0);
     WGL.context.disable(WGL.context.DEPTH_TEST);
     WGL.context.enable(WGL.context.BLEND);
     // Blend color normally but keep the canvas alpha at 1, so translucent overlays
@@ -189,12 +184,16 @@ function appMain()
 function appUpdate(dt)
 {
     if (gScreen === GameScreen.kPlaying)
+    {
+        gGameTime += dt;
+        updateTimeText();
         updateBot(dt);
+    }
 }
 
 function appRender()
 {
-    WGL.context.clear(WGL.context.COLOR_BUFFER_BIT | WGL.context.DEPTH_BUFFER_BIT);
+    WGL.beginFrame(); // Clears the view and the bars around it
 
     if (gScreen === GameScreen.kMenu)
     {
@@ -209,8 +208,8 @@ function appRender()
 
 function appLayout()
 {
-    const w = WGL.context.canvas.width;
-    const h = WGL.context.canvas.height;
+    const w = WGL.getWidth();
+    const h = WGL.getHeight();
     const unit = Math.min(w, h);
 
     // Free the old text textures before building new ones
@@ -262,7 +261,9 @@ function appLayout()
     gTexts.status = makeText("", unit * 0.04, "bold", Colors.kText, w / 2, boardTop + ((h - boardTop) / 2));
     const menuW = unit * 0.16;
     const menuH = unit * 0.06;
-    gButtons.menu = new Button("Menu", 12 + (menuW / 2), h - 12 - (menuH / 2), menuW, menuH, unit * 0.03);
+    const margin = Math.round(unit * 0.03);
+    gButtons.menu = new Button("Menu", margin + (menuW / 2), h - margin - (menuH / 2), menuW, menuH, unit * 0.03);
+    gTexts.time = makeText("", unit * 0.04, "bold", Colors.kText, w - margin, h - margin - (menuH / 2), Alignment.kMiddleRight);
 
     // Menu screen
     gTexts.menuTitle = makeText("MENU", unit * 0.10, "bold", Colors.kTitle, w / 2, h * 0.66);
@@ -278,6 +279,7 @@ function appLayout()
     gTexts.quitHint = makeText("You can close this window now.", unit * 0.032, "normal", Colors.kTextDim, w / 2, h * 0.44);
 
     updateStatusText();
+    updateTimeText();
     updateGameOverText();
 }
 
@@ -445,6 +447,7 @@ function renderGame(isActive)
     }
 
     gTexts.status.render();
+    gTexts.time.render();
     gButtons.menu.render(isActive);
 }
 
@@ -498,6 +501,23 @@ function updateStatusText()
     gTexts.status.setText(text);
 }
 
+// Game time as "mm:ss"; minutes keep counting past 59
+function formatTime(seconds)
+{
+    const total = Math.floor(seconds);
+    const mm = String(Math.floor(total / 60)).padStart(2, "0");
+    const ss = String(total % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+}
+
+function updateTimeText()
+{
+    if (gTexts.time === undefined)
+        return;
+
+    gTexts.time.setText(formatTime(gGameTime)); // Only re-rasterizes when the second changes
+}
+
 function updateGameOverText()
 {
     if (gTexts.gameOver === undefined || gWinner === EMPTY)
@@ -510,12 +530,10 @@ function updateGameOverText()
 
 // *** Input ***
 
+// Design units, +Y up to match Rect2D
 function toCanvasCoords(e)
 {
-    const bounds = WGL.context.canvas.getBoundingClientRect();
-    const x = e.clientX - bounds.left;
-    const y = WGL.context.canvas.height - (e.clientY - bounds.top); // Flip Y to match Rect2D (+Y up)
-    return new Vector2(x, y);
+    return WGL.clientToView(e.clientX, e.clientY);
 }
 
 function cellAt(x, y)
@@ -651,7 +669,9 @@ function resetGame()
     gWinner = EMPTY;
     gBotTimer = 0.0;
     gBotPlan = null;
+    gGameTime = 0.0;
     updateStatusText();
+    updateTimeText();
 }
 
 function startGame()

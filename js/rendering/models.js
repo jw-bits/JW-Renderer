@@ -73,7 +73,7 @@ class Rect2D
         
         this.#mesh.bindMaterial(this.#material);
         let b = true;
-        let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
+        let res = new Vector2(WGL.getWidth(), WGL.getHeight());
         b |= this.#material.setUniformValue("u_res", res);
 
         let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
@@ -121,6 +121,19 @@ class Rect2D
 
         this.#material.bindUniforms();
         this.#mesh.render();
+    }
+
+    // Frees the mesh; the texture belongs to the caller. load() can be called again afterwards.
+    unload()
+    {
+        if (this.#mesh !== null)
+        {
+            this.#mesh.unload();
+            this.#mesh = null;
+        }
+
+        this.#material = null;
+        this.#isLoaded = false;
     }
 
     // *** Internal methods ***
@@ -210,7 +223,7 @@ class RoundedRect2D
 
         this.#mesh.bindMaterial(this.#material);
         let b = true;
-        let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
+        let res = new Vector2(WGL.getWidth(), WGL.getHeight());
         b |= this.#material.setUniformValue("u_res", res);
 
         let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
@@ -357,7 +370,7 @@ class NinePatch2D
 
         this.#mesh.bindMaterial(this.#material);
         let b = true;
-        let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
+        let res = new Vector2(WGL.getWidth(), WGL.getHeight());
         b |= this.#material.setUniformValue("u_res", res);
 
         let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
@@ -600,7 +613,7 @@ class Particles2D
      {
         if (this.#isRunning === true)
         {
-            let res = new Vector2(WGL.context.canvas.width, WGL.context.canvas.height);
+            let res = new Vector2(WGL.getWidth(), WGL.getHeight());
             this.#material.setUniformValue("u_res", res);
             this.#material.setUniformValue("u_color", Vector4.kWhite);
             

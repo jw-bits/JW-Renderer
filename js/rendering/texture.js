@@ -111,6 +111,33 @@ class Texture
             return true;
     }
 
+    // Loads the pixels of a canvas (or any image source texImage2D accepts). Ready right away.
+    loadCanvas(canvas)
+    {
+        if (this.#isLoaded === true)
+            return false; // Already loaded... free first, or use updateCanvas()
+
+        if (canvas == null)
+            return false;
+
+        if (this.#texId === 0)
+            this.#initTexture();
+
+        this.#uploadCanvas(canvas);
+        this.#isLoaded = true;
+            return true;
+    }
+
+    // Replaces the pixels of a texture loaded with loadCanvas(). The size may change.
+    updateCanvas(canvas)
+    {
+        if (this.#isLoaded === false || canvas == null)
+            return false;
+
+        this.#uploadCanvas(canvas);
+            return true;
+    }
+
     isLoaded() { return this.#isLoaded; }
     getWidth() { return this.#width; }
     getHeight() { return this.#height; }
@@ -133,6 +160,22 @@ class Texture
     }
 
     // *** Internal Methods ***
+
+    // No mipmaps: canvas textures are usually redrawn at the size they're shown
+    #uploadCanvas(canvas)
+    {
+        const gl = WGL.context;
+
+        gl.bindTexture(gl.TEXTURE_2D, this.#texId);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this.#flipY);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        this.#width = canvas.width;
+        this.#height = canvas.height;
+    }
 
     #initTexture()
     {

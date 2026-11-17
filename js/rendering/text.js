@@ -3,15 +3,14 @@
 /*
     Text2D - Screen-space text drawn with Rect2D.
 
-    The text is rasterized in white onto a hidden 2D canvas, the canvas is
-    turned into a data URL and loaded through Texture.load(), and the result
-    is drawn with a Rect2D. The color is applied as a tint, so setColor()
-    never re-rasterizes; only setText() does.
+    The text is rasterized in white onto a hidden 2D canvas, which is
+    uploaded straight into the Text2D's own texture (no image decode), and
+    drawn with a Rect2D. The color is applied as a tint, so setColor() never
+    re-rasterizes; only setText() does. New text shows up right away.
 
-    Texture loading is asynchronous, so new text appears once its texture has
-    loaded (usually the next frame). Like Rect2D, the canvas resolution is
-    captured when the text is built: after the canvas is resized, create the
-    Text2D again (or call setText with new text).
+    Sizes and positions are in design units (see WGL). The text is rasterized
+    at the view's current scale so it stays sharp at any window size; when
+    the scale changes, render() rasterizes it again automatically.
 
     Usage:
         const font = await gFontManager.load("./fonts/MyFont-Regular.ttf"); // The app's FontManager
@@ -24,13 +23,13 @@
 
     The Font is the only way to choose what Text2D draws with; use
     fontManager.loadFromSystem("Arial") for a font the browser already has.
-    If the Font hasn't finished loading, setText() waits for it before
-    rasterizing. If it fails to load, the text is drawn in sans-serif.
+    The Font must be loaded before setText() is called; otherwise setText()
+    returns false and nothing changes.
 */
 class Text2D
 {
     static #kCanvas = null;
-    static #kPadding = 4; // Pixels around the text so anti-aliased edges aren't clipped
+    static #kPadding = 4; // Design units around the text so anti-aliased edges aren't clipped
 
     #text;
     #font;
@@ -39,15 +38,17 @@ class Text2D
 
     #texture;
     #rect;
+    #rectTexW;     // Texture size the rect was built for
+    #rectTexH;
+    #rasterScale;  // View scale the text was rasterized at
     #color;
 
     #x;
     #y;
     #align;
 
-    #width;
+    #width;  // Design units
     #height;
-    #loadId;
 
     // _font is a Font, usually from the app's FontManager
     constructor(_font, _fontSize = 32, _fontWeight = "normal")
@@ -67,6 +68,9 @@ class Text2D
 
         this.#texture = null;
         this.#rect = null;
+        this.#rectTexW = 0;
+        this.#rectTexH = 0;
+        this.#rasterScale = 0;
         this.#color = new Vector4(1, 1, 1, 1);
 
         this.#x = 0;
@@ -75,26 +79,25 @@ class Text2D
 
         this.#width = 0;
         this.#height = 0;
-        this.#loadId = 0;
     }
 
-    setText(_text, onLoadSuccessCB = null)
+    // Returns false if the text is null, the Font isn't loaded, or the text couldn't be drawn
+    setText(_text)
     {
         if (_text == null)
             return false;
 
-        if (_text === this.#text)
+        if (this.#font.isLoaded() === false)
+        {
+            console.error("Text2D.setText(): the Font isn't loaded");
+                return false;
+        }
+
+        if (_text === this.#text && this.#rect !== null)
             return true; // Nothing changed
 
         this.#text = _text;
-        const loadId = ++this.#loadId;
-
-        if (this.#font.isLoaded() === true)
-            this.#rasterize(_text, loadId, onLoadSuccessCB);
-        else
-            this.#rasterizeWhenFontLoads(_text, loadId, onLoadSuccessCB);
-
-        return true; // Loading...
+        return this.#rasterize();
     }
 
     getFont() { return this.#font; }
@@ -121,13 +124,20 @@ class Text2D
 
     render()
     {
+        if (this.#text !== null && this.#rasterScale !== WGL.getViewScale())
+            this.#rasterize(); // The window was resized; redraw at the new scale
+
         if (this.#rect !== null)
             this.#rect.render();
     }
 
     unload()
     {
-        this.#loadId++; // Discard any texture still loading
+        if (this.#rect !== null)
+        {
+            this.#rect.unload();
+            this.#rect = null;
+        }
 
         if (this.#texture !== null)
         {
@@ -135,64 +145,72 @@ class Text2D
             this.#texture = null;
         }
 
-        this.#rect = null;
         this.#text = null;
+        this.#rectTexW = 0;
+        this.#rectTexH = 0;
+        this.#rasterScale = 0;
         this.#width = 0;
         this.#height = 0;
     }
 
     // *** Internal Methods ***
 
-    async #rasterizeWhenFontLoads(_text, loadId, onLoadSuccessCB)
+    #rasterize()
     {
-        await this.#font.waitForLoad(); // On failure the Font falls back to sans-serif
-
-        if (loadId === this.#loadId) // Skip if a newer setText() or unload() came first
-            this.#rasterize(_text, loadId, onLoadSuccessCB);
-    }
-
-    #rasterize(_text, loadId, onLoadSuccessCB)
-    {
-        // Rasterize the text in white
+        // Draw at device-pixel size, so one texel lands on one screen pixel
+        const scale = WGL.getViewScale();
         const c = Text2D.#getCanvas();
         let ctx = c.getContext("2d");
-        const font = this.#font.toCss(this.#fontSize, this.#fontWeight);
-        const pad = Text2D.#kPadding;
+        const size = this.#fontSize * scale;
+        const font = this.#font.toCss(size, this.#fontWeight);
+        const pad = Math.ceil(Text2D.#kPadding * scale);
 
         ctx.font = font;
-        const w = Math.max(1, Math.ceil(ctx.measureText(_text).width) + (pad * 2));
-        const h = Math.ceil(this.#fontSize * 1.3) + (pad * 2);
+        const texW = Math.max(1, Math.ceil(ctx.measureText(this.#text).width) + (pad * 2));
+        const texH = Math.max(1, Math.ceil(size * 1.3) + (pad * 2));
 
-        c.width = w; // Resizing clears the canvas and resets the context state
-        c.height = h;
+        c.width = texW; // Resizing clears the canvas and resets the context state
+        c.height = texH;
 
         ctx.font = font;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(_text, w / 2.0, h / 2.0);
+        ctx.fillText(this.#text, texW / 2.0, texH / 2.0);
 
-        const url = c.toDataURL("image/png");
-        let tex = new Texture();
+        // Upload into this Text2D's texture, creating it the first time
+        let ok;
 
-        tex.load(url, () => {
-            if (loadId !== this.#loadId)
-            {
-                tex.unload(); // A newer setText() or unload() replaced this one
-                    return;
-            }
+        if (this.#texture === null)
+        {
+            this.#texture = new Texture();
+            ok = this.#texture.loadCanvas(c);
+        }
+        else
+            ok = this.#texture.updateCanvas(c);
 
-            if (this.#texture !== null)
-                this.#texture.unload();
+        if (ok === false)
+        {
+            console.error("Text2D couldn't upload the texture for: " + this.#text);
+                return false;
+        }
 
-            this.#texture = tex;
-            this.#width = w;
-            this.#height = h;
-            this.#buildRect();
+        const scaleChanged = (scale !== this.#rasterScale);
+        this.#rasterScale = scale;
+        this.#width = texW / scale;
+        this.#height = texH / scale;
 
-            if (onLoadSuccessCB !== null)
-                onLoadSuccessCB();
-        });
+        // The rect only needs rebuilding when its size changes
+        if (this.#rect === null || scaleChanged || texW !== this.#rectTexW || texH !== this.#rectTexH)
+        {
+            if (this.#buildRect() === false)
+                return false;
+
+            this.#rectTexW = texW;
+            this.#rectTexH = texH;
+        }
+
+        return true;
     }
 
     static #getCanvas()
@@ -205,23 +223,28 @@ class Text2D
 
     #buildRect()
     {
+        if (this.#rect !== null)
+            this.#rect.unload();
+
         let r = new Rect2D();
 
         if (r.load(this.#texture, this.#width, this.#height) === false)
         {
             console.error("Text2D couldn't build its rect for: " + this.#text);
-                return;
+            this.#rect = null;
+                return false;
         }
 
         this.#rect = r;
         this.#rect.setColor(this.#color);
         this.#applyPos();
+            return true;
     }
 
     #applyPos()
     {
         if (this.#rect === null)
-            return; // Applied once the texture loads
+            return; // Applied once the text is set
 
         // Alignment values run left/center/right in groups of bottom/middle/top
         const col = Math.floor(this.#align / 3);
@@ -236,6 +259,6 @@ class Text2D
         if (row === 1) by -= this.#height / 2.0;
         else if (row === 2) by -= this.#height;
 
-        this.#rect.setPos(Math.round(lx), Math.round(by));
+        this.#rect.setPos(lx, by);
     }
 }
