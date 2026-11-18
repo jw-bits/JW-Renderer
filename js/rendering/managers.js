@@ -3,7 +3,7 @@
 /*
     Asset managers. The app creates one instance of each and uses it everywhere:
 
-        // After WGL.init()
+        // After WGLV.init()
         gTextureManager = new TextureManager();
         gFontManager = new FontManager("'Segoe UI', Arial, sans-serif");
         gMaterialManager = new MaterialManager();
@@ -146,7 +146,7 @@ class FontManager
     so a missing image is easy to spot. Any request for a texture that fails,
     for any reason, logs a console.error and returns the default texture
     instead, so callers always get a loaded Texture back. Create it after
-    WGL.init().
+    WGLV.init().
 
     Usage:
         let textures = new TextureManager();
@@ -170,7 +170,7 @@ class TextureManager
         this.#defaultTexture = new Texture(true, false);
 
         if (this.#defaultTexture.loadPixels(2, 2, TextureManager.#kDefaultPixels) === false)
-            console.error("TextureManager couldn't create its default texture (was WGL.init() called first?)");
+            console.error("TextureManager couldn't create its default texture (was WGLV.init() called first?)");
     }
 
     getDefault() { return this.#defaultTexture; }

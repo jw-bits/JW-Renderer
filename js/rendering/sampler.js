@@ -9,7 +9,7 @@
     One Sampler can be shared by any number of Materials.
 
     Usage:
-        const gl = WGL.context;
+        const gl = WGLV.context;
         let s = new Sampler();
         s.setWrap(gl.REPEAT, gl.REPEAT);
         s.setFilter(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR); // The texture needs mipmaps for this
@@ -27,7 +27,7 @@ class Sampler
 
     constructor()
     {
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         this.#id = gl.createSampler();
         this.#wrapS = gl.CLAMP_TO_EDGE;
@@ -46,7 +46,7 @@ class Sampler
     }
 
     // min: gl.NEAREST, gl.LINEAR or one of the *_MIPMAP_* modes; mag: gl.NEAREST or gl.LINEAR
-    setFilter(minFilter, magFilter = WGL.context.LINEAR)
+    setFilter(minFilter, magFilter = WGLV.context.LINEAR)
     {
         this.#minFilter = minFilter;
         this.#magFilter = magFilter;
@@ -62,21 +62,21 @@ class Sampler
     // True if the min filter reads mipmaps (the texture must have them, or it samples as black)
     usesMipmaps()
     {
-        const gl = WGL.context;
+        const gl = WGLV.context;
         return (this.#minFilter !== gl.NEAREST && this.#minFilter !== gl.LINEAR);
     }
 
     // Binds to a texture unit (0 - 3); overrides the bound texture's own filtering and wrapping
     bind(unit)
     {
-        WGL.context.bindSampler(unit, this.#id);
+        WGLV.context.bindSampler(unit, this.#id);
     }
 
     unload()
     {
         if (this.#id !== null)
         {
-            WGL.context.deleteSampler(this.#id);
+            WGLV.context.deleteSampler(this.#id);
             this.#id = null;
         }
     }
@@ -88,7 +88,7 @@ class Sampler
         if (this.#id === null)
             return;
 
-        const gl = WGL.context;
+        const gl = WGLV.context;
         gl.samplerParameteri(this.#id, gl.TEXTURE_WRAP_S, this.#wrapS);
         gl.samplerParameteri(this.#id, gl.TEXTURE_WRAP_T, this.#wrapT);
         gl.samplerParameteri(this.#id, gl.TEXTURE_MIN_FILTER, this.#minFilter);

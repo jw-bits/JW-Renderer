@@ -85,7 +85,7 @@ class Texture
         if (this.#texId === 0)
             this.#initTexture();
 
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         gl.bindTexture(gl.TEXTURE_2D, this.#texId);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this.#flipY);
@@ -129,14 +129,14 @@ class Texture
     getHeight() { return this.#height; }
     getURL() { return this.#url; }
 
-    bind() { WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texId); }
+    bind() { WGLV.context.bindTexture(WGLV.context.TEXTURE_2D, this.#texId); }
 
     unload()
     {
         if (this.#texId === 0)
             return; // Alredy unloaded
 
-        WGL.context.deleteTexture(this.#texId);
+        WGLV.context.deleteTexture(this.#texId);
 
         this.#texId = 0;
         this.#url = null;
@@ -150,7 +150,7 @@ class Texture
     // source is an image, canvas, or anything else texImage2D accepts
     #upload(source, width, height)
     {
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         gl.bindTexture(gl.TEXTURE_2D, this.#texId);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this.#flipY);
@@ -161,7 +161,7 @@ class Texture
     // Expects the texture to be bound; unbinds it
     #finishUpload(width, height)
     {
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         // WebGL2 can build mipmaps for any size, not just powers of two
         if (this.#hasMipmaps === true)
@@ -175,7 +175,7 @@ class Texture
 
     #initTexture()
     {
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         this.#texId = gl.createTexture();
         this.#width = 2;

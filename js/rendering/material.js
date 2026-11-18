@@ -152,7 +152,7 @@ class Material
             if (u.componentCount === 1 && u.value < this.#textures.length) // Texture units
             {
                 this.#bindTexture(u.value);
-                WGL.context.uniform1i(u.location, u.value);
+                WGLV.context.uniform1i(u.location, u.value);
             }
         }
     }
@@ -169,7 +169,7 @@ class Material
         if (u === undefined)
             return false;
 
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         switch (u.componentCount)
         {
@@ -243,10 +243,10 @@ class Material
     {
         switch (textureIndex)
         {
-            case 0: WGL.context.activeTexture(WGL.context.TEXTURE0); break;
-            case 1: WGL.context.activeTexture(WGL.context.TEXTURE1); break;
-            case 2: WGL.context.activeTexture(WGL.context.TEXTURE2); break;
-            case 3: WGL.context.activeTexture(WGL.context.TEXTURE3); break;
+            case 0: WGLV.context.activeTexture(WGLV.context.TEXTURE0); break;
+            case 1: WGLV.context.activeTexture(WGLV.context.TEXTURE1); break;
+            case 2: WGLV.context.activeTexture(WGLV.context.TEXTURE2); break;
+            case 3: WGLV.context.activeTexture(WGLV.context.TEXTURE3); break;
             default: console.error("Only 4 texture units supported"); break;
         }
 
@@ -277,7 +277,7 @@ class Material
             if (Material.#kDefaultMipmapSampler === null)
             {
                 Material.#kDefaultMipmapSampler = new Sampler();
-                Material.#kDefaultMipmapSampler.setFilter(WGL.context.LINEAR_MIPMAP_LINEAR, WGL.context.LINEAR);
+                Material.#kDefaultMipmapSampler.setFilter(WGLV.context.LINEAR_MIPMAP_LINEAR, WGLV.context.LINEAR);
             }
 
             return Material.#kDefaultMipmapSampler;

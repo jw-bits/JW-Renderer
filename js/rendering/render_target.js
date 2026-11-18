@@ -22,7 +22,7 @@ class RenderTarget {
      * @param {object} options - Configuration for depth, stencil, and texture parameters.
      */
     load(width, height, options = {}) {
-        const gl = WGL.context;
+        const gl = WGLV.context;
         this.#width = width;
         this.#height = height;
 
@@ -84,22 +84,22 @@ class RenderTarget {
     }
 
     bind() {
-        WGL.context.bindFramebuffer(WGL.context.FRAMEBUFFER, this.#fbo);
-        WGL.context.viewport(0, 0, this.#width, this.#height);
+        WGLV.context.bindFramebuffer(WGLV.context.FRAMEBUFFER, this.#fbo);
+        WGLV.context.viewport(0, 0, this.#width, this.#height);
     }
 
     unbind() {
-        WGL.restoreView(); // Back to the canvas, through the design view
+        WGLV.restoreView(); // Back to the canvas, through the design view
     }
 
     bindAsTexture(unit = 0) {
-        WGL.context.activeTexture(WGL.context.TEXTURE0 + unit);
-        WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texture);
-        WGL.context.bindSampler(unit, null); // Use this texture's own filtering, not a Material's leftover sampler
+        WGLV.context.activeTexture(WGLV.context.TEXTURE0 + unit);
+        WGLV.context.bindTexture(WGLV.context.TEXTURE_2D, this.#texture);
+        WGLV.context.bindSampler(unit, null); // Use this texture's own filtering, not a Material's leftover sampler
     }
 
     unload() {
-        const gl = WGL.context;
+        const gl = WGLV.context;
         if (this.#fbo) gl.deleteFramebuffer(this.#fbo);
         if (this.#texture) gl.deleteTexture(this.#texture);
         if (this.#depthStencil) gl.deleteRenderbuffer(this.#depthStencil);

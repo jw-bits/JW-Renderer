@@ -31,14 +31,24 @@ const BOT_SEARCH_DEPTH = 4;     // Plies (half-moves) the bot looks ahead
 const BOT_THINK_DELAY = 0.6;    // Seconds the bot "thinks" before moving
 const BOT_STEP_DELAY = 0.35;    // Seconds between each hop of the bot's move
 
+// Sparks from the edge of a piece that lands a jump; speeds and sizes are in squares, so they follow the layout
+const SPARK_COUNT = 10;
+const SPARK_MAX_ALIVE = 256;
+const SPARK_SPEED = new Range(1.5, 3.0);  // Squares per second
+const SPARK_LIFE = new Range(0.4, 0.7);   // Seconds
+const SPARK_SIZE = 0.14;                  // Squares
+const SPARK_GRAVITY = 6.0;                // Squares per second squared, downward
+const SPARK_END_SCALE = 0.4;              // Shrink to 40% over each life
+
 const FONT_FAMILY = "'Segoe UI', Arial, sans-serif";
 const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
 
-// The app's single manager instances, created in loadAssets() after WGL.init()
+// The app's single manager instances, created in loadAssets() after WGLV.init()
 let gTextureManager = null;
 let gFontManager = null;
 let gMaterialManager = null;
 let gBatcher = null; // Everything is drawn through it, once per frame
+let gSparks = null;  // Particles2D for jumps
 
 let gUIFont = null;    // System font for all menu text (the FontManager's default)
 let gTitleFont = null; // The title's font file, or the default font if it couldn't be loaded
@@ -73,7 +83,8 @@ const Colors = {
     kWin: new Vector4(0.45, 0.95, 0.45, 1.0),
     kLose: new Vector4(1.0, 0.40, 0.35, 1.0),
     kBackground: new Vector4(0.12, 0.10, 0.09, 1.0),
-    kBars: new Vector4(0.0, 0.0, 0.0, 1.0)  // Fills the window outside the design area
+    kBars: new Vector4(0.0, 0.0, 0.0, 1.0),  // Fills the window outside the design area
+    kSpark: new Vector4(1.0, 0.85, 0.40, 1.0)
 };
 
 // MaterialBatcher layers, back (0) to front (7). Things with different materials
@@ -81,7 +92,7 @@ const Colors = {
 const Layers = {
     kBoard: 0,        // Border, then squares (one material, so submission order holds)
     kHighlight: 1,
-    kPieces: 2,       // Pieces and move hints (they never overlap)
+    kPieces: 2,       // Pieces and move hints (they never overlap), then sparks on top
     kUIBack: 3,       // Button backgrounds
     kUIText: 4,       // Text and button labels
     kOverlay: 5,      // Darkens everything under the menu / game over screens
@@ -101,7 +112,7 @@ let gScreen = GameScreen.kTitle;
 let gScreenBeforeMenu = GameScreen.kTitle;
 let gMouse = new Vector2(-1, -1);
 
-// Layout, in design units (WGL's fixed design resolution), so it's built once
+// Layout, in design units (WGLV's fixed design resolution), so it's built once
 let gLayout = { w: 0, h: 0, sq: 0, boardX: 0, boardY: 0 };
 let gRects = {};
 let gTexts = {};
@@ -121,34 +132,34 @@ let gGameTime = 0.0;        // Seconds played this game; paused while the menu i
 // *** App ***
 
 window.onload = () => {
-    if (WGL.init("wglCanvas") === false)
+    if (WGLV.init("wglCanvas") === false)
     {
         console.error("WebGL2 couldn't be initialized");
             return;
     }
 
-    WGL.setDesignResolution(1920, 1080);
-    WGL.setBarColor(Colors.kBars);
-    WGL.setClearColor(Colors.kBackground);
-    WGL.resizeToWindow();
+    WGLV.setDesignResolution(1920, 1080);
+    WGLV.setBarColor(Colors.kBars);
+    WGLV.setClearColor(Colors.kBackground);
+    WGLV.resizeToWindow();
     appSetup();
 };
 
 // The layout is in design units, so a resize only refits the view (text re-rasterizes itself)
-window.onresize = () => WGL.resizeToWindow();
+window.onresize = () => WGLV.resizeToWindow();
 
 function appSetup()
 {
-    WGL.context.disable(WGL.context.DEPTH_TEST);
-    WGL.context.enable(WGL.context.BLEND);
+    WGLV.context.disable(WGLV.context.DEPTH_TEST);
+    WGLV.context.enable(WGLV.context.BLEND);
     // Blend color normally but keep the canvas alpha at 1, so translucent overlays
     // darken the scene instead of letting the white page show through the canvas
-    WGL.context.blendFuncSeparate(WGL.context.SRC_ALPHA, WGL.context.ONE_MINUS_SRC_ALPHA, WGL.context.ONE, WGL.context.ONE_MINUS_SRC_ALPHA);
+    WGLV.context.blendFuncSeparate(WGLV.context.SRC_ALPHA, WGLV.context.ONE_MINUS_SRC_ALPHA, WGLV.context.ONE, WGLV.context.ONE_MINUS_SRC_ALPHA);
 
     loadAssets().then(appOnAssetsLoaded);
 
-    WGL.context.canvas.addEventListener("mousedown", onMouseDown);
-    WGL.context.canvas.addEventListener("mousemove", onMouseMove);
+    WGLV.context.canvas.addEventListener("mousedown", onMouseDown);
+    WGLV.context.canvas.addEventListener("mousemove", onMouseMove);
     window.addEventListener("keydown", onKeyDown);
 }
 
@@ -165,7 +176,8 @@ async function loadAssets()
         square: "./textures/square.png",
         piece: "./textures/checker_piece.png",
         king: "./textures/checker_king.png",
-        ring: "./textures/circle.png"
+        ring: "./textures/circle.png",
+        particle: "./textures/particleA.png"
     };
 
     const names = Object.keys(files);
@@ -176,6 +188,13 @@ async function loadAssets()
 
     names.forEach((name, i) => { gTextures[name] = textures[i]; });
     gTitleFont = titleFont;
+
+    gSparks = new Particles2D();
+
+    if (gSparks.load(SPARK_MAX_ALIVE, gTextures.particle) === false)
+        console.error("Couldn't load the jump sparks; jumps won't show them");
+
+    gSparks.setEndScale(SPARK_END_SCALE); // Gravity depends on the square size; set in appLayout()
 }
 
 /*
@@ -216,11 +235,15 @@ function appUpdate(dt)
         updateTimeText();
         updateBot(dt);
     }
+
+    // Sparks freeze while the menu is open, like the game; they finish on the game over screen
+    if (gScreen !== GameScreen.kMenu)
+        gSparks.update(dt);
 }
 
 function appRender()
 {
-    WGL.beginFrame(); // Clears the view and the bars around it
+    WGLV.beginFrame(); // Clears the view and the bars around it
 
     // The render functions only submit to the batcher; it draws everything at the end
     if (gScreen === GameScreen.kMenu)
@@ -238,8 +261,8 @@ function appRender()
 
 function appLayout()
 {
-    const w = WGL.getWidth();
-    const h = WGL.getHeight();
+    const w = WGLV.getWidth();
+    const h = WGLV.getHeight();
     const unit = Math.min(w, h);
 
     // Free the old text textures before building new ones
@@ -263,6 +286,7 @@ function appLayout()
     const hintSize = Math.floor(sq * 0.5);
 
     gLayout = { w, h, sq, boardX, boardY };
+    gSparks.setGravity(0, -SPARK_GRAVITY * sq);
 
     // makeRect() shares one Material per texture, so the board is one batch
     gRects.border = makeRect(gTextures.square, boardPx + (border * 2), boardPx + (border * 2), Colors.kBorder);
@@ -466,6 +490,8 @@ function renderGame(isActive)
         }
     }
 
+    gBatcher.submitDrawable(gSparks, Layers.kPieces); // Drawn after the layer's pieces, so on top
+
     // Where the selected piece can go
     if (gTurn === HUMAN && gSelected !== null)
     {
@@ -509,6 +535,26 @@ function renderQuit()
 {
     gBatcher.submit(gTexts.quitTitle, Layers.kUIText);
     gBatcher.submit(gTexts.quitHint, Layers.kUIText);
+}
+
+// A ring of sparks flying out from the edge of the piece that just landed on (r, c)
+function emitJumpSparks(r, c)
+{
+    const sq = gLayout.sq;
+    const cx = squareX(c) + (sq / 2);
+    const cy = squareY(r) + (sq / 2);
+    const radius = Math.floor(sq * 0.86) / 2; // The piece's size, as in appLayout()
+    const step = (Math.PI * 2.0) / SPARK_COUNT;
+
+    for (let i = 0; i < SPARK_COUNT; i++)
+    {
+        const angle = (i * step) + MathUtil.randomFloat(-0.3, 0.3) * step;
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+        const speed = SPARK_SPEED.random() * sq;
+
+        gSparks.emit(cx + (dx * radius), cy + (dy * radius), dx * speed, dy * speed, SPARK_LIFE.random(), SPARK_SIZE * sq, Colors.kSpark);
+    }
 }
 
 function squareX(c) { return gLayout.boardX + (c * gLayout.sq); }
@@ -565,7 +611,7 @@ function updateGameOverText()
 // Design units, +Y up to match Rect2D
 function toCanvasCoords(e)
 {
-    return WGL.clientToView(e.clientX, e.clientY);
+    return WGLV.clientToView(e.clientX, e.clientY);
 }
 
 function cellAt(x, y)
@@ -702,6 +748,7 @@ function resetGame()
     gBotTimer = 0.0;
     gBotPlan = null;
     gGameTime = 0.0;
+    gSparks?.clear();
     updateStatusText();
     updateTimeText();
 }
@@ -746,6 +793,9 @@ function performHumanStep(fr, fc, tr, tc)
 
     const result = applyStep(gBoard, fr, fc, tr, tc);
     gLastMove.push({ r: tr, c: tc });
+
+    if (result.captured)
+        emitJumpSparks(tr, tc);
 
     if (result.captured && !result.promoted && getJumps(gBoard, tr, tc).length > 0)
     {
@@ -802,7 +852,9 @@ function updateBot(dt)
     // Make one hop of the move
     const from = gBotPlan[0];
     const to = gBotPlan[1];
-    applyStep(gBoard, from.r, from.c, to.r, to.c);
+    if (applyStep(gBoard, from.r, from.c, to.r, to.c).captured)
+        emitJumpSparks(to.r, to.c);
+
     gLastMove.push(to);
     gBotPlan.shift();
 

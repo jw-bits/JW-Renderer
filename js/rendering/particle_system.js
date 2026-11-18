@@ -67,23 +67,23 @@ class ParticleSystem {
         this.#posBuffer = new VertexFloatBuffer(true);
         this.#colorBuffer = new VertexFloatBuffer(true);
         this.#sizeBuffer = new VertexFloatBuffer(true);
-        this.#vao = WGL.context.createVertexArray();
+        this.#vao = WGLV.context.createVertexArray();
 
-        WGL.context.bindVertexArray(this.#vao);
+        WGLV.context.bindVertexArray(this.#vao);
         
-        WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#posBuffer.getBufferId());
-        WGL.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kPosition), 3, WGL.context.FLOAT, false, 0, 0);
-        WGL.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kPosition));
+        WGLV.context.bindBuffer(WGLV.context.ARRAY_BUFFER, this.#posBuffer.getBufferId());
+        WGLV.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kPosition), 3, WGLV.context.FLOAT, false, 0, 0);
+        WGLV.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kPosition));
 
-        WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#colorBuffer.getBufferId());
-        WGL.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kColor), 4, WGL.context.FLOAT, false, 0, 0);
-        WGL.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kColor));
+        WGLV.context.bindBuffer(WGLV.context.ARRAY_BUFFER, this.#colorBuffer.getBufferId());
+        WGLV.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kColor), 4, WGLV.context.FLOAT, false, 0, 0);
+        WGLV.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kColor));
 
-        WGL.context.bindBuffer(WGL.context.ARRAY_BUFFER, this.#sizeBuffer.getBufferId());
-        WGL.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kPtSize), 1, WGL.context.FLOAT, false, 0, 0);
-        WGL.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kPtSize));
+        WGLV.context.bindBuffer(WGLV.context.ARRAY_BUFFER, this.#sizeBuffer.getBufferId());
+        WGLV.context.vertexAttribPointer(RenderAttributes.getLocation(RenderAttributes.kPtSize), 1, WGLV.context.FLOAT, false, 0, 0);
+        WGLV.context.enableVertexAttribArray(RenderAttributes.getLocation(RenderAttributes.kPtSize));
 
-        WGL.context.bindVertexArray(null);
+        WGLV.context.bindVertexArray(null);
 
         let shader = new Shader();
         shader.load(ParticleSystem.#VS, ParticleSystem.#FS);
@@ -181,11 +181,11 @@ class ParticleSystem {
 
         this.#material.bind();
         this.#material.setUniform("u_mvp", viewProj);
-        WGL.context.depthMask(false);
-        WGL.context.bindVertexArray(this.#vao);
-        WGL.context.drawArrays(WGL.context.POINTS, 0, this.#activeCount);
-        WGL.context.bindVertexArray(null);
-        WGL.context.depthMask(true);
+        WGLV.context.depthMask(false);
+        WGLV.context.bindVertexArray(this.#vao);
+        WGLV.context.drawArrays(WGLV.context.POINTS, 0, this.#activeCount);
+        WGLV.context.bindVertexArray(null);
+        WGLV.context.depthMask(true);
     }
 
     getPositions() { return this.#positions; }

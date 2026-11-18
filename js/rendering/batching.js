@@ -1,14 +1,14 @@
 "use strict";
 
 /*
-    MaterialBatcher - Collects Model2Ds (and Text2Ds) during a frame, then
-    draws them all in one go, layer by layer, grouped by Material.
+    MaterialBatcher - Collects Model2Ds (Rect2D, Text2D, ...) during a frame,
+    then draws them all in one go, layer by layer, grouped by Material.
 
     Layers run 0 - 7: 0 is drawn first (farthest back), 7 last (top-most).
     Within a layer, everything sharing a Material is drawn together, so the
-    Material is bound once per group. Rect2Ds whose Material uses Rect2D's
-    default shader (see Rect2D.getDefaultShader()) go one step further: each
-    group of them is a single instanced draw call.
+    Material is bound once per group. Quads (Rect2D, Text2D: isQuad()) whose
+    Material uses Rect2D's default shader (see Rect2D.getDefaultShader()) go
+    one step further: each group of them is a single instanced draw call.
 
     Order: layers are always drawn in order, and within one Material the
     submission order is kept. Different Materials in the same layer may be
@@ -16,7 +16,7 @@
     a certain way (e.g. board 0, pieces 2, UI 5).
 
     Usage:
-        let batcher = new MaterialBatcher(); // After WGL.init()
+        let batcher = new MaterialBatcher(); // After WGLV.init()
 
         // Each frame
         batcher.submit(boardRect, 0);
@@ -24,13 +24,17 @@
         batcher.submit(piece, 2);  // The same model can be submitted again...
         piece.setPos(x2, y2);
         batcher.submit(piece, 2);  // ...with different values each time
-        batcher.submit(label, 5);  // Text2D works too
+        batcher.submit(label, 5);  // A Text2D
         batcher.render();          // Draws everything and empties the batcher
 
     submit() captures the model's position, scale, rotation and color at that
     moment, so one model can be drawn many times per frame (like a board square).
     Its size, mesh and Material are read when it's drawn, so don't unload or
     reload a model between submit() and render().
+
+    Anything else that draws itself (e.g. Particles2D) can go on a layer with
+    submitDrawable(obj, layer): obj.render() is called after that layer's
+    models, in submission order. Nothing is captured; it draws as it is then.
 */
 class MaterialBatcher
 {
@@ -43,6 +47,7 @@ class MaterialBatcher
 
     #layers;      // Per layer: the submitted entries
     #groups;      // Per layer: Material -> group number, in order of first submission
+    #drawables;   // Per layer: objects with render(), drawn after the layer's models
     #pool;        // Entry objects reused from frame to frame
     #poolUsed;
 
@@ -62,11 +67,13 @@ class MaterialBatcher
     {
         this.#layers = [];
         this.#groups = [];
+        this.#drawables = [];
 
         for (let i = 0; i < MaterialBatcher.kLayerCount; ++i)
         {
             this.#layers.push([]);
             this.#groups.push(new Map());
+            this.#drawables.push([]);
         }
 
         this.#pool = [];
@@ -88,10 +95,10 @@ class MaterialBatcher
     }
 
     /*
-        Queues a Model2D or Text2D for the next render(), on a layer from 0 (back)
-        to 7 (front). Returns false if it isn't loaded or the layer isn't valid.
+        Queues a Model2D (including Text2D) for the next render(), on a layer from 0
+        (back) to 7 (front). Returns false if it isn't loaded or the layer isn't valid.
     */
-    submit(item, layer = 0)
+    submit(model, layer = 0)
     {
         if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
         {
@@ -99,20 +106,14 @@ class MaterialBatcher
                 return false;
         }
 
-        let model = null;
-
-        if (item instanceof Text2D)
-            model = item.getModel(); // null until the text is set
-        else if (item instanceof Model2D)
-            model = item;
-        else
+        if ((model instanceof Model2D) === false)
         {
-            console.error("MaterialBatcher.submit() needs a Model2D or Text2D");
+            console.error("MaterialBatcher.submit() needs a Model2D (Rect2D, Text2D, ...)");
                 return false;
         }
 
-        if (model === null || model.isLoaded() === false)
-            return false;
+        if (model.isLoaded() === false)
+            return false; // e.g. a Text2D before its text is set
 
         const material = model.getMaterial();
         let groups = this.#groups[layer];
@@ -128,7 +129,7 @@ class MaterialBatcher
         e.model = model;
         e.material = material;
         e.group = group;
-        e.instanced = (this.#instShader !== null && model instanceof Rect2D && material.getShader() === Rect2D.getDefaultShader());
+        e.instanced = (this.#instShader !== null && model.isQuad() === true && material.getShader() === Rect2D.getDefaultShader());
         e.x = model.getX();
         e.y = model.getY();
         e.scaleX = model.getScaleX();
@@ -142,6 +143,29 @@ class MaterialBatcher
             return true;
     }
 
+    /*
+        Queues anything with a render() method (e.g. Particles2D) on a layer. It's drawn
+        after that layer's models, as it is at render() time. Returns false if it has no
+        render() or the layer isn't valid.
+    */
+    submitDrawable(drawable, layer = 0)
+    {
+        if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
+        {
+            console.error(`MaterialBatcher.submitDrawable(): layer must be ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}`);
+                return false;
+        }
+
+        if (typeof drawable?.render !== "function")
+        {
+            console.error("MaterialBatcher.submitDrawable() needs an object with a render() method");
+                return false;
+        }
+
+        this.#drawables[layer].push(drawable);
+            return true;
+    }
+
     // Draws everything submitted since the last render(), back layer to front, then empties the batcher
     render()
     {
@@ -149,32 +173,12 @@ class MaterialBatcher
 
         for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
         {
-            let list = this.#layers[l];
+            this.#renderModels(this.#layers[l]);
 
-            if (list.length === 0)
-                continue;
-
-            // Stable sort: groups in order of first submission, submission order kept inside each group
-            list.sort((a, b) => a.group - b.group);
-
-            let i = 0;
-
-            while (i < list.length)
+            for (const d of this.#drawables[l])
             {
-                // A run of entries that are all instanced, or all not, with the same Material
-                const material = list[i].material;
-                const instanced = list[i].instanced;
-                let end = i + 1;
-
-                while (end < list.length && list[end].material === material && list[end].instanced === instanced)
-                    ++end;
-
-                if (instanced === true)
-                    this.#drawInstanced(list, i, end);
-                else
-                    this.#drawEach(list, i, end);
-
-                i = end;
+                d.render();
+                ++this.#drawCalls; // Counted as one, though a drawable may draw more or nothing
             }
         }
 
@@ -188,6 +192,7 @@ class MaterialBatcher
         {
             this.#layers[l].length = 0;
             this.#groups[l].clear();
+            this.#drawables[l].length = 0;
         }
 
         for (let i = 0; i < this.#poolUsed; ++i)
@@ -207,7 +212,7 @@ class MaterialBatcher
     {
         this.clear();
 
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         if (this.#instVao !== null) gl.deleteVertexArray(this.#instVao);
         if (this.#quadBuffer !== null) gl.deleteBuffer(this.#quadBuffer);
@@ -225,6 +230,36 @@ class MaterialBatcher
     }
 
     // *** Internal Methods ***
+
+    // Draws one layer's models, grouped by Material
+    #renderModels(list)
+    {
+        if (list.length === 0)
+            return;
+
+        // Stable sort: groups in order of first submission, submission order kept inside each group
+        list.sort((a, b) => a.group - b.group);
+
+        let i = 0;
+
+        while (i < list.length)
+        {
+            // A run of entries that are all instanced, or all not, with the same Material
+            const material = list[i].material;
+            const instanced = list[i].instanced;
+            let end = i + 1;
+
+            while (end < list.length && list[end].material === material && list[end].instanced === instanced)
+                ++end;
+
+            if (instanced === true)
+                this.#drawInstanced(list, i, end);
+            else
+                this.#drawEach(list, i, end);
+
+            i = end;
+        }
+    }
 
     #nextEntry()
     {
@@ -255,7 +290,7 @@ class MaterialBatcher
     // Draws Rect2Ds sharing a Material in one instanced call
     #drawInstanced(list, start, end)
     {
-        const gl = WGL.context;
+        const gl = WGLV.context;
         const count = end - start;
         const stride = MaterialBatcher.#kFloatsPerInstance;
 
@@ -285,7 +320,7 @@ class MaterialBatcher
         // The Material binds its textures and samplers; then switch to the instanced shader
         list[start].material.bind();
         this.#instShader.bind();
-        gl.uniform2f(this.#instResLocation, WGL.getWidth(), WGL.getHeight());
+        gl.uniform2f(this.#instResLocation, WGLV.getWidth(), WGLV.getHeight());
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, d, 0, count * stride);
@@ -308,7 +343,7 @@ class MaterialBatcher
         while (capacity < count)
             capacity *= 2;
 
-        const gl = WGL.context;
+        const gl = WGLV.context;
 
         this.#instData = new Float32Array(capacity * MaterialBatcher.#kFloatsPerInstance);
         this.#instCapacity = capacity;
@@ -319,7 +354,7 @@ class MaterialBatcher
 
     #setupInstancing()
     {
-        const gl = WGL.context;
+        const gl = WGLV.context;
         let shader = new Shader();
 
         if (shader.load(Rect2DInstancedShaderSource.VS, Rect2DInstancedShaderSource.FS) === false)

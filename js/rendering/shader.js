@@ -13,14 +13,14 @@ class Shader
 
     load(vsSource, fsSource)
     {
-        this.#vsId = WGL.context.createShader(WGL.context.VERTEX_SHADER);
-        this.#fsId = WGL.context.createShader(WGL.context.FRAGMENT_SHADER);
+        this.#vsId = WGLV.context.createShader(WGLV.context.VERTEX_SHADER);
+        this.#fsId = WGLV.context.createShader(WGLV.context.FRAGMENT_SHADER);
 
         // Compile vertex shader
-        WGL.context.shaderSource(this.#vsId, vsSource);
-        WGL.context.compileShader(this.#vsId);
+        WGLV.context.shaderSource(this.#vsId, vsSource);
+        WGLV.context.compileShader(this.#vsId);
 
-        let didCompile = WGL.context.getShaderParameter(this.#vsId, WGL.context.COMPILE_STATUS);
+        let didCompile = WGLV.context.getShaderParameter(this.#vsId, WGLV.context.COMPILE_STATUS);
 
         if (didCompile === false)
         {
@@ -30,10 +30,10 @@ class Shader
         }
 
         // Compile fragment shader
-        WGL.context.shaderSource(this.#fsId, fsSource);
-        WGL.context.compileShader(this.#fsId);
+        WGLV.context.shaderSource(this.#fsId, fsSource);
+        WGLV.context.compileShader(this.#fsId);
 
-        didCompile = WGL.context.getShaderParameter(this.#fsId, WGL.context.COMPILE_STATUS);
+        didCompile = WGLV.context.getShaderParameter(this.#fsId, WGLV.context.COMPILE_STATUS);
 
         if (didCompile === false)
         {
@@ -43,18 +43,18 @@ class Shader
         }
 
         
-        this.#programId = WGL.context.createProgram();
+        this.#programId = WGLV.context.createProgram();
 
         // Compile program
-        WGL.context.attachShader(this.#programId, this.#vsId);
-        WGL.context.attachShader(this.#programId, this.#fsId);
-        WGL.context.linkProgram(this.#programId);
+        WGLV.context.attachShader(this.#programId, this.#vsId);
+        WGLV.context.attachShader(this.#programId, this.#fsId);
+        WGLV.context.linkProgram(this.#programId);
 
-        let didLink = WGL.context.getProgramParameter(this.#programId, WGL.context.LINK_STATUS);
+        let didLink = WGLV.context.getProgramParameter(this.#programId, WGLV.context.LINK_STATUS);
 
         if (didLink === false)
         {
-            const errMsg = WGL.context.getProgramInfoLog(this.#programId);
+            const errMsg = WGLV.context.getProgramInfoLog(this.#programId);
 
             console.error(`Link failed: ${errMsg}`);
             this.unload();
@@ -70,40 +70,40 @@ class Shader
         if (this.#fsId !== 0)
         {
             if (this.#programId !== 0)
-                WGL.context.detachShader(this.#programId, this.#fsId);
+                WGLV.context.detachShader(this.#programId, this.#fsId);
             
-            WGL.context.deleteShader(this.#fsId);
+            WGLV.context.deleteShader(this.#fsId);
         }
 
         if (this.#vsId !== 0)
         {
             if (this.#programId !== 0)
-                WGL.context.detachShader(this.#programId, this.#vsId);
+                WGLV.context.detachShader(this.#programId, this.#vsId);
             
-            WGL.context.deleteShader(this.#vsId);
+            WGLV.context.deleteShader(this.#vsId);
         }
 
         if (this.#programId !== 0)
-            WGL.context.deleteProgram(this.#programId);
+            WGLV.context.deleteProgram(this.#programId);
         
         this.#vsId = 0;
         this.#fsId = 0;
         this.#programId = 0;
     }
 
-    getAttrib(attribName) { return WGL.context.getAttribLocation(this.#programId, attribName); } // -1 if not found
-    getUniform(uniformName) { return WGL.context.getUniformLocation(this.#programId, uniformName); } // null if not found
+    getAttrib(attribName) { return WGLV.context.getAttribLocation(this.#programId, attribName); } // -1 if not found
+    getUniform(uniformName) { return WGLV.context.getUniformLocation(this.#programId, uniformName); } // null if not found
 
     bind()
     {
-        WGL.context.useProgram(this.#programId);
+        WGLV.context.useProgram(this.#programId);
     }
 
     // *** Internal Methods ***
 
     #logCompilerFailure(shaderId, shaderSource)
     {
-        const errMsg = WGL.context.getShaderInfoLog(shaderId);
+        const errMsg = WGLV.context.getShaderInfoLog(shaderId);
             
         console.log(`Shader source: ${shaderSource}`);
         console.error(`Shader failed to compile with error: ${errMsg}`);

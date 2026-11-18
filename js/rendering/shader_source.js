@@ -148,6 +148,79 @@ const Rect2DInstancedShaderSource = {
     `
 };
 
+/*
+    Particles2D: instanced quads simulated on the GPU. Each particle is written
+    once when emitted; the shader works out where it is from the time since then:
+
+        age = u_time - startTime
+        pos = startPos + velocity * age + 0.5 * u_gravity * age^2
+
+    Over its life a particle fades out and its size goes from size to
+    size * u_endScale. Particles that haven't started or have died are
+    collapsed off-screen, so dead slots cost almost nothing.
+
+    The mesh is a unit quad (-0.5, -0.5) - (0.5, 0.5), centered on the particle.
+    Per instance:
+        a_iMotion (startX, startY, velX, velY)  Design units, design units per second
+        a_iLife   (startTime, life, size)       Seconds, seconds, design units
+        a_iColor  (r, g, b, a)
+*/
+const Particles2DShaderSource = {
+    kMotionLocation: 8,
+    kLifeLocation: 9,
+    kColorLocation: 10,
+
+    VS: `#version 300 es
+        layout(location = 5) in vec2 a_pos;
+        layout(location = 8) in vec4 a_iMotion;
+        layout(location = 9) in vec3 a_iLife;
+        layout(location = 10) in vec4 a_iColor;
+
+        uniform vec2 u_res;
+        uniform float u_time;
+        uniform vec2 u_gravity;
+        uniform float u_endScale;
+
+        out vec2 v_uv0;
+        out vec4 v_color;
+
+        void main() {
+            float age = u_time - a_iLife.x;
+            float life = a_iLife.y;
+
+            if (age < 0.0 || age >= life) {
+                gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); // Off-screen; all 4 corners collapse
+                v_uv0 = vec2(0.0);
+                v_color = vec4(0.0);
+                return;
+            }
+
+            float t = age / life;
+            vec2 center = a_iMotion.xy + (a_iMotion.zw * age) + (0.5 * u_gravity * age * age);
+            float size = a_iLife.z * mix(1.0, u_endScale, t);
+            vec2 p = center + (a_pos * size);
+
+            gl_Position = vec4(((p / u_res) * 2.0) - 1.0, 0.0, 1.0);
+
+            v_uv0 = a_pos + 0.5;
+            v_color = vec4(a_iColor.rgb, a_iColor.a * (1.0 - t));
+        }
+    `,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+
+        in vec2 v_uv0;
+        in vec4 v_color;
+        out vec4 fragColor;
+
+        void main() {
+            fragColor = texture(u_tex0, v_uv0) * v_color;
+        }
+    `
+};
+
 const Standard3DShaderSource = {
     VS: `#version 300 es
         layout (location = 5) in vec3 a_pos;
