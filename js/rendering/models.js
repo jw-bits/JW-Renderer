@@ -1,30 +1,45 @@
-class Rect2D
+/*
+    Model2D - Base class for textured 2D shapes drawn in design units (see WGL).
+
+    Holds the per-object state (position, size, scale, rotation, color), the
+    material and mesh, the setters/getters, render() and unload().
+
+    Each subclass does its own loading, two ways:
+        load(texture, ...)   A Texture; the subclass creates a Material with its own default shader.
+        load(material, ...)  A loaded Material, used as is. It only holds the shader, textures
+                             and samplers, so many models can share one (see MaterialManager).
+
+    Uniform values live here, not in the Material: render() binds the
+    material, then uploads this model's u_res, u_color, u_vec0 and u_scale.
+
+    A subclass's load() builds the mesh, binds it to the material, then hands
+    both to the base with the "_" setters below (for subclasses only).
+*/
+class Model2D
 {
-    // Shader
-    static #kShader = null; 
+    // Scratch values for uploading uniforms in render()
+    static #kRes = new Vector2();
+    static #kRect = new Vector4();
+    static #kScaleRot = new Vector3();
 
     #position;
+    #material;
     #width;
     #height;
-
-    #material;
     #mesh;
-
     #scaleX;
     #scaleY;
     #rotZ;
     #color;
     #isLoaded;
 
-    
     constructor()
     {
         this.#position = new Vector2();
+        this.#material = null;
         this.#width = 0;
         this.#height = 0;
-        this.#material = null;
         this.#mesh = null;
-                 
         this.#scaleX = 1.0;
         this.#scaleY = 1.0;
         this.#rotZ = 0.0;
@@ -32,82 +47,29 @@ class Rect2D
         this.#isLoaded = false;
     }
 
-    load(_texture, _width, _height)
+    // (x, y) is the bottom-left corner
+    setPos(x, y) { this.#position.set(x, y); }
+    setRotation(rotZ) { this.#rotZ = rotZ; }
+
+    setScale(sx, sy = sx)
     {
-        if (this.#isLoaded === true)
-            return false; // Unload first
-
-        if (_texture.isLoaded() === false)
-            return false; // Invalid texture
-
-        if (Rect2D.#kShader === null)
-        {
-            Rect2D.#kShader = new Shader();
-            
-            if (Rect2D.#kShader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
-            {
-                Rect2D.#kShader = null;
-                    return false;
-            }
-        }
-
-        if (_width !== undefined)
-            this.#width = _width;
-        else
-            this.#width = _texture.getWidth();
-
-        if (_height !== undefined)
-            this.#height = _height;
-        else
-            this.#height = _texture.getHeight();
-
-        let ta = [_texture];
-
-        this.#material = new Material();
-
-        if (this.#material.load(Rect2D.#kShader, ta) === false)
-            return false;
-
-        this.#mesh = Shapes.makeQuad(0, 0, 0, this.#width, this.#height, Alignment.kBottomLeft);
-        if (this.#mesh === null) return false;
-        
-        this.#mesh.bindMaterial(this.#material);
-        let b = true;
-        let res = new Vector2(WGL.getWidth(), WGL.getHeight());
-        b |= this.#material.setUniformValue("u_res", res);
-
-        let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
-        b |= this.#material.setUniformValue("u_scale", scaleAndRotZ);
-
-        b |= this.#material.setUniformValue("u_color", this.#color);
-
-        let rectPos = new Vector4(0, 0, this.#width / 2.0, this.#height / 2.0);
-        b |= this.#material.setUniformValue("u_vec0", rectPos);
-
-        this.#isLoaded = b;
-            return b;      
-    }
-    
-    setPos(x, y)
-    {
-        this.#position.set(x,y);
-
-        let rectPos = new Vector4(this.#position.x, this.#position.y, this.#width / 2.0, this.#height / 2.0);
-        this.#material.setUniformValue("u_vec0", rectPos);
+        this.#scaleX = sx;
+        this.#scaleY = sy;
     }
 
-    setRotation(rotZ)
-    {
-        this.#rotZ = rotZ;        
-        let scaleAndRotZ = new Vector3(this.#scaleX, this.#scaleY, this.#rotZ);
-        this.#material?.setUniformValue("u_scale", scaleAndRotZ);
-    }
+    setColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
 
-    setColor(color)
-    {
-        this.#color.set(color.x, color.y, color.z, color.w);
-        this.#material?.setUniformValue("u_color", this.#color);
-    }
+    getPos() { return this.#position; }
+    getX() { return this.#position.x; }
+    getY() { return this.#position.y; }
+    getWidth() { return this.#width; }
+    getHeight() { return this.#height; }
+    getScaleX() { return this.#scaleX; }
+    getScaleY() { return this.#scaleY; }
+    getRotation() { return this.#rotZ; }
+    getColor() { return this.#color; }
+    getMaterial() { return this.#material; }
+    isLoaded() { return this.#isLoaded; }
 
     render()
     {
@@ -117,13 +79,36 @@ class Rect2D
                 return;
         }
 
-        this.#material.bindShader();
+        this.#material.bind();
+        this.draw(this.#position.x, this.#position.y, this.#scaleX, this.#scaleY, this.#rotZ, this.#color);
+    }
 
-        this.#material.bindUniforms();
+    /*
+        Draws with the given values instead of this model's own, without binding
+        the material: it must already be bound. Used by MaterialBatcher, which
+        binds a material once for many models and replays the values captured
+        when each was submitted.
+    */
+    draw(x, y, scaleX, scaleY, rotZ, color)
+    {
+        if (this.#isLoaded === false)
+            return;
+
+        const m = this.#material;
+
+        Model2D.#kRes.set(WGL.getWidth(), WGL.getHeight());
+        Model2D.#kRect.set(x, y, this.#width / 2.0, this.#height / 2.0);
+        Model2D.#kScaleRot.set(scaleX, scaleY, rotZ);
+
+        m.setUniform("u_res", Model2D.#kRes);
+        m.setUniform("u_color", color);
+        m.setUniform("u_vec0", Model2D.#kRect);
+        m.setUniform("u_scale", Model2D.#kScaleRot);
+
         this.#mesh.render();
     }
 
-    // Frees the mesh; the texture belongs to the caller. load() can be called again afterwards.
+    // Frees the mesh; the material and texture belong to the caller. load() can be called again afterwards.
     unload()
     {
         if (this.#mesh !== null)
@@ -136,148 +121,193 @@ class Rect2D
         this.#isLoaded = false;
     }
 
-    // *** Internal methods ***
+    // *** For subclasses ***
 
+    _setSize(width, height)
+    {
+        this.#width = width;
+        this.#height = height;
+    }
+
+    _setMaterial(material) { this.#material = material; }
+
+    // The mesh must already be bound to the material
+    _setMesh(mesh) { this.#mesh = mesh; }
+
+    _setLoaded(isLoaded) { this.#isLoaded = isLoaded; }
 }
 
-// Same API and shader as Rect2D, but the corners are rounded with geometry
-class RoundedRect2D
+class Rect2D extends Model2D
 {
-    // Shader
-    static #kShader = null;
+    static #kShader = null; // Default shader, used when loading from a Texture
 
-    #position;
-    #width;
-    #height;
+    // _source is a Texture or a loaded Material. _width / _height default to its texture's size.
+    load(_source, _width, _height)
+    {
+        if (this.isLoaded() === true)
+            return false; // Unload first
+
+        let material = null;
+
+        if (_source instanceof Texture)
+        {
+            const shader = Rect2D.getDefaultShader();
+
+            if (_source.isLoaded() === false || shader === null)
+                return false;
+
+            material = new Material();
+
+            if (material.load(shader, [_source]) === false)
+                return false;
+        }
+        else if (_source instanceof Material && _source.isLoaded() === true)
+            material = _source;
+        else
+        {
+            console.error("Rect2D.load() needs a loaded Texture or Material");
+                return false;
+        }
+
+        const tex = material.getTexture(0);
+        const w = _width ?? tex?.getWidth();
+        const h = _height ?? tex?.getHeight();
+
+        if (w === undefined || h === undefined)
+        {
+            console.error("Rect2D.load() needs a width and height for a Material without a texture");
+                return false;
+        }
+
+        let mesh = Shapes.makeQuad(0, 0, 0, w, h, Alignment.kBottomLeft);
+
+        if (mesh == null)
+            return false;
+
+        mesh.bindMaterial(material);
+        this._setSize(w, h);
+        this._setMaterial(material);
+        this._setMesh(mesh);
+        this._setLoaded(true);
+            return true;
+    }
+
+    /*
+        The shader Rect2D uses when loading from a Texture (null if it can't be built).
+        Build shared Materials with it too: MaterialBatcher only draws a Rect2D in a
+        single instanced call when its Material uses this shader.
+    */
+    static getDefaultShader()
+    {
+        if (Rect2D.#kShader === null)
+        {
+            let shader = new Shader();
+
+            if (shader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
+                return null;
+
+            Rect2D.#kShader = shader;
+        }
+
+        return Rect2D.#kShader;
+    }
+}
+
+// A Rect2D with the corners rounded with geometry
+class RoundedRect2D extends Model2D
+{
+    static #kShader = null; // Default shader, used when loading from a Texture
+
     #radius;
-
-    #material;
-    #mesh;
-
-    #scaleX;
-    #scaleY;
-    #rotZ;
-    #color;
-    #isLoaded;
 
     constructor()
     {
-        this.#position = new Vector2();
-        this.#width = 0;
-        this.#height = 0;
+        super();
         this.#radius = 0;
-        this.#material = null;
-        this.#mesh = null;
-
-        this.#scaleX = 1.0;
-        this.#scaleY = 1.0;
-        this.#rotZ = 0.0;
-        this.#color = new Vector4(1, 1, 1, 1);
-        this.#isLoaded = false;
     }
 
-    // _radius is clamped to half the shortest side; _segments is the number of triangles per corner
-    load(_texture, _width, _height, _radius, _segments = 8)
+    /*
+        _source is a Texture or a loaded Material. _width / _height default to its texture's size.
+        _radius is clamped to half the shortest side (a quarter of it if undefined).
+        _segments is the number of triangles per corner.
+    */
+    load(_source, _width, _height, _radius, _segments = 8)
     {
-        if (this.#isLoaded === true)
+        if (this.isLoaded() === true)
             return false; // Unload first
 
-        if (_texture.isLoaded() === false)
-            return false; // Invalid texture
+        let material = null;
 
-        if (RoundedRect2D.#kShader === null)
+        if (_source instanceof Texture)
         {
-            RoundedRect2D.#kShader = new Shader();
+            const shader = RoundedRect2D.#getDefaultShader();
 
-            if (RoundedRect2D.#kShader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
-            {
-                RoundedRect2D.#kShader = null;
-                    return false;
-            }
+            if (_source.isLoaded() === false || shader === null)
+                return false;
+
+            material = new Material();
+
+            if (material.load(shader, [_source]) === false)
+                return false;
+        }
+        else if (_source instanceof Material && _source.isLoaded() === true)
+            material = _source;
+        else
+        {
+            console.error("RoundedRect2D.load() needs a loaded Texture or Material");
+                return false;
         }
 
-        if (_width !== undefined)
-            this.#width = _width;
-        else
-            this.#width = _texture.getWidth();
+        const tex = material.getTexture(0);
+        const w = _width ?? tex?.getWidth();
+        const h = _height ?? tex?.getHeight();
 
-        if (_height !== undefined)
-            this.#height = _height;
-        else
-            this.#height = _texture.getHeight();
+        if (w === undefined || h === undefined)
+        {
+            console.error("RoundedRect2D.load() needs a width and height for a Material without a texture");
+                return false;
+        }
 
         if (_radius !== undefined)
-            this.#radius = Math.max(0, Math.min(_radius, this.#width / 2.0, this.#height / 2.0));
+            this.#radius = Math.max(0, Math.min(_radius, w / 2.0, h / 2.0));
         else
-            this.#radius = Math.min(this.#width, this.#height) * 0.25;
+            this.#radius = Math.min(w, h) * 0.25;
 
-        let ta = [_texture];
+        let mesh = Shapes.makeRoundedRect(0, 0, 0, w, h, this.#radius, _segments);
 
-        this.#material = new Material();
-
-        if (this.#material.load(RoundedRect2D.#kShader, ta) === false)
+        if (mesh == null)
             return false;
 
-        this.#mesh = Shapes.makeRoundedRect(0, 0, 0, this.#width, this.#height, this.#radius, _segments);
-        if (this.#mesh === null) return false;
-
-        this.#mesh.bindMaterial(this.#material);
-        let b = true;
-        let res = new Vector2(WGL.getWidth(), WGL.getHeight());
-        b |= this.#material.setUniformValue("u_res", res);
-
-        let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
-        b |= this.#material.setUniformValue("u_scale", scaleAndRotZ);
-
-        b |= this.#material.setUniformValue("u_color", this.#color);
-
-        let rectPos = new Vector4(0, 0, this.#width / 2.0, this.#height / 2.0);
-        b |= this.#material.setUniformValue("u_vec0", rectPos);
-
-        this.#isLoaded = b;
-            return b;
-    }
-
-    setPos(x, y)
-    {
-        this.#position.set(x, y);
-
-        let rectPos = new Vector4(this.#position.x, this.#position.y, this.#width / 2.0, this.#height / 2.0);
-        this.#material.setUniformValue("u_vec0", rectPos);
-    }
-
-    setRotation(rotZ)
-    {
-        this.#rotZ = rotZ;
-        let scaleAndRotZ = new Vector3(this.#scaleX, this.#scaleY, this.#rotZ);
-        this.#material?.setUniformValue("u_scale", scaleAndRotZ);
-    }
-
-    setColor(color)
-    {
-        this.#color.set(color.x, color.y, color.z, color.w);
-        this.#material?.setUniformValue("u_color", this.#color);
+        mesh.bindMaterial(material);
+        this._setSize(w, h);
+        this._setMaterial(material);
+        this._setMesh(mesh);
+        this._setLoaded(true);
+            return true;
     }
 
     getRadius() { return this.#radius; }
 
-    render()
+    // *** Internal methods ***
+
+    static #getDefaultShader()
     {
-        if (this.#isLoaded === false)
+        if (RoundedRect2D.#kShader === null)
         {
-            console.log("Not loaded, skipping render");
-                return;
+            let shader = new Shader();
+
+            if (shader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
+                return null;
+
+            RoundedRect2D.#kShader = shader;
         }
 
-        this.#material.bindShader();
-
-        this.#material.bindUniforms();
-        this.#mesh.render();
+        return RoundedRect2D.#kShader;
     }
 }
 
 /*
-    Nine-slice (9-patch) rectangle. Same API and shader as Rect2D.
+    Nine-slice (9-patch) rectangle.
 
     The texture is split into a 3x3 grid by a center UVRect:
         Corners (1, 3, 7, 9) keep their size in texture pixels.
@@ -287,144 +317,100 @@ class RoundedRect2D
     If the rectangle is smaller than the corners, all borders are shrunk by
     the same factor so the corners never overlap and keep their shape.
 */
-class NinePatch2D
+class NinePatch2D extends Model2D
 {
-    // Shader
-    static #kShader = null;
+    static #kShader = null; // Default shader, used when loading from a Texture
 
-    #position;
-    #width;
-    #height;
     #centerUV;
-
-    #material;
-    #mesh;
-
-    #scaleX;
-    #scaleY;
-    #rotZ;
-    #color;
-    #isLoaded;
 
     constructor()
     {
-        this.#position = new Vector2();
-        this.#width = 0;
-        this.#height = 0;
+        super();
         this.#centerUV = new UVRect();
-        this.#material = null;
-        this.#mesh = null;
-
-        this.#scaleX = 1.0;
-        this.#scaleY = 1.0;
-        this.#rotZ = 0.0;
-        this.#color = new Vector4(1, 1, 1, 1);
-        this.#isLoaded = false;
     }
 
-    // _centerUV is a UVRect for the stretchable center; the 8 surrounding areas come from what's left around it.
-    // Without one the whole texture is the center (a plain stretched rect).
-    load(_texture, _width, _height, _centerUV)
+    /*
+        _source is a Texture or a loaded Material; a Material needs a texture in unit 0,
+        since the border sizes come from it. _width / _height default to the texture's size.
+        _centerUV is a UVRect for the stretchable center; the 8 surrounding areas come from
+        what's left around it. Without one the whole texture is the center (a plain stretched rect).
+    */
+    load(_source, _width, _height, _centerUV)
     {
-        if (this.#isLoaded === true)
+        if (this.isLoaded() === true)
             return false; // Unload first
 
-        if (_texture.isLoaded() === false)
-            return false; // Invalid texture
+        let material = null;
 
-        if (NinePatch2D.#kShader === null)
+        if (_source instanceof Texture)
         {
-            NinePatch2D.#kShader = new Shader();
+            const shader = NinePatch2D.#getDefaultShader();
 
-            if (NinePatch2D.#kShader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
-            {
-                NinePatch2D.#kShader = null;
-                    return false;
-            }
+            if (_source.isLoaded() === false || shader === null)
+                return false;
+
+            material = new Material();
+
+            if (material.load(shader, [_source]) === false)
+                return false;
+        }
+        else if (_source instanceof Material && _source.isLoaded() === true)
+            material = _source;
+        else
+        {
+            console.error("NinePatch2D.load() needs a loaded Texture or Material");
+                return false;
         }
 
-        if (_width !== undefined)
-            this.#width = _width;
-        else
-            this.#width = _texture.getWidth();
+        const tex = material.getTexture(0);
 
-        if (_height !== undefined)
-            this.#height = _height;
-        else
-            this.#height = _texture.getHeight();
+        if (tex === null)
+        {
+            console.error("NinePatch2D.load() needs a Material with a texture in unit 0");
+                return false;
+        }
+
+        const w = _width ?? tex.getWidth();
+        const h = _height ?? tex.getHeight();
 
         if (_centerUV !== undefined)
             this.#centerUV.set(_centerUV.getX(), _centerUV.getY(), _centerUV.getWidth(), _centerUV.getHeight());
         else
             this.#centerUV.set(0.0, 0.0, 1.0, 1.0);
 
-        let ta = [_texture];
+        let mesh = this.#buildMesh(w, h, tex.getWidth(), tex.getHeight());
 
-        this.#material = new Material();
-
-        if (this.#material.load(NinePatch2D.#kShader, ta) === false)
+        if (mesh == null)
             return false;
 
-        this.#mesh = this.#buildMesh(_texture.getWidth(), _texture.getHeight());
-        if (this.#mesh === null) return false;
-
-        this.#mesh.bindMaterial(this.#material);
-        let b = true;
-        let res = new Vector2(WGL.getWidth(), WGL.getHeight());
-        b |= this.#material.setUniformValue("u_res", res);
-
-        let scaleAndRotZ = new Vector3(1.0, 1.0, 0.0);
-        b |= this.#material.setUniformValue("u_scale", scaleAndRotZ);
-
-        b |= this.#material.setUniformValue("u_color", this.#color);
-
-        let rectPos = new Vector4(0, 0, this.#width / 2.0, this.#height / 2.0);
-        b |= this.#material.setUniformValue("u_vec0", rectPos);
-
-        this.#isLoaded = b;
-            return b;
-    }
-
-    setPos(x, y)
-    {
-        this.#position.set(x, y);
-
-        let rectPos = new Vector4(this.#position.x, this.#position.y, this.#width / 2.0, this.#height / 2.0);
-        this.#material.setUniformValue("u_vec0", rectPos);
-    }
-
-    setRotation(rotZ)
-    {
-        this.#rotZ = rotZ;
-        let scaleAndRotZ = new Vector3(this.#scaleX, this.#scaleY, this.#rotZ);
-        this.#material?.setUniformValue("u_scale", scaleAndRotZ);
-    }
-
-    setColor(color)
-    {
-        this.#color.set(color.x, color.y, color.z, color.w);
-        this.#material?.setUniformValue("u_color", this.#color);
+        mesh.bindMaterial(material);
+        this._setSize(w, h);
+        this._setMaterial(material);
+        this._setMesh(mesh);
+        this._setLoaded(true);
+            return true;
     }
 
     getCenterUV() { return this.#centerUV; }
 
-    render()
-    {
-        if (this.#isLoaded === false)
-        {
-            console.log("Not loaded, skipping render");
-                return;
-        }
-
-        this.#material.bindShader();
-
-        this.#material.bindUniforms();
-        this.#mesh.render();
-    }
-
     // *** Internal methods ***
 
-    #buildMesh(texWidth, texHeight)
+    static #getDefaultShader()
+    {
+        if (NinePatch2D.#kShader === null)
+        {
+            let shader = new Shader();
+
+            if (shader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
+                return null;
+
+            NinePatch2D.#kShader = shader;
+        }
+
+        return NinePatch2D.#kShader;
+    }
+
+    #buildMesh(width, height, texWidth, texHeight)
     {
         const c = this.#centerUV;
 
@@ -435,12 +421,12 @@ class NinePatch2D
         let top = (1.0 - c.getTop()) * texHeight;
 
         // Shrink the borders if they don't fit, by the same amount on both axes so the corners keep their shape
-        const s = Math.min(NinePatch2D.#fitScale(left + right, this.#width), NinePatch2D.#fitScale(bottom + top, this.#height));
+        const s = Math.min(NinePatch2D.#fitScale(left + right, width), NinePatch2D.#fitScale(bottom + top, height));
         left *= s; right *= s;
         bottom *= s; top *= s;
 
-        const xs = [0, left, this.#width - right, this.#width];
-        const ys = [0, bottom, this.#height - top, this.#height];
+        const xs = [0, left, width - right, width];
+        const ys = [0, bottom, height - top, height];
         const us = [0, c.getLeft(), c.getRight(), 1];
         const vs = [0, c.getBottom(), c.getTop(), 1];
 
@@ -457,7 +443,7 @@ class Particles2D
 {
     static #VS = `#version 300 es
         layout(location = 5) in vec3 a_pos;
-        
+
         uniform vec2 u_res;
 
         void main() {
@@ -479,7 +465,7 @@ class Particles2D
         void main() {
             vec4 c = texture(u_tex0, gl_PointCoord);
             fragColor = c * u_color;
-        }    
+        }
     `;
 
     //  static #FS = `
@@ -487,25 +473,25 @@ class Particles2D
 
     //      void main() {
     //          gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
-    //      }    
+    //      }
     //  `;
 
      // Shader
      static #kShader = null;
-     
+
      #material;
      #mesh;
 
      #emitPosition;
      #duration;
-     #useGravity;     
+     #useGravity;
      #isLoaded;
      #isRunning;
 
      #deltaTime;
      #positions;
-     #velocities;    
-     
+     #velocities;
+
      constructor()
      {
          this.#material = null;
@@ -541,7 +527,7 @@ class Particles2D
 
         this.#positions = new Float32Array(_particleCount * 3);
         this.#positions.fill(0.0);
-        
+
         this.#velocities = new Array(_particleCount);
 
         if (this.#mesh.set(this.#positions) === false)
@@ -556,8 +542,8 @@ class Particles2D
 
      // Takes a function to do the initilization logic for the positions/veleociies of the particles
      // initFunc
-     // (   
-     //     origin, -- A Vector2 of where the particles should emit from  
+     // (
+     //     origin, -- A Vector2 of where the particles should emit from
      //     poistions[], -- A Float32Array[] of (x,y,z) tightly packed
      //     velocities[] -- An array of Vector2
      // )
@@ -613,139 +599,10 @@ class Particles2D
      {
         if (this.#isRunning === true)
         {
-            let res = new Vector2(WGL.getWidth(), WGL.getHeight());
-            this.#material.setUniformValue("u_res", res);
-            this.#material.setUniformValue("u_color", Vector4.kWhite);
-            
-            this.#material.bindShader();
-
-            this.#material.bindUniforms();
+            this.#material.bind();
+            this.#material.setUniform("u_res", new Vector2(WGL.getWidth(), WGL.getHeight()));
+            this.#material.setUniform("u_color", Vector4.kWhite);
             this.#mesh.render();
         }
      }
-}
-
-class Model {
-    static #kShader = null;
-    
-    #material;
-    #mesh;
-    #pos;
-    #rot;
-    #scale;
-    #color;
-    #isLoaded = false;
-
-    constructor() {
-        this.#pos = new Vector3(0, 0, 0);
-        this.#rot = new Vector3(0, 0, 0);
-        this.#scale = new Vector3(1, 1, 1);
-        this.#color = new Vector4(1, 1, 1, 1);
-    }
-
-    load(_mesh, _texture) {
-        if (Model.#kShader === null) {
-            Model.#kShader = new Shader();
-            if (!Model.#kShader.load(Standard3DShaderSource.VS, Standard3DShaderSource.FS)) return false;
-        }
-        this.#mesh = _mesh;
-        this.#material = new Material();
-
-        if (!this.#material.load(Model.#kShader, [_texture])) 
-            return false;
-
-        this.#material.setUniformValue("u_color", this.#color);
-
-        this.#mesh.bindMaterial(this.#material);        
-        this.#isLoaded = true;
-            return true;
-    }
-
-    setPos(x, y, z) { this.#pos.set(x, y, z); }
-    setRotation(x, y, z) { this.#rot.set(x, y, z); }
-    setScale(x, y, z) { this.#scale.set(x, y, z); }
-    setColor(c) { this.#color = c; }
-    setAlpha(a) { this.#color.w = a; }
-
-    getPos() { return this.#pos; }
-    getRotation() { return this.#rot; }
-    getScale() { return this.#scale; }
-    getColor() { return this.#color; }
-
-    translate(x, y, z) {
-        this.#pos.x += x; this.#pos.y += y; this.#pos.z += z;
-    }
-
-    rotate(x, y, z) {
-        this.#rot.x += x; this.#rot.y += y; this.#rot.z += z;
-    }
-
-    getModelMatrix() {
-        let mTranslation = Matrix4.fromTranslation(this.#pos.x, this.#pos.y, this.#pos.z);
-        let mRotX = Matrix4.fromRotationX(this.#rot.x);
-        let mRotY = Matrix4.fromRotationY(this.#rot.y);
-        let mRotZ = Matrix4.fromRotationZ(this.#rot.z);
-        let mScale = Matrix4.fromScaling(this.#scale.x, this.#scale.y, this.#scale.z);
-
-        return Matrix4.multiply(mTranslation, Matrix4.multiply(mRotZ, Matrix4.multiply(mRotY, Matrix4.multiply(mRotX, mScale))));
-    }
-
-    renderWithShader(viewProj, shader) {
-        if (!this.#isLoaded) return;
-
-        let model = this.getModelMatrix();
-        let mvp = Matrix4.multiply(viewProj, model);
-
-        shader.bind();
-        let uMvpLoc = shader.getUniform("u_mvp");
-        if (uMvpLoc) {
-            WGL.context.uniformMatrix4fv(uMvpLoc, false, mvp.m);
-        }
-
-        this.#mesh.render();
-    }
-
-    render(viewProj) {
-        if (!this.#isLoaded) return;
-
-        this.#material.setUniformValue("u_color", this.#color);
-
-        let model = this.getModelMatrix();
-        let mvp = Matrix4.multiply(viewProj, model);
-
-        this.#material.setUniformValue("u_mvp", mvp);
-        this.#material.bindShader();
-        
-        this.#material.bindUniforms();
-        this.#mesh.render();
-    }
-}
-
-class Quad extends Model {
-    constructor() {
-        super();
-    }
-
-    load(_texture, size = 0.2) {
-        // Quads in 3D are usually centered at 0,0,0
-        const mesh = Shapes.makeQuad(-size/2, -size/2, 0, size, size, Alignment.kBottomLeft);
-        return super.load(mesh, _texture);
-    }
-
-    // Helper to align quad to a specific cube face
-    alignToFace(faceIndex, offset = 0.501) {
-        this.setPos(0, 0, 0);
-        this.setRotation(0, 0, 0);
-        
-        const randomOffset = () => MathUtil.randomFloat(-0.3, 0.3);
-
-        switch(faceIndex) {
-            case 0: this.setPos(randomOffset(), randomOffset(), offset); break; // Front
-            case 1: this.setPos(randomOffset(), randomOffset(), -offset); this.setRotation(0, Math.PI, 0); break; // Back
-            case 2: this.setPos(offset, randomOffset(), randomOffset()); this.setRotation(0, Math.PI/2, 0); break; // Right
-            case 3: this.setPos(-offset, randomOffset(), randomOffset()); this.setRotation(0, -Math.PI/2, 0); break; // Left
-            case 4: this.setPos(randomOffset(), offset, randomOffset()); this.setRotation(-Math.PI/2, 0, 0); break; // Top
-            case 5: this.setPos(randomOffset(), -offset, randomOffset()); this.setRotation(Math.PI/2, 0, 0); break; // Bottom
-        }
-    }
 }

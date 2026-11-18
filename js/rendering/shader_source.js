@@ -45,12 +45,14 @@ const Rect2DShaderSource = {
         
         uniform vec2 u_res;
         uniform vec3 u_scale;
-        uniform vec4 u_vec0;
+
+        // u_vec0 is (x, y, width / 2, height / 2); scale and rotation pivot on the rect's center
+        uniform vec4 u_vec0; 
 
         out vec2 v_uv0;
-
+        
         void main() {
-            vec2 ssPos = ((a_pos.xy + u_vec0.xy) - u_vec0.zw) * u_scale.xy;
+            vec2 ssPos = (a_pos.xy - u_vec0.zw) * u_scale.xy;
 
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
@@ -58,7 +60,7 @@ const Rect2DShaderSource = {
             vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
                              ssPos.x * -sa + ssPos.y * ca);
 
-            vec2 zTo1 = (rPos + u_vec0.zw) / u_res;
+            vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
             vec2 cs = (zTo1 * 2.0) - 1.0;
 
             gl_Position = vec4(cs, 0.0, 1.0);
@@ -79,6 +81,70 @@ const Rect2DShaderSource = {
             vec4 c = texture(u_tex0, v_uv0);
             fragColor = c * u_color;
         }    
+    `
+};
+
+/*
+    Instanced Rect2D: draws many Rect2Ds that share a material in one draw call
+    (see MaterialBatcher). Same math as Rect2DShaderSource, but the per-rect
+    values come from instance attributes instead of uniforms.
+
+    The mesh is a unit quad (0,0) - (1,1); its position doubles as the UV.
+    Per instance:
+        a_iRect     (x, y, width / 2, height / 2)  Like u_vec0; (x, y) is the bottom-left corner
+        a_iScaleRot (scaleX, scaleY, rotZ)         Like u_scale
+        a_iColor    (r, g, b, a)                   Like u_color
+
+    Locations 8 - 10 are past the ones RenderAttributes uses (0 - 7).
+*/
+const Rect2DInstancedShaderSource = {
+    kRectLocation: 8,
+    kScaleRotLocation: 9,
+    kColorLocation: 10,
+
+    VS: `#version 300 es
+        layout(location = 5) in vec2 a_pos;
+        layout(location = 8) in vec4 a_iRect;
+        layout(location = 9) in vec3 a_iScaleRot;
+        layout(location = 10) in vec4 a_iColor;
+
+        uniform vec2 u_res;
+
+        out vec2 v_uv0;
+        out vec4 v_color;
+
+        void main() {
+            vec2 halfSize = a_iRect.zw;
+            vec2 ssPos = ((a_pos * halfSize * 2.0) - halfSize) * a_iScaleRot.xy;
+
+            float sa = sin(a_iScaleRot.z);
+            float ca = cos(a_iScaleRot.z);
+
+            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
+                             ssPos.x * -sa + ssPos.y * ca);
+
+            vec2 zTo1 = (rPos + halfSize + a_iRect.xy) / u_res;
+            vec2 cs = (zTo1 * 2.0) - 1.0;
+
+            gl_Position = vec4(cs, 0.0, 1.0);
+
+            v_uv0 = a_pos;
+            v_color = a_iColor;
+        }
+    `,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+
+        in vec2 v_uv0;
+        in vec4 v_color;
+        out vec4 fragColor;
+
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            fragColor = c * v_color;
+        }
     `
 };
 

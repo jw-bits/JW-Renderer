@@ -95,6 +95,7 @@ class RenderTarget {
     bindAsTexture(unit = 0) {
         WGL.context.activeTexture(WGL.context.TEXTURE0 + unit);
         WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texture);
+        WGL.context.bindSampler(unit, null); // Use this texture's own filtering, not a Material's leftover sampler
     }
 
     unload() {

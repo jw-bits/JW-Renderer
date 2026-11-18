@@ -124,11 +124,20 @@ class Text2D
 
     render()
     {
+        this.getModel()?.render();
+    }
+
+    /*
+        The Rect2D that draws this text, re-rasterized first if the view scale
+        changed, or null if there's no text yet. MaterialBatcher uses it; it's
+        rebuilt by setText() and resizes, so don't keep it.
+    */
+    getModel()
+    {
         if (this.#text !== null && this.#rasterScale !== WGL.getViewScale())
             this.#rasterize(); // The window was resized; redraw at the new scale
 
-        if (this.#rect !== null)
-            this.#rect.render();
+        return this.#rect;
     }
 
     unload()
@@ -183,7 +192,7 @@ class Text2D
 
         if (this.#texture === null)
         {
-            this.#texture = new Texture();
+            this.#texture = new Texture(true, false); // No mipmaps: it's drawn at the size it's rasterized
             ok = this.#texture.loadCanvas(c);
         }
         else

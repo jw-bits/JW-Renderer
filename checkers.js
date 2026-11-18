@@ -37,6 +37,8 @@ const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
 // The app's single manager instances, created in loadAssets() after WGL.init()
 let gTextureManager = null;
 let gFontManager = null;
+let gMaterialManager = null;
+let gBatcher = null; // Everything is drawn through it, once per frame
 
 let gUIFont = null;    // System font for all menu text (the FontManager's default)
 let gTitleFont = null; // The title's font file, or the default font if it couldn't be loaded
@@ -72,6 +74,19 @@ const Colors = {
     kLose: new Vector4(1.0, 0.40, 0.35, 1.0),
     kBackground: new Vector4(0.12, 0.10, 0.09, 1.0),
     kBars: new Vector4(0.0, 0.0, 0.0, 1.0)  // Fills the window outside the design area
+};
+
+// MaterialBatcher layers, back (0) to front (7). Things with different materials
+// that must overlap a certain way (a button and its label) go on different layers.
+const Layers = {
+    kBoard: 0,        // Border, then squares (one material, so submission order holds)
+    kHighlight: 1,
+    kPieces: 2,       // Pieces and move hints (they never overlap)
+    kUIBack: 3,       // Button backgrounds
+    kUIText: 4,       // Text and button labels
+    kOverlay: 5,      // Darkens everything under the menu / game over screens
+    kOverlayBack: 6,  // Buttons on the overlay
+    kOverlayText: 7
 };
 
 // *** Globals ***
@@ -142,6 +157,8 @@ async function loadAssets()
 {
     gTextureManager = new TextureManager();
     gFontManager = new FontManager(FONT_FAMILY);
+    gMaterialManager = new MaterialManager();
+    gBatcher = new MaterialBatcher();
     gUIFont = gFontManager.getDefault();
 
     const files = {
@@ -159,6 +176,16 @@ async function loadAssets()
 
     names.forEach((name, i) => { gTextures[name] = textures[i]; });
     gTitleFont = titleFont;
+}
+
+/*
+    One shared Material per texture, built on Rect2D's default shader, so every
+    rect using a texture lands in the same batch (and Rect2Ds draw instanced).
+    Falls back to the texture itself (a per-rect material) if it can't be made.
+*/
+function materialFor(texture)
+{
+    return gMaterialManager.load(Rect2D.getDefaultShader(), [texture]) ?? texture;
 }
 
 function appOnAssetsLoaded()
@@ -195,6 +222,7 @@ function appRender()
 {
     WGL.beginFrame(); // Clears the view and the bars around it
 
+    // The render functions only submit to the batcher; it draws everything at the end
     if (gScreen === GameScreen.kMenu)
     {
         renderScreen(gScreenBeforeMenu, false);
@@ -202,6 +230,8 @@ function appRender()
     }
     else
         renderScreen(gScreen, true);
+
+    gBatcher.render();
 }
 
 // *** Layout ***
@@ -234,6 +264,7 @@ function appLayout()
 
     gLayout = { w, h, sq, boardX, boardY };
 
+    // makeRect() shares one Material per texture, so the board is one batch
     gRects.border = makeRect(gTextures.square, boardPx + (border * 2), boardPx + (border * 2), Colors.kBorder);
     gRects.border.setPos(boardX - border, boardY - border);
 
@@ -286,7 +317,7 @@ function appLayout()
 function makeRect(texture, w, h, color)
 {
     let r = new Rect2D();
-    r.load(texture, Math.round(w), Math.round(h));
+    r.load(materialFor(texture), Math.round(w), Math.round(h));
     r.setColor(color);
     return r;
 }
@@ -294,7 +325,7 @@ function makeRect(texture, w, h, color)
 function makeRoundedRect(texture, w, h, radius, color)
 {
     let r = new RoundedRect2D();
-    r.load(texture, Math.round(w), Math.round(h), radius);
+    r.load(materialFor(texture), Math.round(w), Math.round(h), radius);
     r.setColor(color);
     return r;
 }
@@ -338,12 +369,13 @@ class Button
         return (px >= this.#x && px <= this.#x + this.#w && py >= this.#y && py <= this.#y + this.#h);
     }
 
-    render(isActive)
+    // The background goes on backLayer, the label on textLayer (in front of it)
+    render(isActive, backLayer = Layers.kUIBack, textLayer = Layers.kUIText)
     {
         const hover = (isActive === true) && this.contains(gMouse.x, gMouse.y);
         this.#bg.setColor(hover ? Colors.kButtonHover : Colors.kButton);
-        this.#bg.render();
-        this.#label.render();
+        gBatcher.submit(this.#bg, backLayer);
+        gBatcher.submit(this.#label, textLayer);
     }
 
     unload()
@@ -367,26 +399,26 @@ function renderScreen(screen, isActive)
 
 function renderTitle(isActive)
 {
-    gTexts.title.render();
-    gTexts.subtitle.render();
+    gBatcher.submit(gTexts.title, Layers.kUIText);
+    gBatcher.submit(gTexts.subtitle, Layers.kUIText);
     gButtons.start.render(isActive);
-    gTexts.titleHint.render();
+    gBatcher.submit(gTexts.titleHint, Layers.kUIText);
 }
 
 function renderGame(isActive)
 {
     const sq = gLayout.sq;
 
-    gRects.border.render();
+    gBatcher.submit(gRects.border, Layers.kBoard);
 
-    // Squares
+    // Squares (submitted after the border, with the same material, so they draw on top of it)
     for (let r = 0; r < BOARD_SIZE; r++)
     {
         for (let c = 0; c < BOARD_SIZE; c++)
         {
             let rect = ((r + c) % 2 === 0) ? gRects.lightSquare : gRects.darkSquare;
             rect.setPos(squareX(c), squareY(r));
-            rect.render();
+            gBatcher.submit(rect, Layers.kBoard);
         }
     }
 
@@ -429,7 +461,7 @@ function renderGame(isActive)
             if (rect !== null)
             {
                 rect.setPos(Math.round(squareX(c) + pieceOffset), Math.round(squareY(r) + pieceOffset));
-                rect.render();
+                gBatcher.submit(rect, Layers.kPieces);
             }
         }
     }
@@ -442,12 +474,12 @@ function renderGame(isActive)
         for (const t of getLegalTargets(gBoard, gSelected.r, gSelected.c, HUMAN))
         {
             gRects.hint.setPos(Math.round(squareX(t.c) + hintOffset), Math.round(squareY(t.r) + hintOffset));
-            gRects.hint.render();
+            gBatcher.submit(gRects.hint, Layers.kPieces);
         }
     }
 
-    gTexts.status.render();
-    gTexts.time.render();
+    gBatcher.submit(gTexts.status, Layers.kUIText);
+    gBatcher.submit(gTexts.time, Layers.kUIText);
     gButtons.menu.render(isActive);
 }
 
@@ -455,28 +487,28 @@ function renderHighlight(r, c, color)
 {
     gRects.highlight.setColor(color);
     gRects.highlight.setPos(squareX(c), squareY(r));
-    gRects.highlight.render();
+    gBatcher.submit(gRects.highlight, Layers.kHighlight);
 }
 
 function renderMenu()
 {
-    gRects.overlay.render();
-    gTexts.menuTitle.render();
-    gButtons.quit.render(true);
-    gTexts.menuHint.render();
+    gBatcher.submit(gRects.overlay, Layers.kOverlay);
+    gBatcher.submit(gTexts.menuTitle, Layers.kOverlayText);
+    gButtons.quit.render(true, Layers.kOverlayBack, Layers.kOverlayText);
+    gBatcher.submit(gTexts.menuHint, Layers.kOverlayText);
 }
 
 function renderGameOver()
 {
-    gRects.overlay.render();
-    gTexts.gameOver.render();
-    gTexts.gameOverHint.render();
+    gBatcher.submit(gRects.overlay, Layers.kOverlay);
+    gBatcher.submit(gTexts.gameOver, Layers.kOverlayText);
+    gBatcher.submit(gTexts.gameOverHint, Layers.kOverlayText);
 }
 
 function renderQuit()
 {
-    gTexts.quitTitle.render();
-    gTexts.quitHint.render();
+    gBatcher.submit(gTexts.quitTitle, Layers.kUIText);
+    gBatcher.submit(gTexts.quitHint, Layers.kUIText);
 }
 
 function squareX(c) { return gLayout.boardX + (c * gLayout.sq); }

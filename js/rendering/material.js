@@ -1,18 +1,52 @@
+/*
+    Material - A shader, up to 4 textures, and the sampler state for each
+    texture unit. That's all it holds, so one Material can be shared by any
+    number of models (see MaterialManager).
+
+    Each texture unit is drawn with its Sampler (filtering and wrapping). A
+    unit without one uses a shared default: trilinear (LINEAR_MIPMAP_LINEAR /
+    LINEAR) if its texture has mipmaps, otherwise LINEAR / LINEAR; both clamp.
+
+    Uniform values (position, color, ...) belong to whatever is being drawn,
+    not the Material. Bind the Material, then upload them:
+
+        material.bind();                       // Shader, textures, samplers
+        material.setUniform("u_color", color); // Uploaded right away
+        mesh.render();
+
+    Usage:
+        let m = new Material();
+        m.load(shader, [texture], [sampler]); // Samplers are optional, per unit
+        m.setSampler(0, repeatSampler);       // Or set / change one later
+
+    Samplers and textures belong to the caller; one can be shared by many Materials.
+*/
 class Material
 {
+    // Shared defaults, created the first time they're needed
+    static #kDefaultSampler = null;
+    static #kDefaultMipmapSampler = null;
+
+    // Ids for the shaders, textures and samplers in getKey(); weak, so they don't keep anything alive
+    static #kIds = new WeakMap();
+    static #kNextId = 1;
+
     #shader;
     #textures;
-    
-    #uniforms;
+    #samplers; // Per texture unit; null uses a default
+
+    #uniforms; // Name -> RenderMapping (location and component count) for the shader's uniforms
 
     constructor()
     {
         this.#shader = null;
         this.#textures = [];
-        this.#uniforms = [];
+        this.#samplers = [null, null, null, null];
+        this.#uniforms = new Map();
     }
 
-    load(_shader, textureArray)
+    // samplerArray is optional: one Sampler (or null for the default) per texture
+    load(_shader, textureArray, samplerArray = null)
     {
         if (this.#shader !== null)
             return false; // Already loaded
@@ -26,6 +60,15 @@ class Material
             }
             else
                 return false;
+        }
+
+        if (samplerArray != null)
+        {
+            if (Array.isArray(samplerArray) === false || samplerArray.length > 4)
+                return false;
+
+            for (let i = 0; i < samplerArray.length; ++i)
+                this.#samplers[i] = samplerArray[i] ?? null;
         }
 
         this.#shader = _shader;
@@ -57,38 +100,90 @@ class Material
                 }
             }
             else
-                this.#textures = [];            
+                this.#textures = [];
         }
 
-        this.#uniforms = [];
+        this.#samplers = [null, null, null, null]; // Samplers belong to the caller
+        this.#uniforms = new Map();
     }
 
-    setUniformValue(_name, _value)
+    // The sampler for a texture unit (0 - 3); null goes back to the default
+    setSampler(unit, sampler)
     {
-        let m = this.#uniforms.find((member) => member.name === _name);
-
-        if (m !== undefined)
+        if (unit < 0 || unit > 3)
         {
-            m.value = _value;
-                return true;
+            console.error("Material.setSampler(): only texture units 0 - 3 are supported");
+                return false;
         }
 
-        return false;
+        this.#samplers[unit] = sampler ?? null;
+            return true;
     }
 
-    getUniformValue(_name)
+    // The sampler set for a unit, or null if it uses the default
+    getSampler(unit = 0) { return this.#samplers[unit] ?? null; }
+
+    getShader() { return this.#shader; }
+
+    /*
+        Identifies what makes this material: its shader, textures, and samplers.
+        Two Materials built from the same objects get the same key, e.g.
+        "s3|t7,9|p-,12" (shader 3, textures 7 and 9, unit 0 default sampler,
+        unit 1 sampler 12). Uniform values aren't part of it. null if not loaded.
+    */
+    getKey()
     {
-        let m = this.#uniforms.find((member) => member.name === _name);
-        if (m !== undefined) {
-            return m.value;
-        }
-        return null;
+        if (this.#shader === null)
+            return null;
+
+        const textures = this.#textures.map((t) => Material.#idOf(t));
+        const samplers = this.#textures.map((t, i) => (this.#samplers[i] !== null) ? Material.#idOf(this.#samplers[i]) : "-");
+
+        return `s${Material.#idOf(this.#shader)}|t${textures.join(",")}|p${samplers.join(",")}`;
     }
 
-    bindShader()
+    // Binds the shader, and each texture with its sampler. Call before setUniform() and drawing.
+    bind()
     {
         this.#shader.bind();
+
+        for (const u of this.#uniforms.values())
+        {
+            if (u.componentCount === 1 && u.value < this.#textures.length) // Texture units
+            {
+                this.#bindTexture(u.value);
+                WGL.context.uniform1i(u.location, u.value);
+            }
+        }
     }
+
+    /*
+        Uploads a uniform value right away, so the Material must be bound.
+        value is a Vector2, Vector3, Vector4 or Matrix4 to match the uniform.
+        Returns false if the shader doesn't use that uniform (texture units are set by bind()).
+    */
+    setUniform(name, value)
+    {
+        const u = this.#uniforms.get(name);
+
+        if (u === undefined)
+            return false;
+
+        const gl = WGL.context;
+
+        switch (u.componentCount)
+        {
+            case 2:  gl.uniform2f(u.location, value.x, value.y); break;
+            case 3:  gl.uniform3f(u.location, value.x, value.y, value.z); break;
+            case 4:  gl.uniform4f(u.location, value.x, value.y, value.z, value.w); break;
+            case 16: gl.uniformMatrix4fv(u.location, false, value.m); break;
+            default: return false;
+        }
+
+        return true;
+    }
+
+    hasUniform(name) { return this.#uniforms.has(name); }
 
     getAttribLocation(name)
     {
@@ -100,34 +195,10 @@ class Material
         return this.#shader.getUniform(name);
     }
 
-    bindUniforms()
-    {
-        for (let i = 0; i < this.#uniforms.length; ++i)
-        {
-            let u = this.#uniforms[i];
+    isLoaded() { return (this.#shader !== null); }
 
-            switch (u.componentCount)
-            {
-                case 1: // One-component is texture units only
-                {
-                    if (u.value < this.#textures.length)
-                    {
-                        this.#bindTexture(u.value);
-                        WGL.context.uniform1i(u.location, u.value); 
-                    }                    
-                } 
-                break;                
-                
-                case 2:  WGL.context.uniform2f(u.location, u.value.x, u.value.y); break;
-                case 3:  WGL.context.uniform3f(u.location, u.value.x, u.value.y, u.value.z); break;
-                case 4:  WGL.context.uniform4f(u.location, u.value.x, u.value.y, u.value.z, u.value.w); break;
-                case 16: WGL.context.uniformMatrix4fv(u.location, false, u.value.m); break;
-                default: console.log("Unsupported uniform"); break;
-            }
-        }        
-    }
-
-    getRenderUniforms() { return this.#uniforms; }
+    // The texture in a unit (0 - 3), or null if there isn't one
+    getTexture(index = 0) { return this.#textures[index] ?? null; }
 
     // *** Internal Methods ***
 
@@ -144,6 +215,7 @@ class Material
                 m.location = idx;
                 m.componentCount = componentCount;
 
+                // Only texture units keep a value here: the unit number. Other values come from setUniform().
                 if (m.componentCount === 1)
                 {
                     if (uName === "u_tex0")
@@ -156,19 +228,11 @@ class Material
                         m.value = 3;
                     else
                         m.value = 0;
-                }                    
-                else if (m.componentCount === 2)
-                    m.value = new Vector2();
-                else if (m.componentCount === 3)
-                    m.value = new Vector3();
-                else if (m.componentCount === 4)
-                    m.value = new Vector4();
-                else if (m.componentCount === 16)
-                    m.value = new Matrix4();
-                else
+                }
+                else if (m.componentCount !== 2 && m.componentCount !== 3 && m.componentCount !== 4 && m.componentCount !== 16)
                     return false;
-                
-                this.#uniforms.push(m);
+
+                this.#uniforms.set(uName, m);
             }
         }
     
@@ -188,5 +252,40 @@ class Material
 
         let t = this.#textures[textureIndex];
         t.bind();
+
+        const sampler = this.#samplers[textureIndex] ?? Material.#getDefaultSampler(t.hasMipmaps());
+        sampler.bind(textureIndex);
+    }
+
+    static #idOf(obj)
+    {
+        let id = Material.#kIds.get(obj);
+
+        if (id === undefined)
+        {
+            id = Material.#kNextId++;
+            Material.#kIds.set(obj, id);
+        }
+
+        return id;
+    }
+
+    static #getDefaultSampler(withMipmaps)
+    {
+        if (withMipmaps === true)
+        {
+            if (Material.#kDefaultMipmapSampler === null)
+            {
+                Material.#kDefaultMipmapSampler = new Sampler();
+                Material.#kDefaultMipmapSampler.setFilter(WGL.context.LINEAR_MIPMAP_LINEAR, WGL.context.LINEAR);
+            }
+
+            return Material.#kDefaultMipmapSampler;
+        }
+
+        if (Material.#kDefaultSampler === null)
+            Material.#kDefaultSampler = new Sampler();
+
+        return Material.#kDefaultSampler;
     }
 }

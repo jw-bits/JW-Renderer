@@ -179,10 +179,8 @@ class ParticleSystem {
     render(viewProj) {
         if (this.#activeCount === 0) return;
 
-        this.#material.bindShader();
-        this.#material.setUniformValue("u_mvp", viewProj);
-        
-        this.#material.bindUniforms();
+        this.#material.bind();
+        this.#material.setUniform("u_mvp", viewProj);
         WGL.context.depthMask(false);
         WGL.context.bindVertexArray(this.#vao);
         WGL.context.drawArrays(WGL.context.POINTS, 0, this.#activeCount);

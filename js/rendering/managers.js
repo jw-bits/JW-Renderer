@@ -6,6 +6,7 @@
         // After WGL.init()
         gTextureManager = new TextureManager();
         gFontManager = new FontManager("'Segoe UI', Arial, sans-serif");
+        gMaterialManager = new MaterialManager();
 */
 
 /*
@@ -138,7 +139,8 @@ class FontManager
 }
 
 /*
-    TextureManager - Keeps one Texture per image url (and wrap/flip options).
+    TextureManager - Keeps one Texture per image url (and flip/mipmap options).
+    Filtering and wrapping are sampler state, set on the Material (see Sampler).
 
     The constructor creates the default texture: a magenta/white checkerboard,
     so a missing image is easy to spot. Any request for a texture that fails,
@@ -165,7 +167,7 @@ class TextureManager
     constructor()
     {
         this.#textures = new Map();
-        this.#defaultTexture = new Texture();
+        this.#defaultTexture = new Texture(true, false);
 
         if (this.#defaultTexture.loadPixels(2, 2, TextureManager.#kDefaultPixels) === false)
             console.error("TextureManager couldn't create its default texture (was WGL.init() called first?)");
@@ -174,7 +176,7 @@ class TextureManager
     getDefault() { return this.#defaultTexture; }
 
     // Loads an image. Always resolves to a loaded Texture: this image's, or the default texture on failure.
-    async load(url, useClamp = true, flipY = true)
+    async load(url, flipY = true, useMipmaps = true)
     {
         if (typeof url !== "string" || url.length === 0)
         {
@@ -182,12 +184,12 @@ class TextureManager
                 return this.#defaultTexture;
         }
 
-        const key = this.#key(url, useClamp, flipY);
+        const key = this.#key(url, flipY, useMipmaps);
         let entry = this.#textures.get(key);
 
         if (entry === undefined)
         {
-            const texture = new Texture(useClamp, flipY);
+            const texture = new Texture(flipY, useMipmaps);
             const promise = new Promise((resolve) => {
                 const started = texture.load(url, () => resolve(true), () => resolve(false));
 
@@ -212,19 +214,19 @@ class TextureManager
     }
 
     // The Texture for a url, or null if it isn't loaded or loading. It may still be loading; check isLoaded().
-    get(url, useClamp = true, flipY = true)
+    get(url, flipY = true, useMipmaps = true)
     {
-        return this.#textures.get(this.#key(url, useClamp, flipY))?.texture ?? null;
+        return this.#textures.get(this.#key(url, flipY, useMipmaps))?.texture ?? null;
     }
 
-    has(url, useClamp = true, flipY = true)
+    has(url, flipY = true, useMipmaps = true)
     {
-        return this.#textures.has(this.#key(url, useClamp, flipY));
+        return this.#textures.has(this.#key(url, flipY, useMipmaps));
     }
 
-    unload(url, useClamp = true, flipY = true)
+    unload(url, flipY = true, useMipmaps = true)
     {
-        const key = this.#key(url, useClamp, flipY);
+        const key = this.#key(url, flipY, useMipmaps);
         const entry = this.#textures.get(key);
 
         if (entry !== undefined)
@@ -245,8 +247,106 @@ class TextureManager
 
     // *** Internal Methods ***
 
-    #key(url, useClamp, flipY)
+    #key(url, flipY, useMipmaps)
     {
-        return `${url}|${useClamp ? "clamp" : "repeat"}|${flipY ? "flip" : "noflip"}`;
+        return `${url}|${flipY ? "flip" : "noflip"}|${useMipmaps ? "mips" : "nomips"}`;
+    }
+}
+
+/*
+    MaterialManager - Keeps one Material per unique shader + textures + samplers
+    (see Material.getKey()).
+
+    Requesting the same combination again returns the same Material. The
+    shaders, textures and samplers belong to the caller (or their managers);
+    unloading a Material here doesn't unload them.
+
+    A failed request logs a console.error and returns null: there's no
+    default material, since the manager doesn't know which shader to use.
+
+    Usage:
+        let materials = new MaterialManager();
+        const m = materials.load(shader, [texture], [sampler]);
+
+    Materials hold no uniform values (those belong to each model), so one
+    Material can be shared by any number of models.
+*/
+class MaterialManager
+{
+    #materials; // Key -> Material
+
+    constructor()
+    {
+        this.#materials = new Map();
+    }
+
+    // The Material for this shader, textures and samplers (samplers optional, per unit), or null on failure
+    load(shader, textures = [], samplers = null)
+    {
+        if (shader == null)
+        {
+            console.error("MaterialManager.load() needs a shader");
+                return null;
+        }
+
+        let material = new Material();
+
+        if (material.load(shader, textures, samplers) === false)
+        {
+            console.error("MaterialManager couldn't load a material (up to 4 textures and samplers are supported)");
+                return null;
+        }
+
+        return this.add(material);
+    }
+
+    // Stores a loaded Material. If one with the same key is already stored, that one is returned instead.
+    add(material)
+    {
+        const key = material?.getKey() ?? null;
+
+        if (key === null)
+        {
+            console.error("MaterialManager.add() needs a loaded Material");
+                return null;
+        }
+
+        const existing = this.#materials.get(key);
+
+        if (existing !== undefined)
+            return existing;
+
+        this.#materials.set(key, material);
+            return material;
+    }
+
+    // The Material for a key from Material.getKey(), or null
+    get(key)
+    {
+        return this.#materials.get(key) ?? null;
+    }
+
+    has(key)
+    {
+        return this.#materials.has(key);
+    }
+
+    unload(key)
+    {
+        const material = this.#materials.get(key);
+
+        if (material !== undefined)
+        {
+            material.unload(); // Leaves the shader, textures and samplers alone
+            this.#materials.delete(key);
+        }
+    }
+
+    unloadAll()
+    {
+        for (const material of this.#materials.values())
+            material.unload();
+
+        this.#materials.clear();
     }
 }

@@ -1,24 +1,34 @@
+/*
+    Texture - The pixels of a 2D texture (and their mipmaps).
+
+    How the texture is filtered and wrapped is sampler state, which lives in
+    the Material (see Sampler). The Texture only keeps safe internal settings
+    (LINEAR, CLAMP_TO_EDGE) for the rare case it's bound without a sampler.
+
+    Options, set when it's created:
+        _flipY       Flip rows on upload, so V runs up (matches the 2D models)
+        _makeMipmaps Build mipmaps on every upload, so a Sampler can use a *_MIPMAP_* filter
+*/
 class Texture
 {
     #texId;
     #width;
-    #height;    
+    #height;
     #url;
     #isLoaded;
 
     // Options
-    #useClamp;
     #flipY;
+    #hasMipmaps;
 
     // Checkerboard RGB
     static #pixels = new Uint8Array([255, 0, 255, 255, 255, 255, 255, 255,
                                     255, 255, 255, 255, 255, 0, 255, 255]);
 
-    constructor(_useClamp = true, _flipY = true)
+    constructor(_flipY = true, _makeMipmaps = true)
     {
-        
-        this.#useClamp = _useClamp;
         this.#flipY = _flipY;
+        this.#hasMipmaps = _makeMipmaps;
         this.#url = null;
         this.#isLoaded = false;
 
@@ -44,28 +54,7 @@ class Texture
         img.decoding = "async";
 
         img.onload = () => {
-            this.#width = img.naturalWidth;
-            this.#height = img.naturalHeight;
-
-            const colorFormat = WGL.context.RGBA;
-
-            WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texId);
-            WGL.context.pixelStorei(WGL.context.UNPACK_FLIP_Y_WEBGL, this.#flipY);
-            WGL.context.texImage2D(WGL.context.TEXTURE_2D, 0, colorFormat, colorFormat, WGL.context.UNSIGNED_BYTE, img);
-
-            if (MathUtil.isPowerOfTwo(this.#width) && MathUtil.isPowerOfTwo(this.#height))
-            {
-                WGL.context.generateMipmap(WGL.context.TEXTURE_2D);
-                WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MAG_FILTER, WGL.context.LINEAR);
-                WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MIN_FILTER, WGL.context.LINEAR_MIPMAP_LINEAR);
-            }
-            else
-            {
-                WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MAG_FILTER, WGL.context.LINEAR);
-                WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MIN_FILTER, WGL.context.LINEAR);
-            }
-
-            WGL.context.bindTexture(WGL.context.TEXTURE_2D, null);
+            this.#upload(img, img.naturalWidth, img.naturalHeight);
             this.#isLoaded = true;
 
             if (onLoadSuccessCB !== null)
@@ -96,17 +85,13 @@ class Texture
         if (this.#texId === 0)
             this.#initTexture();
 
-        const colorFormat = WGL.context.RGBA;
+        const gl = WGL.context;
 
-        WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texId);
-        WGL.context.pixelStorei(WGL.context.UNPACK_FLIP_Y_WEBGL, this.#flipY);
-        WGL.context.texImage2D(WGL.context.TEXTURE_2D, 0, colorFormat, width, height, 0, colorFormat, WGL.context.UNSIGNED_BYTE, rgbaPixels);
-        WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MAG_FILTER, WGL.context.NEAREST);
-        WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_MIN_FILTER, WGL.context.NEAREST);
-        WGL.context.bindTexture(WGL.context.TEXTURE_2D, null);
+        gl.bindTexture(gl.TEXTURE_2D, this.#texId);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this.#flipY);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgbaPixels);
+        this.#finishUpload(width, height);
 
-        this.#width = width;
-        this.#height = height;
         this.#isLoaded = true;
             return true;
     }
@@ -123,7 +108,7 @@ class Texture
         if (this.#texId === 0)
             this.#initTexture();
 
-        this.#uploadCanvas(canvas);
+        this.#upload(canvas, canvas.width, canvas.height);
         this.#isLoaded = true;
             return true;
     }
@@ -134,11 +119,12 @@ class Texture
         if (this.#isLoaded === false || canvas == null)
             return false;
 
-        this.#uploadCanvas(canvas);
+        this.#upload(canvas, canvas.width, canvas.height);
             return true;
     }
 
     isLoaded() { return this.#isLoaded; }
+    hasMipmaps() { return this.#hasMipmaps; }
     getWidth() { return this.#width; }
     getHeight() { return this.#height; }
     getURL() { return this.#url; }
@@ -161,37 +147,52 @@ class Texture
 
     // *** Internal Methods ***
 
-    // No mipmaps: canvas textures are usually redrawn at the size they're shown
-    #uploadCanvas(canvas)
+    // source is an image, canvas, or anything else texImage2D accepts
+    #upload(source, width, height)
     {
         const gl = WGL.context;
 
         gl.bindTexture(gl.TEXTURE_2D, this.#texId);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this.#flipY);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+        this.#finishUpload(width, height);
+    }
+
+    // Expects the texture to be bound; unbinds it
+    #finishUpload(width, height)
+    {
+        const gl = WGL.context;
+
+        // WebGL2 can build mipmaps for any size, not just powers of two
+        if (this.#hasMipmaps === true)
+            gl.generateMipmap(gl.TEXTURE_2D);
+
         gl.bindTexture(gl.TEXTURE_2D, null);
 
-        this.#width = canvas.width;
-        this.#height = canvas.height;
+        this.#width = width;
+        this.#height = height;
     }
 
     #initTexture()
     {
-        const border = 0;
-        const colorFormat = WGL.context.RGBA;
-        const uvWrap = (this.#useClamp === true) ? WGL.context.CLAMP_TO_EDGE : WGL.context.REPEAT;
-        
-        this.#texId = WGL.context.createTexture();
+        const gl = WGL.context;
+
+        this.#texId = gl.createTexture();
         this.#width = 2;
         this.#height = 2;
 
-        WGL.context.bindTexture(WGL.context.TEXTURE_2D, this.#texId);
-        WGL.context.texImage2D(WGL.context.TEXTURE_2D, 0, colorFormat, this.#width, this.#height, border, colorFormat, WGL.context.UNSIGNED_BYTE, Texture.#pixels);
-        WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_WRAP_S, uvWrap);
-        WGL.context.texParameteri(WGL.context.TEXTURE_2D, WGL.context.TEXTURE_WRAP_T, uvWrap);
+        gl.bindTexture(gl.TEXTURE_2D, this.#texId);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.#width, this.#height, 0, gl.RGBA, gl.UNSIGNED_BYTE, Texture.#pixels);
 
-        WGL.context.bindTexture(WGL.context.TEXTURE_2D, null);
+        if (this.#hasMipmaps === true)
+            gl.generateMipmap(gl.TEXTURE_2D); // So the placeholder works with a mipmap sampler too
+
+        // Only used when no sampler is bound; a Material always binds one
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+        gl.bindTexture(gl.TEXTURE_2D, null);
     }
 }
