@@ -59,13 +59,6 @@ class Sampler
     getMagFilter() { return this.#magFilter; }
     isLoaded() { return (this.#id !== null); }
 
-    // True if the min filter reads mipmaps (the texture must have them, or it samples as black)
-    usesMipmaps()
-    {
-        const gl = WGLV.context;
-        return (this.#minFilter !== gl.NEAREST && this.#minFilter !== gl.LINEAR);
-    }
-
     // Binds to a texture unit (0 - 3); overrides the bound texture's own filtering and wrapping
     bind(unit)
     {

@@ -35,7 +35,10 @@ class Material
     #textures;
     #samplers; // Per texture unit; null uses a default
 
-    #uniforms; // Name -> RenderMapping (location and component count) for the shader's uniforms
+    // Looked up once in load(), from the uniforms the shader actually uses
+    #uniforms;     // Name -> RenderMapping (location and component count)
+    #textureUnits; // The sampler uniforms with a texture to bind, for bind()
+    #textureKey;   // Cached getTextureKey(); null until asked for, or after a change
 
     constructor()
     {
@@ -43,6 +46,8 @@ class Material
         this.#textures = [];
         this.#samplers = [null, null, null, null];
         this.#uniforms = new Map();
+        this.#textureUnits = [];
+        this.#textureKey = null;
     }
 
     // samplerArray is optional: one Sampler (or null for the default) per texture
@@ -105,6 +110,8 @@ class Material
 
         this.#samplers = [null, null, null, null]; // Samplers belong to the caller
         this.#uniforms = new Map();
+        this.#textureUnits = [];
+        this.#textureKey = null;
     }
 
     // The sampler for a texture unit (0 - 3); null goes back to the default
@@ -117,6 +124,7 @@ class Material
         }
 
         this.#samplers[unit] = sampler ?? null;
+        this.#textureKey = null;
             return true;
     }
 
@@ -136,10 +144,28 @@ class Material
         if (this.#shader === null)
             return null;
 
-        const textures = this.#textures.map((t) => Material.#idOf(t));
-        const samplers = this.#textures.map((t, i) => (this.#samplers[i] !== null) ? Material.#idOf(this.#samplers[i]) : "-");
+        return `s${Material.#idOf(this.#shader)}|${this.getTextureKey()}`;
+    }
 
-        return `s${Material.#idOf(this.#shader)}|t${textures.join(",")}|p${samplers.join(",")}`;
+    /*
+        Like getKey() without the shader: just the textures and samplers, e.g.
+        "t7,9|p-,12". Materials with different shaders but the same textures
+        and samplers share it, which is what MaterialBatcher's instanced
+        drawing needs (it uses its own shader). null if not loaded.
+    */
+    getTextureKey()
+    {
+        if (this.#shader === null)
+            return null;
+
+        if (this.#textureKey === null)
+        {
+            const textures = this.#textures.map((t) => Material.#idOf(t));
+            const samplers = this.#textures.map((t, i) => (this.#samplers[i] !== null) ? Material.#idOf(this.#samplers[i]) : "-");
+            this.#textureKey = `t${textures.join(",")}|p${samplers.join(",")}`;
+        }
+
+        return this.#textureKey;
     }
 
     // Binds the shader, and each texture with its sampler. Call before setUniform() and drawing.
@@ -147,32 +173,30 @@ class Material
     {
         this.#shader.bind();
 
-        for (const u of this.#uniforms.values())
+        for (const u of this.#textureUnits)
         {
-            if (u.componentCount === 1 && u.value < this.#textures.length) // Texture units
-            {
-                this.#bindTexture(u.value);
-                WGLV.context.uniform1i(u.location, u.value);
-            }
+            this.#bindTexture(u.value);
+            WGLV.context.uniform1i(u.location, u.value);
         }
     }
 
     /*
         Uploads a uniform value right away, so the Material must be bound.
-        value is a Vector2, Vector3, Vector4 or Matrix4 to match the uniform.
+        value is a number, Vector2, Vector3, Vector4 or Matrix4 to match the uniform.
         Returns false if the shader doesn't use that uniform (texture units are set by bind()).
     */
     setUniform(name, value)
     {
         const u = this.#uniforms.get(name);
 
-        if (u === undefined)
-            return false;
+        if (u === undefined || u.value !== null)
+            return false; // Not used, or a texture unit
 
         const gl = WGLV.context;
 
         switch (u.componentCount)
         {
+            case 1:  gl.uniform1f(u.location, value); break;
             case 2:  gl.uniform2f(u.location, value.x, value.y); break;
             case 3:  gl.uniform3f(u.location, value.x, value.y, value.z); break;
             case 4:  gl.uniform4f(u.location, value.x, value.y, value.z, value.w); break;
@@ -183,18 +207,6 @@ class Material
         return true;
     }
 
-    hasUniform(name) { return this.#uniforms.has(name); }
-
-    getAttribLocation(name)
-    {
-        return this.#shader.getAttrib(name);
-    }
-
-    getUniformLocation(name)
-    {
-        return this.#shader.getUniform(name);
-    }
-
     isLoaded() { return (this.#shader !== null); }
 
     // The texture in a unit (0 - 3), or null if there isn't one
@@ -202,40 +214,38 @@ class Material
 
     // *** Internal Methods ***
 
+    /*
+        Caches a RenderMapping for each uniform the shader uses. Every one must be
+        listed in RenderUniforms; one that isn't is reported and skipped (setUniform()
+        can't set it).
+    */
     #setupUniforms()
     {
-        for (const [uName, componentCount] of RenderUniforms.allUniforms)
+        for (const uName of this.#shader.getActiveUniformNames())
         {
-            let idx = this.#shader.getUniform(uName);
+            const componentCount = RenderUniforms.componentCount(uName);
 
-            if (idx !== null)
+            if (componentCount === 0)
             {
-                let m = new RenderMapping();
-                m.name = uName;
-                m.location = idx;
-                m.componentCount = componentCount;
-
-                // Only texture units keep a value here: the unit number. Other values come from setUniform().
-                if (m.componentCount === 1)
-                {
-                    if (uName === "u_tex0")
-                        m.value = 0;
-                    else if (uName === "u_tex1")
-                        m.value = 1;
-                    else if (uName === "u_tex2")
-                        m.value = 2;
-                    else if (uName === "u_tex3")
-                        m.value = 3;
-                    else
-                        m.value = 0;
-                }
-                else if (m.componentCount !== 2 && m.componentCount !== 3 && m.componentCount !== 4 && m.componentCount !== 16)
-                    return false;
-
-                this.#uniforms.set(uName, m);
+                console.error(`Material: the shader uses "${uName}", which isn't in RenderUniforms; add it there or use u_vec0 - u_vec3`);
+                continue;
             }
+
+            let m = new RenderMapping();
+            m.name = uName;
+            m.location = this.#shader.getUniform(uName);
+            m.componentCount = componentCount;
+
+            // Only texture units keep a value here: the unit number. Other values come from setUniform().
+            const unit = RenderUniforms.textureUnit(uName);
+            m.value = (unit !== -1) ? unit : null;
+
+            this.#uniforms.set(uName, m);
+
+            if (unit !== -1 && unit < this.#textures.length)
+                this.#textureUnits.push(m);
         }
-    
+
         return true;
     }
 

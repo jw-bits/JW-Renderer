@@ -40,6 +40,10 @@ const SPARK_SIZE = 0.14;                  // Squares
 const SPARK_GRAVITY = 6.0;                // Squares per second squared, downward
 const SPARK_END_SCALE = 0.4;              // Shrink to 40% over each life
 
+// Sound effects, by AudioManager name
+const SFX_CLICK = "click";        // The human makes a move that doesn't capture
+const SFX_JUMP_LAND = "jumpland"; // Any piece lands after capturing
+
 const FONT_FAMILY = "'Segoe UI', Arial, sans-serif";
 const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
 
@@ -110,7 +114,9 @@ let gIsReady = false;
 
 let gScreen = GameScreen.kTitle;
 let gScreenBeforeMenu = GameScreen.kTitle;
-let gMouse = new Vector2(-1, -1);
+
+// Receives InputManager's events (see onInputEvent())
+const gInputListener = { onInputEvent: (e) => onInputEvent(e) };
 
 // Layout, in design units (WGLV's fixed design resolution), so it's built once
 let gLayout = { w: 0, h: 0, sq: 0, boardX: 0, boardY: 0 };
@@ -157,10 +163,6 @@ function appSetup()
     WGLV.context.blendFuncSeparate(WGLV.context.SRC_ALPHA, WGLV.context.ONE_MINUS_SRC_ALPHA, WGLV.context.ONE, WGLV.context.ONE_MINUS_SRC_ALPHA);
 
     loadAssets().then(appOnAssetsLoaded);
-
-    WGLV.context.canvas.addEventListener("mousedown", onMouseDown);
-    WGLV.context.canvas.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("keydown", onKeyDown);
 }
 
 // Failed loads come back as the managers' default texture / font, so this always finishes
@@ -180,10 +182,15 @@ async function loadAssets()
         particle: "./textures/particleA.png"
     };
 
+    // Sound can't play until the user's first tap or key; a failed load only logs, and play() then does nothing
+    AudioManager.init();
+
     const names = Object.keys(files);
     const [textures, titleFont] = await Promise.all([
         Promise.all(names.map((name) => gTextureManager.load(files[name]))),
-        gFontManager.load(TITLE_FONT_URL)
+        gFontManager.load(TITLE_FONT_URL),
+        AudioManager.loadSFX(SFX_CLICK, "./audio/click.wav"),
+        AudioManager.loadSFX(SFX_JUMP_LAND, "./audio/jumpland.wav")
     ]);
 
     names.forEach((name, i) => { gTextures[name] = textures[i]; });
@@ -212,6 +219,10 @@ function appOnAssetsLoaded()
     gIsReady = true;
     resetGame();
     appLayout();
+
+    // Started once the game can react, so nothing queues up while loading
+    InputManager.init();
+    InputManager.addListener(gInputListener);
     appMain();
 }
 
@@ -229,6 +240,8 @@ function appMain()
 
 function appUpdate(dt)
 {
+    InputManager.update(); // Taps and keys reach onInputEvent() here, before the game updates
+
     if (gScreen === GameScreen.kPlaying)
     {
         gGameTime += dt;
@@ -396,7 +409,8 @@ class Button
     // The background goes on backLayer, the label on textLayer (in front of it)
     render(isActive, backLayer = Layers.kUIBack, textLayer = Layers.kUIText)
     {
-        const hover = (isActive === true) && this.contains(gMouse.x, gMouse.y);
+        const p = InputManager.getPosition();
+        const hover = (isActive === true) && InputManager.hasPosition() && this.contains(p.x, p.y);
         this.#bg.setColor(hover ? Colors.kButtonHover : Colors.kButton);
         gBatcher.submit(this.#bg, backLayer);
         gBatcher.submit(this.#label, textLayer);
@@ -608,12 +622,6 @@ function updateGameOverText()
 
 // *** Input ***
 
-// Design units, +Y up to match Rect2D
-function toCanvasCoords(e)
-{
-    return WGLV.clientToView(e.clientX, e.clientY);
-}
-
 function cellAt(x, y)
 {
     const c = Math.floor((x - gLayout.boardX) / gLayout.sq);
@@ -625,72 +633,92 @@ function cellAt(x, y)
     return { r, c };
 }
 
-function onMouseMove(e)
+// InputManager listener; returns true when the event was used
+function onInputEvent(e)
 {
-    const p = toCanvasCoords(e);
-    gMouse.set(p.x, p.y);
+    if (gIsReady === false || gScreen === GameScreen.kQuit || e.hasBeenConsumed === true)
+        return false;
+
+    switch (e.type)
+    {
+        case InputEventType.kTap: return onTap(e.position.x, e.position.y);
+        case InputEventType.kKeyDown: return (e.isRepeat === false) && onKeyDown(e.code);
+        default: return false;
+    }
 }
 
-function onMouseDown(e)
+// (x, y) in design units, +Y up to match Rect2D
+function onTap(x, y)
 {
-    if (gIsReady === false || e.button !== 0)
-        return;
-
-    const p = toCanvasCoords(e);
-    gMouse.set(p.x, p.y);
-
     switch (gScreen)
     {
         case GameScreen.kTitle:
         {
-            if (gButtons.start.contains(p.x, p.y))
-                startGame();
+            if (gButtons.start.contains(x, y) === false)
+                return false;
+
+            startGame();
         }
         break;
 
         case GameScreen.kPlaying:
         {
-            if (gButtons.menu.contains(p.x, p.y))
+            if (gButtons.menu.contains(x, y))
                 openMenu();
             else
             {
-                const cell = cellAt(p.x, p.y);
+                const cell = cellAt(x, y);
 
-                if (cell !== null)
-                    onBoardClick(cell.r, cell.c);
+                if (cell === null)
+                    return false;
+
+                onBoardClick(cell.r, cell.c);
             }
         }
         break;
 
         case GameScreen.kMenu:
         {
-            if (gButtons.quit.contains(p.x, p.y))
-                quitApp();
+            if (gButtons.quit.contains(x, y) === false)
+                return false;
+
+            quitApp();
         }
         break;
 
         case GameScreen.kGameOver: gScreen = GameScreen.kTitle; break;
     }
+
+    return true;
 }
 
-function onKeyDown(e)
+function onKeyDown(code)
 {
-    if (gIsReady === false || gScreen === GameScreen.kQuit)
-        return;
+    switch (code)
+    {
+        case KeyCode.kEscape:
+        {
+            if (gScreen === GameScreen.kMenu)
+                closeMenu();
+            else
+                openMenu();
+        }
+        return true;
 
-    if (e.key === "Escape")
-    {
-        if (gScreen === GameScreen.kMenu)
-            closeMenu();
-        else
-            openMenu();
-    }
-    else if (e.key === "Enter" || e.key === " ")
-    {
-        if (gScreen === GameScreen.kTitle)
-            startGame();
-        else if (gScreen === GameScreen.kGameOver)
-            gScreen = GameScreen.kTitle;
+        case KeyCode.kEnter:
+        case KeyCode.kNumpadEnter:
+        case KeyCode.kSpace:
+        {
+            if (gScreen === GameScreen.kTitle)
+                startGame();
+            else if (gScreen === GameScreen.kGameOver)
+                gScreen = GameScreen.kTitle;
+            else
+                return false;
+        }
+        return true;
+
+        default: return false;
     }
 }
 
@@ -708,6 +736,7 @@ function closeMenu()
 function quitApp()
 {
     gScreen = GameScreen.kQuit;
+    AudioManager.stopAll();
 
     // Browsers only let a script close a window that a script opened.
     // If the close is blocked, the "Thanks for playing" screen stays up.
@@ -794,8 +823,11 @@ function performHumanStep(fr, fc, tr, tc)
     const result = applyStep(gBoard, fr, fc, tr, tc);
     gLastMove.push({ r: tr, c: tc });
 
+    // A capture plays only its landing sound for now; once moves animate, the click can play at the start too
     if (result.captured)
-        emitJumpSparks(tr, tc);
+        landJump(tr, tc);
+    else
+        playSFX(SFX_CLICK);
 
     if (result.captured && !result.promoted && getJumps(gBoard, tr, tc).length > 0)
     {
@@ -829,6 +861,20 @@ function endTurn()
     updateStatusText();
 }
 
+// A piece landed on (r, c) after capturing
+function landJump(r, c)
+{
+    emitJumpSparks(r, c);
+    playSFX(SFX_JUMP_LAND);
+}
+
+// Plays a loaded sound if it can; sound is optional, so a missing or not-yet-allowed one is skipped quietly
+function playSFX(name)
+{
+    if (AudioManager.isLoaded(name))
+        AudioManager.play(name);
+}
+
 function updateBot(dt)
 {
     if (gTurn !== BOT)
@@ -853,7 +899,7 @@ function updateBot(dt)
     const from = gBotPlan[0];
     const to = gBotPlan[1];
     if (applyStep(gBoard, from.r, from.c, to.r, to.c).captured)
-        emitJumpSparks(to.r, to.c);
+        landJump(to.r, to.c);
 
     gLastMove.push(to);
     gBotPlan.shift();

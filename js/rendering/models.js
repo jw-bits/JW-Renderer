@@ -10,7 +10,8 @@
                              and samplers, so many models can share one (see MaterialManager).
 
     Uniform values live here, not in the Material: render() binds the
-    material, then uploads this model's u_res, u_color, u_vec0 and u_scale.
+    material, then uploads this model's u_res, u_color, u_vec0, u_scale, and
+    its UV rect as u_uvOffset and u_uvTile (for shaders that use them).
 
     A subclass's load() builds the mesh, calls its bindAttribs(), then hands
     both to the base with the "_" setters below (for subclasses only).
@@ -22,15 +23,28 @@
     Raster scale: a model that draws into a texture at screen resolution can
     call listenForRasterScale(true) and override onRasterScaleChanged(newScale)
     (see WGLV). unload() stops listening.
+
+    UV rect: the part of the texture a model draws (getUVRect()); the whole
+    texture unless a subclass says otherwise (Sprite draws one atlas frame,
+    Rect2D can tile and offset it).
+
+    Instancing: canInstance() says whether MaterialBatcher may draw the model
+    with its instanced shader: a plain quad filling width x height, drawing a
+    UV rect of texture unit 0, tinted by its color. It's false unless a
+    subclass overrides it; Rect2D (on its default shader), Text2D and Sprite do.
 */
 class Model2D
 {
+    static #kFullUVRect = new UVRect(); // getUVRect() for models that draw the whole texture
+
     // Scratch values for uploading uniforms in render()
     static #kRes = new Vector2();
     static #kRect = new Vector4();
     static #kScaleRot = new Vector3();
+    static #kUVOffset = new Vector2();
+    static #kUVTile = new Vector2();
 
-    #anchor;      // Where setPos() put it
+    #anchor;     // Where setPos() put it
     #align;       // Which part of the model sits on the anchor
     #position;    // The bottom-left corner, from the anchor, alignment and size
     #material;
@@ -97,8 +111,11 @@ class Model2D
     getMaterial() { return this.#material; }
     isLoaded() { return this.#isLoaded; }
 
-    // True if the mesh is a plain quad that fills width x height (MaterialBatcher can instance it)
-    isQuad() { return false; }
+    // True if MaterialBatcher may draw this with its instanced shader (see the top of this file). Subclasses opt in.
+    canInstance() { return false; }
+
+    // The part of the texture drawn, as a UVRect. Shared and read-only for models that draw all of it; don't change it.
+    getUVRect() { return Model2D.#kFullUVRect; }
 
     // Starts or stops calling onRasterScaleChanged() when WGLV's view scale changes
     listenForRasterScale(listen)
@@ -136,22 +153,33 @@ class Model2D
         the material: it must already be bound. Used by MaterialBatcher, which
         binds a material once for many models and replays the values captured
         when each was submitted.
+
+        uvRect is the captured getUVRect(), or null for the model's current one.
+        It's uploaded as u_uvOffset (x, y) and u_uvTile (width, height); shaders
+        that don't use them ignore it. Uniforms keep their value per shader, so
+        this sets them every draw: models sharing Rect2D's shader (RoundedRect2D,
+        NinePatch2D) get the whole texture back after a tiled Rect2D.
     */
-    draw(x, y, scaleX, scaleY, rotZ, color)
+    draw(x, y, scaleX, scaleY, rotZ, color, uvRect = null)
     {
         if (this.#isLoaded === false)
             return;
 
         const m = this.#material;
+        const r = uvRect ?? this.getUVRect();
 
         Model2D.#kRes.set(WGLV.getWidth(), WGLV.getHeight());
         Model2D.#kRect.set(x, y, this.#width / 2.0, this.#height / 2.0);
         Model2D.#kScaleRot.set(scaleX, scaleY, rotZ);
+        Model2D.#kUVOffset.set(r.getX(), r.getY());
+        Model2D.#kUVTile.set(r.getWidth(), r.getHeight());
 
         m.setUniform("u_res", Model2D.#kRes);
         m.setUniform("u_color", color);
         m.setUniform("u_vec0", Model2D.#kRect);
         m.setUniform("u_scale", Model2D.#kScaleRot);
+        m.setUniform(RenderUniforms.kUVOffset, Model2D.#kUVOffset);
+        m.setUniform(RenderUniforms.kUVTile, Model2D.#kUVTile);
 
         this.#mesh.render();
     }
@@ -194,30 +222,94 @@ class Model2D
 
     _setLoaded(isLoaded) { this.#isLoaded = isLoaded; }
 
+    /*
+        For a subclass's load(): the Material to draw with. A loaded Texture gets a
+        new Material on shader; a loaded Material is used as is. Returns null (with
+        a console.error naming className) otherwise.
+    */
+    _resolveMaterial(source, shader, className)
+    {
+        if (source instanceof Texture)
+        {
+            if (source.isLoaded() === false)
+            {
+                console.error(`${className}.load(): the Texture isn't loaded`);
+                    return null;
+            }
+
+            if (shader === null)
+            {
+                console.error(`${className}.load(): its shader couldn't be built`);
+                    return null;
+            }
+
+            let material = new Material();
+
+            if (material.load(shader, [source]) === false)
+            {
+                console.error(`${className}.load() couldn't create a Material`);
+                    return null;
+            }
+
+            return material;
+        }
+
+        if (source instanceof Material && source.isLoaded() === true)
+            return source;
+
+        console.error(`${className}.load() needs a loaded Texture or Material`);
+            return null;
+    }
+
     // *** Internal Methods ***
 
     #updatePosition()
     {
-        // Alignment values run left/center/right in groups of bottom/middle/top
-        const col = Math.floor(this.#align / 3);
-        const row = this.#align % 3;
-
-        let x = this.#anchor.x;
-        let y = this.#anchor.y;
-
-        if (col === 1) x -= this.#width / 2.0;
-        else if (col === 2) x -= this.#width;
-
-        if (row === 1) y -= this.#height / 2.0;
-        else if (row === 2) y -= this.#height;
-
-        this.#position.set(x, y);
+        this.#position.set(this.#anchor.x + Alignment.offsetX(this.#align, this.#width),
+                           this.#anchor.y + Alignment.offsetY(this.#align, this.#height));
     }
 }
 
+/*
+    Rect2D - A textured rectangle.
+
+    UV tiling and offset: setUVTile(2, 3) repeats the texture 2 times across and
+    3 times up; setUVOffset(x, y) shifts it, in texture widths / heights (animate
+    it to scroll). The texture's Sampler must wrap with REPEAT (or
+    MIRRORED_REPEAT) for anything outside 0..1; the default sampler clamps. Both
+    are part of getUVRect(), so tiled Rect2Ds still batch (see MaterialBatcher).
+*/
 class Rect2D extends Model2D
 {
     static #kShader = null; // Default shader, used when loading from a Texture
+
+    #uvRect; // (x, y) is the UV offset, (width, height) the UV tile
+
+    constructor()
+    {
+        super();
+        this.#uvRect = new UVRect();
+    }
+
+    // How many times the texture repeats across (x) and up (y); 1 is once
+    setUVTile(x, y = x)
+    {
+        this.#uvRect.setUnclamped(this.#uvRect.getX(), this.#uvRect.getY(), x, y);
+    }
+
+    // Shifts the texture, in texture widths (x) and heights (y)
+    setUVOffset(x, y)
+    {
+        this.#uvRect.setUnclamped(x, y, this.#uvRect.getWidth(), this.#uvRect.getHeight());
+    }
+
+    getUVTileX() { return this.#uvRect.getWidth(); }
+    getUVTileY() { return this.#uvRect.getHeight(); }
+    getUVOffsetX() { return this.#uvRect.getX(); }
+    getUVOffsetY() { return this.#uvRect.getY(); }
+
+    // The offset and tile, for draw() and MaterialBatcher
+    getUVRect() { return this.#uvRect; }
 
     // _source is a Texture or a loaded Material. _width / _height default to its texture's size.
     load(_source, _width, _height)
@@ -225,27 +317,10 @@ class Rect2D extends Model2D
         if (this.isLoaded() === true)
             return false; // Unload first
 
-        let material = null;
+        const material = this._resolveMaterial(_source, Rect2D.getDefaultShader(), "Rect2D");
 
-        if (_source instanceof Texture)
-        {
-            const shader = Rect2D.getDefaultShader();
-
-            if (_source.isLoaded() === false || shader === null)
-                return false;
-
-            material = new Material();
-
-            if (material.load(shader, [_source]) === false)
-                return false;
-        }
-        else if (_source instanceof Material && _source.isLoaded() === true)
-            material = _source;
-        else
-        {
-            console.error("Rect2D.load() needs a loaded Texture or Material");
-                return false;
-        }
+        if (material === null)
+            return false;
 
         const tex = material.getTexture(0);
         const w = _width ?? tex?.getWidth();
@@ -270,7 +345,11 @@ class Rect2D extends Model2D
             return true;
     }
 
-    isQuad() { return true; }
+    // A Material on another shader may do more than the instanced shader can
+    canInstance()
+    {
+        return (this.isLoaded() === true && this.getMaterial().getShader() === Rect2D.getDefaultShader());
+    }
 
     /*
         The shader Rect2D uses when loading from a Texture (null if it can't be built).
@@ -293,11 +372,9 @@ class Rect2D extends Model2D
     }
 }
 
-// A Rect2D with the corners rounded with geometry
+// A Rect2D with the corners rounded with geometry; loading from a Texture uses Rect2D's default shader
 class RoundedRect2D extends Model2D
 {
-    static #kShader = null; // Default shader, used when loading from a Texture
-
     #radius;
 
     constructor()
@@ -316,27 +393,10 @@ class RoundedRect2D extends Model2D
         if (this.isLoaded() === true)
             return false; // Unload first
 
-        let material = null;
+        const material = this._resolveMaterial(_source, Rect2D.getDefaultShader(), "RoundedRect2D");
 
-        if (_source instanceof Texture)
-        {
-            const shader = RoundedRect2D.#getDefaultShader();
-
-            if (_source.isLoaded() === false || shader === null)
-                return false;
-
-            material = new Material();
-
-            if (material.load(shader, [_source]) === false)
-                return false;
-        }
-        else if (_source instanceof Material && _source.isLoaded() === true)
-            material = _source;
-        else
-        {
-            console.error("RoundedRect2D.load() needs a loaded Texture or Material");
-                return false;
-        }
+        if (material === null)
+            return false;
 
         const tex = material.getTexture(0);
         const w = _width ?? tex?.getWidth();
@@ -367,23 +427,6 @@ class RoundedRect2D extends Model2D
     }
 
     getRadius() { return this.#radius; }
-
-    // *** Internal methods ***
-
-    static #getDefaultShader()
-    {
-        if (RoundedRect2D.#kShader === null)
-        {
-            let shader = new Shader();
-
-            if (shader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
-                return null;
-
-            RoundedRect2D.#kShader = shader;
-        }
-
-        return RoundedRect2D.#kShader;
-    }
 }
 
 /*
@@ -399,8 +442,6 @@ class RoundedRect2D extends Model2D
 */
 class NinePatch2D extends Model2D
 {
-    static #kShader = null; // Default shader, used when loading from a Texture
-
     #centerUV;
 
     constructor()
@@ -420,27 +461,10 @@ class NinePatch2D extends Model2D
         if (this.isLoaded() === true)
             return false; // Unload first
 
-        let material = null;
+        const material = this._resolveMaterial(_source, Rect2D.getDefaultShader(), "NinePatch2D");
 
-        if (_source instanceof Texture)
-        {
-            const shader = NinePatch2D.#getDefaultShader();
-
-            if (_source.isLoaded() === false || shader === null)
-                return false;
-
-            material = new Material();
-
-            if (material.load(shader, [_source]) === false)
-                return false;
-        }
-        else if (_source instanceof Material && _source.isLoaded() === true)
-            material = _source;
-        else
-        {
-            console.error("NinePatch2D.load() needs a loaded Texture or Material");
-                return false;
-        }
+        if (material === null)
+            return false;
 
         const tex = material.getTexture(0);
 
@@ -474,21 +498,6 @@ class NinePatch2D extends Model2D
     getCenterUV() { return this.#centerUV; }
 
     // *** Internal methods ***
-
-    static #getDefaultShader()
-    {
-        if (NinePatch2D.#kShader === null)
-        {
-            let shader = new Shader();
-
-            if (shader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
-                return null;
-
-            NinePatch2D.#kShader = shader;
-        }
-
-        return NinePatch2D.#kShader;
-    }
 
     #buildMesh(width, height, texWidth, texHeight)
     {
@@ -609,7 +618,8 @@ class Text2D extends Model2D
     getFontSize() { return this.#fontSize; }
     getFontWeight() { return this.#fontWeight; }
 
-    isQuad() { return true; }
+    // Always drawn with its own Material on Rect2D's default shader
+    canInstance() { return this.isLoaded(); }
 
     // The view scale changed: redraw at the new scale so the text stays sharp
     onRasterScaleChanged(newScale)
@@ -738,11 +748,12 @@ class Particles2D
     static #kFloatsPerParticle = 11; // Motion (4), start time + life + size (3), color (4)
     static #kRebaseTime = 600.0;     // Seconds; the clock restarts after this once nothing's alive
 
+    // Scratch values for uploading uniforms in render()
+    static #kRes = new Vector2();
+    static #kGravityScaleTime = new Vector4(); // u_vec0: (gravityX, gravityY, endScale, time)
+
     #material;
-    #vao;
-    #quadBuffer;
-    #indexBuffer;
-    #instBuffer;
+    #mesh;        // InstancedQuadMesh
     #data;        // CPU copy of the instance buffer
 
     #capacity;
@@ -756,20 +767,12 @@ class Particles2D
     #gravity;
     #endScale;
 
-    #resLocation;
-    #timeLocation;
-    #gravityLocation;
-    #endScaleLocation;
-
     #isLoaded;
 
     constructor()
     {
         this.#material = null;
-        this.#vao = null;
-        this.#quadBuffer = null;
-        this.#indexBuffer = null;
-        this.#instBuffer = null;
+        this.#mesh = new InstancedQuadMesh();
         this.#data = null;
 
         this.#capacity = 0;
@@ -782,11 +785,6 @@ class Particles2D
 
         this.#gravity = new Vector2();
         this.#endScale = 1.0;
-
-        this.#resLocation = null;
-        this.#timeLocation = null;
-        this.#gravityLocation = null;
-        this.#endScaleLocation = null;
 
         this.#isLoaded = false;
     }
@@ -825,55 +823,22 @@ class Particles2D
                 return false;
         }
 
-        const gl = WGLV.context;
         const stride = Particles2D.#kFloatsPerParticle;
 
-        this.#material = material;
-        this.#capacity = maxParticles;
-        this.#data = new Float32Array(maxParticles * stride); // All zero: life 0, so every slot starts dead
-
-        this.#resLocation = shader.getUniform("u_res");
-        this.#timeLocation = shader.getUniform("u_time");
-        this.#gravityLocation = shader.getUniform("u_gravity");
-        this.#endScaleLocation = shader.getUniform("u_endScale");
-
-        this.#quadBuffer = gl.createBuffer();
-        this.#indexBuffer = gl.createBuffer();
-        this.#instBuffer = gl.createBuffer();
-        this.#vao = gl.createVertexArray();
-
-        gl.bindVertexArray(this.#vao);
-
-        // Unit quad centered on the particle, shared by every instance
-        const posLocation = RenderAttributes.getLocation(RenderAttributes.kPosition);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#quadBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5, -0.5,  0.5, -0.5,  0.5, 0.5,  -0.5, 0.5]), gl.STATIC_DRAW);
-        gl.vertexAttribPointer(posLocation, 2, gl.FLOAT, false, 0, 0);
-        gl.enableVertexAttribArray(posLocation);
-
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.#indexBuffer); // Part of the VAO's state
-        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array([0, 1, 2,  2, 3, 0]), gl.STATIC_DRAW);
-
-        // Per-particle values, interleaved; allocated once, then only changed slots are uploaded
-        const bytes = 4;
-        const strideBytes = stride * bytes;
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this.#data, gl.DYNAMIC_DRAW);
-
+        // Unit quad centered on the particle, shared by every instance, plus the interleaved per-particle values
         const attribs = [
             [Particles2DShaderSource.kMotionLocation, 4, 0],
             [Particles2DShaderSource.kLifeLocation, 3, 4],
             [Particles2DShaderSource.kColorLocation, 4, 7]
         ];
 
-        for (const [location, size, offset] of attribs)
-        {
-            gl.vertexAttribPointer(location, size, gl.FLOAT, false, strideBytes, offset * bytes);
-            gl.enableVertexAttribArray(location);
-            gl.vertexAttribDivisor(location, 1);
-        }
+        if (this.#mesh.load(new Float32Array([-0.5, -0.5,  0.5, -0.5,  0.5, 0.5,  -0.5, 0.5]), stride, attribs) === false)
+            return false;
 
-        gl.bindVertexArray(null);
+        this.#material = material;
+        this.#capacity = maxParticles;
+        this.#data = new Float32Array(maxParticles * stride); // All zero: life 0, so every slot starts dead
+        this.#mesh.setInstanceData(this.#data);               // Allocated once; then only changed slots are uploaded
 
         this.#next = 0;
         this.#dirtyMin = Infinity;
@@ -963,36 +928,27 @@ class Particles2D
         if (this.hasLiveParticles() === false)
             return;
 
-        const gl = WGLV.context;
-
         this.#upload();
 
-        this.#material.bind(); // Shader, texture, sampler
-        gl.uniform2f(this.#resLocation, WGLV.getWidth(), WGLV.getHeight());
-        gl.uniform1f(this.#timeLocation, this.#time);
-        gl.uniform2f(this.#gravityLocation, this.#gravity.x, this.#gravity.y);
-        gl.uniform1f(this.#endScaleLocation, this.#endScale);
+        const m = this.#material;
+        Particles2D.#kRes.set(WGLV.getWidth(), WGLV.getHeight());
+        Particles2D.#kGravityScaleTime.set(this.#gravity.x, this.#gravity.y, this.#endScale, this.#time);
 
-        gl.bindVertexArray(this.#vao);
-        gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_BYTE, 0, this.#capacity);
-        gl.bindVertexArray(null);
+        m.bind(); // Shader, texture, sampler
+        m.setUniform(RenderUniforms.kResolution, Particles2D.#kRes);
+        m.setUniform(RenderUniforms.kVector0, Particles2D.#kGravityScaleTime);
+
+        this.#mesh.render(this.#capacity);
     }
 
     // Frees the GPU objects; load() can be called again afterwards. The texture belongs to the caller.
     unload()
     {
-        const gl = WGLV.context;
+        this.#mesh.unload();
 
-        if (this.#vao !== null) gl.deleteVertexArray(this.#vao);
-        if (this.#quadBuffer !== null) gl.deleteBuffer(this.#quadBuffer);
-        if (this.#indexBuffer !== null) gl.deleteBuffer(this.#indexBuffer);
-        if (this.#instBuffer !== null) gl.deleteBuffer(this.#instBuffer);
-        if (this.#material !== null) this.#material.unload(); // Leaves the shared shader and the texture alone
+        if (this.#material !== null)
+            this.#material.unload(); // Leaves the shared shader and the texture alone
 
-        this.#vao = null;
-        this.#quadBuffer = null;
-        this.#indexBuffer = null;
-        this.#instBuffer = null;
         this.#material = null;
         this.#data = null;
         this.#capacity = 0;
@@ -1013,13 +969,11 @@ class Particles2D
         if (this.#dirtyMax < this.#dirtyMin)
             return;
 
-        const gl = WGLV.context;
         const stride = Particles2D.#kFloatsPerParticle;
         const first = this.#dirtyMin * stride;
         const count = (this.#dirtyMax - this.#dirtyMin + 1) * stride;
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
-        gl.bufferSubData(gl.ARRAY_BUFFER, first * 4, this.#data, first, count);
+        this.#mesh.updateInstanceData(this.#data, first, count);
 
         this.#dirtyMin = Infinity;
         this.#dirtyMax = -1;

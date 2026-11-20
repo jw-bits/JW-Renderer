@@ -9,7 +9,8 @@
             |                    |
           (x, y) --------- (x + w, y)
 
-    Values are clamped to 0..1.
+    Values are clamped to 0..1, except through setUnclamped(), which is for
+    tiling and scrolling a repeating texture (see Rect2D.setUVTile()).
 */
 class UVRect
 {
@@ -42,10 +43,32 @@ class UVRect
             return this;
     }
 
-    // Top-left and bottom-right corners; with V up, tly is the larger V
-    setCorners(tlx, tly, brx, bry)
+    /*
+        As given, without clamping: (x, y) is an offset and (width, height) how
+        many times the texture repeats across the rect. Outside 0..1 the
+        texture's Sampler must wrap with REPEAT or MIRRORED_REPEAT.
+    */
+    setUnclamped(x, y, width, height)
     {
-        return this.set(tlx, bry, brx - tlx, tly - bry);
+        this.#x = x;
+        this.#y = y;
+        this.#width = width;
+        this.#height = height;
+            return this;
+    }
+
+    copy(other)
+    {
+        this.#x = other.getX();
+        this.#y = other.getY();
+        this.#width = other.getWidth();
+        this.#height = other.getHeight();
+            return this;
+    }
+
+    equals(other)
+    {
+        return (this.#x === other.getX() && this.#y === other.getY() && this.#width === other.getWidth() && this.#height === other.getHeight());
     }
 
     getX() { return this.#x; }
@@ -74,79 +97,14 @@ class Shapes
         |       |
         0 ----- 1
     */
+    // (x, y) is the point the quad is aligned on. Returns null if align isn't an Alignment.
     static makeQuad(x, y, z, w, h, align = Alignment.kBottomLeft)
     {
-        let lx = 0;
-        let by = 0;
+        if (Alignment.isValid(align) === false)
+            return null;
 
-        switch (align)
-        {
-            case Alignment.kBottomLeft:
-            {
-                lx = x;
-                by = y;
-            }
-            break;
-
-            case Alignment.kMiddleLeft:
-            {
-                lx = x;
-                by = y - (h / 2.0);
-            }
-            break;
-
-            case Alignment.kTopLeft:
-            {
-                lx = x;
-                by = y - h;
-            }
-            break;
-
-            case Alignment.kBottomCenter:
-            {
-                lx = x - (w / 2.0);
-                by = y;
-            }
-            break;
-
-            case Alignment.kMiddleCenter:
-            {
-                lx = x - (w / 2.0);
-                by = y - (h / 2.0);
-            }
-            break;
-
-            case Alignment.kTopCenter:
-            {
-                lx = x - (w / 2.0);
-                by = y - h;
-            }
-            break;
-
-            case Alignment.kBottomRight:
-            {
-                lx = x - w;
-                by = y;
-            }
-            break;
-
-            case Alignment.kMiddleRight:
-            {
-                lx = x - w;
-                by = y - (h / 2.0);
-            }
-            break;
-
-            case Alignment.kTopRight:
-            {
-                lx = x - w;
-                by = y - h;
-            }
-            break;
-
-            default: return false;
-        }
-
+        let lx = x + Alignment.offsetX(align, w);
+        let by = y + Alignment.offsetY(align, h);
         let rx = lx + w;
         let ty = by + h;
 
@@ -222,9 +180,9 @@ class Shapes
             }
         }
 
-        // Match IndexBuffer's type selection (it picks the GL type from the index count)
+        // Bytes while every vertex index fits in one (IndexBuffer takes the GL type from the array)
         const indexCount = perimCount * 3;
-        let indices = (indexCount < 256) ? new Uint8Array(indexCount) : new Uint16Array(indexCount);
+        let indices = (vertCount <= 256) ? new Uint8Array(indexCount) : new Uint16Array(indexCount);
 
         for (let i = 0; i < perimCount; ++i)
         {
@@ -289,48 +247,6 @@ class Shapes
                 indices[n++] = tr; indices[n++] = tl; indices[n++] = bl;
             }
         }
-
-        let mesh = new StaticMesh();
-        mesh.setVertexData(RenderAttributes.kPosition, pos);
-        mesh.setVertexData(RenderAttributes.kUV0, uvs);
-        mesh.setIndexData(indices);
-        return mesh;
-    }
-
-    static makeCube(size = 1.0) {
-        let s = size / 2.0;
-        let pos = new Float32Array([
-            // Front face
-            -s, -s,  s,  s, -s,  s,  s,  s,  s, -s,  s,  s,
-            // Back face
-            -s, -s, -s, -s,  s, -s,  s,  s, -s,  s, -s, -s,
-            // Top face
-            -s,  s, -s, -s,  s,  s,  s,  s,  s,  s,  s, -s,
-            // Bottom face
-            -s, -s, -s,  s, -s, -s,  s, -s,  s, -s, -s,  s,
-            // Right face
-             s, -s, -s,  s,  s, -s,  s,  s,  s,  s, -s,  s,
-            // Left face
-            -s, -s, -s, -s, -s,  s, -s,  s,  s, -s,  s, -s,
-        ]);
-
-        let uvs = new Float32Array([
-            0,0, 1,0, 1,1, 0,1,
-            1,0, 1,1, 0,1, 0,0,
-            0,1, 0,0, 1,0, 1,1,
-            1,1, 0,1, 0,0, 1,0,
-            1,0, 1,1, 0,1, 0,0,
-            0,0, 1,0, 1,1, 0,1,
-        ]);
-
-        let indices = new Uint8Array([
-            0,  1,  2,      0,  2,  3,    // front
-            4,  5,  6,      4,  6,  7,    // back
-            8,  9,  10,     8,  10, 11,   // top
-            12, 13, 14,     12, 14, 15,   // bottom
-            16, 17, 18,     16, 18, 19,   // right
-            20, 21, 22,     20, 22, 23,   // left
-        ]);
 
         let mesh = new StaticMesh();
         mesh.setVertexData(RenderAttributes.kPosition, pos);

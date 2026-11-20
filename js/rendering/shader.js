@@ -91,8 +91,25 @@ class Shader
         this.#programId = 0;
     }
 
-    getAttrib(attribName) { return WGLV.context.getAttribLocation(this.#programId, attribName); } // -1 if not found
     getUniform(uniformName) { return WGLV.context.getUniformLocation(this.#programId, uniformName); } // null if not found
+
+    // Names of the uniforms the linked program actually uses (the compiler drops unused ones)
+    getActiveUniformNames()
+    {
+        const gl = WGLV.context;
+        const count = gl.getProgramParameter(this.#programId, gl.ACTIVE_UNIFORMS) ?? 0;
+        let names = [];
+
+        for (let i = 0; i < count; ++i)
+        {
+            const info = gl.getActiveUniform(this.#programId, i);
+
+            if (info !== null)
+                names.push(info.name);
+        }
+
+        return names;
+    }
 
     bind()
     {

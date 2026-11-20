@@ -73,27 +73,25 @@ class WGLV
                 return false;
         }
 
-        const defaultAttributes = {antialias: true, depth: true, stencil: false, premultipledAlpha: true, alpha: true};
+        const defaultAttributes = {antialias: true, depth: true, stencil: false, premultipliedAlpha: true, alpha: true};
         const contextAttributes = (ctxAttributes !== null) ? ctxAttributes : defaultAttributes;
 
-        let contextNames = ["webgl2"];
-
-        for (let i = 0; i < contextNames.length; ++i)
+        try
         {
-            try
-            {
-                WGLV.context = c.getContext(contextNames[i], contextAttributes);
-            }
-            catch(e)
-            {
-                console.log(contextNames[i] + " could not be created");
-            }
-
-            if (WGLV.context !== null)
-                break;
+            WGLV.context = c.getContext("webgl2", contextAttributes);
+        }
+        catch (e)
+        {
+            WGLV.context = null;
         }
 
-        return (WGLV.context !== null);
+        if (WGLV.context === null)
+        {
+            console.error("WGLV.init(): WebGL2 isn't available");
+                return false;
+        }
+
+        return true;
     }
 
     // Call before resizeToWindow(), usually once at startup
@@ -177,7 +175,7 @@ class WGLV
         }
     }
 
-    // Draws to the canvas through the design view again (e.g. after rendering to a RenderTarget)
+    // Draws to the canvas through the design view again (e.g. after rendering into a framebuffer)
     static restoreView()
     {
         if (WGLV.context === null)

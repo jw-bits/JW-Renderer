@@ -50,7 +50,7 @@ class Texture
         this.#url = imageUrl;
 
         const img = new Image();
-        img.crossOrigin = "annoymous";
+        img.crossOrigin = "anonymous";
         img.decoding = "async";
 
         img.onload = () => {

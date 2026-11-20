@@ -5,13 +5,15 @@
     then draws them all in one go, layer by layer, grouped by Material.
 
     Layers run 0 - 7: 0 is drawn first (farthest back), 7 last (top-most).
-    Within a layer, everything sharing a Material is drawn together, so the
-    Material is bound once per group. Quads (Rect2D, Text2D: isQuad()) whose
-    Material uses Rect2D's default shader (see Rect2D.getDefaultShader()) go
-    one step further: each group of them is a single instanced draw call.
+    Within a layer, models are drawn in groups, binding once per group:
+        - Instanced: models that canInstance() (Rect2D, Text2D, Sprite) are grouped
+          by their textures and samplers (Material.getTextureKey()), whatever their
+          Material's shader, and each group is a single instanced draw call. So a
+          Sprite and a Rect2D drawing the same atlas share one call.
+        - Everything else is grouped by Material and drawn one model at a time.
 
-    Order: layers are always drawn in order, and within one Material the
-    submission order is kept. Different Materials in the same layer may be
+    Order: layers are always drawn in order, and within one group the
+    submission order is kept. Different groups in the same layer may be
     drawn in any order, so use separate layers for things that must overlap
     a certain way (e.g. board 0, pieces 2, UI 5).
 
@@ -27,8 +29,9 @@
         batcher.submit(label, 5);  // A Text2D
         batcher.render();          // Draws everything and empties the batcher
 
-    submit() captures the model's position, scale, rotation and color at that
-    moment, so one model can be drawn many times per frame (like a board square).
+    submit() captures the model's position, scale, rotation, color and UV rect
+    (a Sprite's frame) at that moment, so one model can be drawn many times per
+    frame (like a board square).
     Its size, mesh and Material are read when it's drawn, so don't unload or
     reload a model between submit() and render().
 
@@ -42,11 +45,11 @@ class MaterialBatcher
     static kMaxLayer = 7;
     static kLayerCount = 8;
 
-    static #kFloatsPerInstance = 11; // Rect (4), scale + rotation (3), color (4)
+    static #kFloatsPerInstance = 15; // Rect (4), scale + rotation (3), color (4), UV rect (4)
     static #kStartCapacity = 64;     // Instances; grows as needed
 
     #layers;      // Per layer: the submitted entries
-    #groups;      // Per layer: Material -> group number, in order of first submission
+    #groups;      // Per layer: group key (texture key string for instanced, else the Material) -> group number, in order of first submission
     #drawables;   // Per layer: objects with render(), drawn after the layer's models
     #pool;        // Entry objects reused from frame to frame
     #poolUsed;
@@ -54,10 +57,7 @@ class MaterialBatcher
     // Instanced Rect2D drawing; null shader if it couldn't be set up (every model is drawn on its own then)
     #instShader;
     #instResLocation;
-    #instVao;
-    #quadBuffer;
-    #indexBuffer;
-    #instBuffer;
+    #instMesh;
     #instData;
     #instCapacity;
 
@@ -81,10 +81,7 @@ class MaterialBatcher
 
         this.#instShader = null;
         this.#instResLocation = null;
-        this.#instVao = null;
-        this.#quadBuffer = null;
-        this.#indexBuffer = null;
-        this.#instBuffer = null;
+        this.#instMesh = new InstancedQuadMesh();
         this.#instData = null;
         this.#instCapacity = 0;
 
@@ -116,20 +113,23 @@ class MaterialBatcher
             return false; // e.g. a Text2D before its text is set
 
         const material = model.getMaterial();
+        const instanced = (this.#instShader !== null && model.canInstance() === true);
+        const key = instanced ? material.getTextureKey() : material; // Strings and Materials never collide as Map keys
         let groups = this.#groups[layer];
-        let group = groups.get(material);
+        let group = groups.get(key);
 
         if (group === undefined)
         {
             group = groups.size;
-            groups.set(material, group);
+            groups.set(key, group);
         }
 
         let e = this.#nextEntry();
         e.model = model;
         e.material = material;
         e.group = group;
-        e.instanced = (this.#instShader !== null && model.isQuad() === true && material.getShader() === Rect2D.getDefaultShader());
+        e.instanced = instanced;
+        e.uvRect.copy(model.getUVRect());
         e.x = model.getX();
         e.y = model.getY();
         e.scaleX = model.getScaleX();
@@ -212,18 +212,11 @@ class MaterialBatcher
     {
         this.clear();
 
-        const gl = WGLV.context;
+        this.#instMesh.unload();
 
-        if (this.#instVao !== null) gl.deleteVertexArray(this.#instVao);
-        if (this.#quadBuffer !== null) gl.deleteBuffer(this.#quadBuffer);
-        if (this.#indexBuffer !== null) gl.deleteBuffer(this.#indexBuffer);
-        if (this.#instBuffer !== null) gl.deleteBuffer(this.#instBuffer);
-        if (this.#instShader !== null) this.#instShader.unload();
+        if (this.#instShader !== null)
+            this.#instShader.unload();
 
-        this.#instVao = null;
-        this.#quadBuffer = null;
-        this.#indexBuffer = null;
-        this.#instBuffer = null;
         this.#instShader = null;
         this.#instData = null;
         this.#instCapacity = 0;
@@ -244,15 +237,14 @@ class MaterialBatcher
 
         while (i < list.length)
         {
-            // A run of entries that are all instanced, or all not, with the same Material
-            const material = list[i].material;
-            const instanced = list[i].instanced;
+            // One group: all instanced with the same textures, or all the same Material drawn one at a time
+            const group = list[i].group;
             let end = i + 1;
 
-            while (end < list.length && list[end].material === material && list[end].instanced === instanced)
+            while (end < list.length && list[end].group === group)
                 ++end;
 
-            if (instanced === true)
+            if (list[i].instanced === true)
                 this.#drawInstanced(list, i, end);
             else
                 this.#drawEach(list, i, end);
@@ -267,7 +259,7 @@ class MaterialBatcher
         {
             this.#pool.push({
                 model: null, material: null, group: 0, instanced: false,
-                x: 0, y: 0, scaleX: 1, scaleY: 1, rotZ: 0, color: new Vector4()
+                x: 0, y: 0, scaleX: 1, scaleY: 1, rotZ: 0, color: new Vector4(), uvRect: new UVRect()
             });
         }
 
@@ -282,12 +274,12 @@ class MaterialBatcher
         for (let i = start; i < end; ++i)
         {
             const e = list[i];
-            e.model.draw(e.x, e.y, e.scaleX, e.scaleY, e.rotZ, e.color);
+            e.model.draw(e.x, e.y, e.scaleX, e.scaleY, e.rotZ, e.color, e.uvRect);
             ++this.#drawCalls;
         }
     }
 
-    // Draws Rect2Ds sharing a Material in one instanced call
+    // Draws quads sharing textures and samplers in one instanced call
     #drawInstanced(list, start, end)
     {
         const gl = WGLV.context;
@@ -315,19 +307,19 @@ class MaterialBatcher
             d[o++] = e.color.y;
             d[o++] = e.color.z;
             d[o++] = e.color.w;
+            d[o++] = e.uvRect.getX();
+            d[o++] = e.uvRect.getY();
+            d[o++] = e.uvRect.getWidth();
+            d[o++] = e.uvRect.getHeight();
         }
 
-        // The Material binds its textures and samplers; then switch to the instanced shader
+        // Any Material in the group binds the same textures and samplers; then switch to the instanced shader
         list[start].material.bind();
         this.#instShader.bind();
         gl.uniform2f(this.#instResLocation, WGLV.getWidth(), WGLV.getHeight());
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, d, 0, count * stride);
-
-        gl.bindVertexArray(this.#instVao);
-        gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_BYTE, 0, count);
-        gl.bindVertexArray(null);
+        this.#instMesh.updateInstanceData(d, 0, count * stride);
+        this.#instMesh.render(count);
 
         ++this.#drawCalls;
     }
@@ -343,13 +335,9 @@ class MaterialBatcher
         while (capacity < count)
             capacity *= 2;
 
-        const gl = WGLV.context;
-
         this.#instData = new Float32Array(capacity * MaterialBatcher.#kFloatsPerInstance);
         this.#instCapacity = capacity;
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this.#instData.byteLength, gl.DYNAMIC_DRAW);
+        this.#instMesh.setInstanceData(this.#instData);
     }
 
     #setupInstancing()
@@ -366,42 +354,19 @@ class MaterialBatcher
         shader.bind();
         gl.uniform1i(shader.getUniform("u_tex0"), 0);
 
-        this.#quadBuffer = gl.createBuffer();
-        this.#indexBuffer = gl.createBuffer();
-        this.#instBuffer = gl.createBuffer();
-        this.#instVao = gl.createVertexArray();
-
-        gl.bindVertexArray(this.#instVao);
-
-        // Unit quad, shared by every instance
-        const posLocation = RenderAttributes.getLocation(RenderAttributes.kPosition);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#quadBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), gl.STATIC_DRAW);
-        gl.vertexAttribPointer(posLocation, 2, gl.FLOAT, false, 0, 0);
-        gl.enableVertexAttribArray(posLocation);
-
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.#indexBuffer); // Part of the VAO's state
-        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array([0, 1, 2,  2, 3, 0]), gl.STATIC_DRAW);
-
-        // Per-instance values, interleaved
-        const bytes = 4;
-        const strideBytes = MaterialBatcher.#kFloatsPerInstance * bytes;
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
-
+        // Unit quad (0,0) - (1,1), shared by every instance, plus the interleaved per-instance values
         const attribs = [
             [Rect2DInstancedShaderSource.kRectLocation, 4, 0],
             [Rect2DInstancedShaderSource.kScaleRotLocation, 3, 4],
-            [Rect2DInstancedShaderSource.kColorLocation, 4, 7]
+            [Rect2DInstancedShaderSource.kColorLocation, 4, 7],
+            [Rect2DInstancedShaderSource.kUVRectLocation, 4, 11]
         ];
 
-        for (const [location, size, offset] of attribs)
+        if (this.#instMesh.load(new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), MaterialBatcher.#kFloatsPerInstance, attribs) === false)
         {
-            gl.vertexAttribPointer(location, size, gl.FLOAT, false, strideBytes, offset * bytes);
-            gl.enableVertexAttribArray(location);
-            gl.vertexAttribDivisor(location, 1);
+            shader.unload();
+                return false;
         }
-
-        gl.bindVertexArray(null);
 
         this.#instShader = shader;
         this.#reserve(MaterialBatcher.#kStartCapacity);
