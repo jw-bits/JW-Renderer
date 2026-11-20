@@ -4,14 +4,14 @@
     Sprite - A Model2D that draws one frame of an atlas texture at a time and
     animates through sequences of frames.
 
-    A frame is a UVRect of the texture (see animation_util.js for the grid and
-    pixel helpers). A sequence (AnimationSequence) is a named run of frames
+    A frame is a UVRect of the texture (see sprite_util.js for the grid and
+    pixel helpers). A sequence (SpriteSequence) is a named run of frames
     with a duration and play mode. Sequences come two ways:
         createSequence()        A start and end frame on a rows x cols grid over the whole
                                 atlas (set by load() or setGrid()); a run can span rows.
         createSequenceInRect()  A rect of the atlas holding one sequence, split into its
                                 own rows x cols grid.
-    addSequence() takes a ready-made AnimationSequence, which can be shared by many Sprites.
+    addSequence() takes a ready-made SpriteSequence, which can be shared by many Sprites.
 
     Playback: play() starts a sequence (optionally reversed); update(dt) advances it.
     Speed scales time (2 is double speed, 0 freezes it). The event callback hears when
@@ -25,7 +25,7 @@
         let s = new Sprite();
         s.load(atlas, 64, 64, 4, 8);   // 64 x 64 design units; a 4 x 8 grid over the atlas
         s.createSequence("walk", 1, 0, 1, 7, 0.8);                      // Row 1, looping
-        s.createSequence("die", 3, 0, 3, 5, 0.6, AnimationPlayMode.kOnce);
+        s.createSequence("die", 3, 0, 3, 5, 0.6, SpritePlayMode.kOnce);
         s.setEventCallback((sprite, event, name) => { if (name === "die") remove(sprite); });
         s.play("walk");
 
@@ -48,7 +48,7 @@ class Sprite extends Model2D
     #gridRows;       // Grid over the whole atlas, for createSequence() and showFrame() without a sequence
     #gridCols;
 
-    #sequences;      // Name -> AnimationSequence
+    #sequences;      // Name -> SpriteSequence
     #sequence;       // Playing or paused, or null
     #time;           // Seconds into the current cycle
     #frame;          // Index into #sequence.frames (or the grid) of the frame drawn now
@@ -56,7 +56,7 @@ class Sprite extends Model2D
     #isFinished;     // A one-shot sequence completed; resume() won't restart it
     #isReversed;
     #speed;
-    #eventCallback;  // (sprite, AnimationEvent, sequenceName) or null
+    #eventCallback;  // (sprite, SpriteEvent, sequenceName) or null
 
     constructor()
     {
@@ -151,14 +151,14 @@ class Sprite extends Model2D
         whole-atlas grid, reading row by row. duration is in seconds. Returns false
         if the range or duration isn't valid, or the name is taken.
     */
-    createSequence(name, startRow, startCol, endRow, endCol, duration, playMode = AnimationPlayMode.kLoop)
+    createSequence(name, startRow, startCol, endRow, endCol, duration, playMode = SpritePlayMode.kLoop)
     {
-        const frames = AnimationUtil.gridRangeFrames(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, startRow, startCol, endRow, endCol);
+        const frames = SpriteUtil.gridRangeFrames(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, startRow, startCol, endRow, endCol);
 
         if (frames === null)
             return false;
 
-        return this.addSequence(new AnimationSequence(name, frames, duration, playMode));
+        return this.addSequence(new SpriteSequence(name, frames, duration, playMode));
     }
 
     /*
@@ -167,22 +167,22 @@ class Sprite extends Model2D
         for a last row that isn't full. Returns false if the grid or duration isn't
         valid, or the name is taken.
     */
-    createSequenceInRect(name, uvRect, rows, cols, duration, playMode = AnimationPlayMode.kLoop, frameCount = rows * cols)
+    createSequenceInRect(name, uvRect, rows, cols, duration, playMode = SpritePlayMode.kLoop, frameCount = rows * cols)
     {
-        const frames = AnimationUtil.gridFrames(uvRect, rows, cols, 0, frameCount);
+        const frames = SpriteUtil.gridFrames(uvRect, rows, cols, 0, frameCount);
 
         if (frames === null)
             return false;
 
-        return this.addSequence(new AnimationSequence(name, frames, duration, playMode));
+        return this.addSequence(new SpriteSequence(name, frames, duration, playMode));
     }
 
     // Adds a ready-made sequence (it can be shared by many Sprites). Returns false if it isn't valid or the name is taken.
     addSequence(sequence)
     {
-        if ((sequence instanceof AnimationSequence) === false || sequence.isValid() === false)
+        if ((sequence instanceof SpriteSequence) === false || sequence.isValid() === false)
         {
-            console.error("Sprite.addSequence() needs an AnimationSequence with a name, frames and a duration above 0");
+            console.error("Sprite.addSequence() needs an SpriteSequence with a name, frames and a duration above 0");
                 return false;
         }
 
@@ -301,7 +301,7 @@ class Sprite extends Model2D
 
     getSpeed() { return this.#speed; }
 
-    // callback(sprite, AnimationEvent, sequenceName), or null for none. It may call play() to chain sequences.
+    // callback(sprite, SpriteEvent, sequenceName), or null for none. It may call play() to chain sequences.
     setEventCallback(callback)
     {
         if (callback !== null && typeof callback !== "function")
@@ -342,7 +342,7 @@ class Sprite extends Model2D
         const sequence = this.#sequence;
         const frameCount = sequence.frames.length;
         const frameDuration = sequence.getFrameDuration();
-        const steps = AnimationUtil.getCycleSteps(frameCount, sequence.playMode);
+        const steps = SpriteUtil.getCycleSteps(frameCount, sequence.playMode);
         const cycleDuration = steps * frameDuration;
         let event = -1;
 
@@ -357,19 +357,19 @@ class Sprite extends Model2D
                 this.#isPlaying = false;
                 this.#isFinished = true;
                 this.#applyFrame(sequence.isPingPong() ? 0 : frameCount - 1);
-                event = AnimationEvent.kCompleted;
+                event = SpriteEvent.kCompleted;
             }
             else
             {
                 this.#time %= cycleDuration;
-                event = AnimationEvent.kLooped;
+                event = SpriteEvent.kLooped;
             }
         }
 
         if (this.#isFinished === false)
         {
             const step = Math.min(Math.floor(this.#time / frameDuration), steps - 1);
-            this.#applyFrame(AnimationUtil.stepToFrame(step, frameCount, sequence.playMode));
+            this.#applyFrame(SpriteUtil.stepToFrame(step, frameCount, sequence.playMode));
         }
 
         if (event !== -1 && this.#eventCallback !== null)
@@ -453,6 +453,6 @@ class Sprite extends Model2D
     #showGridFrame(index)
     {
         this.#frame = index;
-        AnimationUtil.gridFrame(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, index, this.#uvRect);
+        SpriteUtil.gridFrame(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, index, this.#uvRect);
     }
 }

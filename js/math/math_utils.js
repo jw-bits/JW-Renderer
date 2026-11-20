@@ -309,7 +309,7 @@ class Easing extends Interpolator
     // Eases from A to B. Returns false (and changes nothing) if the arguments aren't valid.
     init(_a, _b, _duration, _easingType)
     {
-        if (Easing.#isEasingType(_easingType) === false)
+        if (Easing.isValid(_easingType) === false)
         {
             console.error("Easing.init() needs an easing type such as Easing.kQuadraticIn");
                 return false;
@@ -324,11 +324,24 @@ class Easing extends Interpolator
 
     getEasingType() { return this.#easingType; }
 
-    // Maps progress t (0 - 1) along an easing curve
+    // True for one of the easing types below (Easing.kQuadraticIn - Easing.kBounceInOut)
+    static isValid(easingType)
+    {
+        return (Number.isInteger(easingType) === true && easingType >= Easing.kQuadraticIn && easingType <= Easing.kBounceInOut);
+    }
+
+    /*
+        Maps progress t (0 - 1) along an easing curve. Every curve gives 0 at
+        t = 0 and 1 at t = 1; Back and Elastic go outside 0 - 1 in between
+        (they overshoot), the others don't.
+    */
     static ease(easingType, t)
     {
         switch (easingType)
         {
+            case Easing.kLinear:
+                return t;
+
             case Easing.kQuadraticIn:
                 return t * t;
 
@@ -366,6 +379,83 @@ class Easing extends Interpolator
                     return 0.5 * ((t2 * t2 * t2) + 2.0);
             }
 
+            // Sine: a gentler start / stop than quadratic
+            case Easing.kSineIn:
+                return 1.0 - Math.cos(t * Math.PI * 0.5);
+
+            case Easing.kSineOut:
+                return Math.sin(t * Math.PI * 0.5);
+
+            case Easing.kSineInOut:
+                return -0.5 * (Math.cos(t * Math.PI) - 1.0);
+
+            // Back: pulls back before starting (In), or overshoots and settles (Out)
+            case Easing.kBackIn:
+                return (Easing.#kBackC3 * t * t * t) - (Easing.#kBackC1 * t * t);
+
+            case Easing.kBackOut:
+            {
+                const t1 = t - 1.0;
+                    return 1.0 + (Easing.#kBackC3 * t1 * t1 * t1) + (Easing.#kBackC1 * t1 * t1);
+            }
+
+            case Easing.kBackInOut:
+            {
+                const c2 = Easing.#kBackC1 * 1.525;
+                const t2 = t * 2.0;
+
+                if (t2 < 1.0)
+                    return 0.5 * (t2 * t2 * (((c2 + 1.0) * t2) - c2));
+
+                const t3 = t2 - 2.0;
+                    return 0.5 * ((t3 * t3 * (((c2 + 1.0) * t3) + c2)) + 2.0);
+            }
+
+            // Elastic: a springy wobble around the start (In) or end (Out)
+            case Easing.kElasticIn:
+            {
+                if (t <= 0.0 || t >= 1.0)
+                    return (t <= 0.0) ? 0.0 : 1.0;
+
+                return -Math.pow(2.0, (10.0 * t) - 10.0) * Math.sin(((10.0 * t) - 10.75) * Easing.#kElasticC4);
+            }
+
+            case Easing.kElasticOut:
+            {
+                if (t <= 0.0 || t >= 1.0)
+                    return (t <= 0.0) ? 0.0 : 1.0;
+
+                return (Math.pow(2.0, -10.0 * t) * Math.sin(((10.0 * t) - 0.75) * Easing.#kElasticC4)) + 1.0;
+            }
+
+            case Easing.kElasticInOut:
+            {
+                if (t <= 0.0 || t >= 1.0)
+                    return (t <= 0.0) ? 0.0 : 1.0;
+
+                const s = Math.sin(((20.0 * t) - 11.125) * Easing.#kElasticC5);
+
+                if (t < 0.5)
+                    return -0.5 * Math.pow(2.0, (20.0 * t) - 10.0) * s;
+
+                return (0.5 * Math.pow(2.0, (-20.0 * t) + 10.0) * s) + 1.0;
+            }
+
+            // Bounce: bounces off the end (Out) like a dropped ball, or off the start (In)
+            case Easing.kBounceIn:
+                return 1.0 - Easing.#bounceOut(1.0 - t);
+
+            case Easing.kBounceOut:
+                return Easing.#bounceOut(t);
+
+            case Easing.kBounceInOut:
+            {
+                if (t < 0.5)
+                    return 0.5 * (1.0 - Easing.#bounceOut(1.0 - (t * 2.0)));
+
+                return 0.5 * (1.0 + Easing.#bounceOut((t * 2.0) - 1.0));
+            }
+
             default:
                 return t;
         }
@@ -377,24 +467,64 @@ class Easing extends Interpolator
 
     // *** Internal Methods ***
 
-    static #isEasingType(easingType)
+    // Four parabolas, each lower than the last, landing on 1 at t = 1
+    static #bounceOut(t)
     {
-        return (Number.isInteger(easingType) === true && easingType >= Easing.kQuadraticIn && easingType <= Easing.kCubicInOut);
+        const n1 = 7.5625;
+        const d1 = 2.75;
+
+        if (t < 1.0 / d1)
+            return n1 * t * t;
+
+        if (t < 2.0 / d1)
+        {
+            const t1 = t - (1.5 / d1);
+                return (n1 * t1 * t1) + 0.75;
+        }
+
+        if (t < 2.5 / d1)
+        {
+            const t1 = t - (2.25 / d1);
+                return (n1 * t1 * t1) + 0.9375;
+        }
+
+        const t1 = t - (2.625 / d1);
+            return (n1 * t1 * t1) + 0.984375;
     }
 
     // *** Static Vars ***
 
-    // Easing types
+    static #kBackC1 = 1.70158;                // How far Back overshoots (about 10%)
+    static #kBackC3 = Easing.#kBackC1 + 1.0;
+    static #kElasticC4 = (2.0 * Math.PI) / 3.0;   // Elastic In / Out wobble period
+    static #kElasticC5 = (2.0 * Math.PI) / 4.5;   // Elastic InOut wobble period
+
+    // Easing types; the first six keep their original values
     static kQuadraticIn = 0;
     static kQuadraticOut = 1;
     static kQuadraticInOut = 2;
     static kCubicIn = 3;
     static kCubicOut = 4;
     static kCubicInOut = 5;
+    static kLinear = 6;
+    static kSineIn = 7;
+    static kSineOut = 8;
+    static kSineInOut = 9;
+    static kBackIn = 10;
+    static kBackOut = 11;
+    static kBackInOut = 12;
+    static kElasticIn = 13;
+    static kElasticOut = 14;
+    static kElasticInOut = 15;
+    static kBounceIn = 16;
+    static kBounceOut = 17;
+    static kBounceInOut = 18;
 
     static
     {
-        for (const name of ["kQuadraticIn", "kQuadraticOut", "kQuadraticInOut", "kCubicIn", "kCubicOut", "kCubicInOut"])
+        for (const name of ["kQuadraticIn", "kQuadraticOut", "kQuadraticInOut", "kCubicIn", "kCubicOut", "kCubicInOut",
+                            "kLinear", "kSineIn", "kSineOut", "kSineInOut", "kBackIn", "kBackOut", "kBackInOut",
+                            "kElasticIn", "kElasticOut", "kElasticInOut", "kBounceIn", "kBounceOut", "kBounceInOut"])
             Object.defineProperty(Easing, name, { writable: false, configurable: false });
     }
 }

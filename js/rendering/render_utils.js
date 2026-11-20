@@ -81,11 +81,91 @@ class UVRect
     getBottom() { return this.#y; }
     getTop() { return this.#y + this.#height; }
 
+    /*
+        Converts a rect in texture pixels to a UVRect, written into out (also returned).
+
+        origin is the Alignment of pixel (0, 0) on the texture:
+            Alignment.kTopLeft     Image editors and atlas tools: x right, y down (the default)
+            Alignment.kBottomLeft  GL style: x right, y up
+            Others                 x runs away from a right edge (else right); y runs down
+                                   from a top edge (else up); center / middle put the
+                                   origin halfway across
+        (x, y) is the rect's corner nearest the origin, and it extends width / height
+        along those directions. Values outside the texture are clamped to it.
+
+        V runs up to match textures uploaded with flipY (Texture's default), so
+        pixel rects measured from an image's top-left convert correctly.
+
+        Returns null (with a console.error) if the texture size or origin isn't valid.
+    */
+    static pixelsToUVRect(x, y, width, height, texWidth, texHeight, origin = Alignment.kTopLeft, out = new UVRect())
+    {
+        const o = UVRect.#getOrigin(texWidth, texHeight, origin, "pixelsToUVRect");
+
+        if (o === null)
+            return null;
+
+        const left = o.xRunsRight ? (o.x + x) : (o.x - x - width);
+        const bottom = o.yRunsUp ? (o.y + y) : (o.y - y - height);
+
+        return out.set(left / texWidth, bottom / texHeight, width / texWidth, height / texHeight);
+    }
+
+    /*
+        Converts a UVRect to texture pixels, as pixelsToUVRect() takes them: written
+        into out as (x, y, width, height) and returned. Returns null (with a
+        console.error) if the texture size or origin isn't valid.
+    */
+    static uvRectToPixels(uvRect, texWidth, texHeight, origin = Alignment.kTopLeft, out = new Vector4())
+    {
+        const o = UVRect.#getOrigin(texWidth, texHeight, origin, "uvRectToPixels");
+
+        if (o === null)
+            return null;
+
+        const left = uvRect.getX() * texWidth;
+        const bottom = uvRect.getY() * texHeight;
+        const width = uvRect.getWidth() * texWidth;
+        const height = uvRect.getHeight() * texHeight;
+
+        const x = o.xRunsRight ? (left - o.x) : (o.x - left - width);
+        const y = o.yRunsUp ? (bottom - o.y) : (o.y - bottom - height);
+
+        out.set(x, y, width, height);
+            return out;
+    }
+
     // *** Internal Methods ***
 
     static #clamp01(v)
     {
         return Math.min(1.0, Math.max(0.0, v));
+    }
+
+    // Where pixel (0, 0) sits, in pixels from the bottom-left, and which way x and y run from it
+    static #getOrigin(texWidth, texHeight, origin, method)
+    {
+        if (!(texWidth > 0) || !(texHeight > 0))
+        {
+            console.error(`UVRect.${method}() needs a texture width and height above 0`);
+                return null;
+        }
+
+        if (Alignment.isValid(origin) === false)
+        {
+            console.error(`UVRect.${method}(): origin must be an Alignment`);
+                return null;
+        }
+
+        const col = Alignment.getColumn(origin);
+        const row = Alignment.getRow(origin);
+
+        return {
+            x: col * (texWidth / 2.0),
+            y: row * (texHeight / 2.0),
+            xRunsRight: (col !== 2),
+            yRunsUp: (row !== 2)
+        };
     }
 }
 

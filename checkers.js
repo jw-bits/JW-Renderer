@@ -29,7 +29,11 @@ const BOT = BLACK;
 
 const BOT_SEARCH_DEPTH = 4;     // Plies (half-moves) the bot looks ahead
 const BOT_THINK_DELAY = 0.6;    // Seconds the bot "thinks" before moving
-const BOT_STEP_DELAY = 0.35;    // Seconds between each hop of the bot's move
+const BOT_STEP_DELAY = 0.35;    // Seconds between each hop of the bot's move (after the piece lands)
+
+// A moving piece slides to its square while lifted: scaled up to MOVE_LIFT_SCALE by halfway, back to 1 as it lands
+const MOVE_TIME = 0.35;         // Seconds per hop
+const MOVE_LIFT_SCALE = 1.2;
 
 // Sparks from the edge of a piece that lands a jump; speeds and sizes are in squares, so they follow the layout
 const SPARK_COUNT = 10;
@@ -41,7 +45,7 @@ const SPARK_GRAVITY = 6.0;                // Squares per second squared, downwar
 const SPARK_END_SCALE = 0.4;              // Shrink to 40% over each life
 
 // Sound effects, by AudioManager name
-const SFX_CLICK = "click";        // The human makes a move that doesn't capture
+const SFX_CLICK = "click";        // The human picks up a piece to move it
 const SFX_JUMP_LAND = "jumpland"; // Any piece lands after capturing
 
 const FONT_FAMILY = "'Segoe UI', Arial, sans-serif";
@@ -53,6 +57,12 @@ let gFontManager = null;
 let gMaterialManager = null;
 let gBatcher = null; // Everything is drawn through it, once per frame
 let gSparks = null;  // Particles2D for jumps
+
+// Move animation, created in loadAssets(): one slide and one lift, shared by every move
+let gMoveSlide = null;   // AnimAction from square to square; its start and target are set per move
+let gMoveLift = null;    // AnimSequence: up to MOVE_LIFT_SCALE, then back to 1
+let gSlidePlayer = null; // AnimPlayers on the moving piece's rect; they drive different channels
+let gLiftPlayer = null;
 
 let gUIFont = null;    // System font for all menu text (the FontManager's default)
 let gTitleFont = null; // The title's font file, or the default font if it couldn't be loaded
@@ -135,6 +145,14 @@ let gBotTimer = 0.0;
 let gBotPlan = null;        // Squares the bot's current move walks through
 let gGameTime = 0.0;        // Seconds played this game; paused while the menu is open
 
+/*
+    The hop being animated, or null. The board already holds the result; until
+    the piece lands, its destination square draws the moving rect instead, and
+    a captured piece stays drawn where it was.
+        { piece, rect, to: {r, c}, captured: {r, c, piece} or null, result, onLanded(result) }
+*/
+let gMoving = null;
+
 // *** App ***
 
 window.onload = () => {
@@ -202,6 +220,28 @@ async function loadAssets()
         console.error("Couldn't load the jump sparks; jumps won't show them");
 
     gSparks.setEndScale(SPARK_END_SCALE); // Gravity depends on the square size; set in appLayout()
+
+    setupMoveAnimation();
+}
+
+// The slide and lift every move plays (see startMove())
+function setupMoveAnimation()
+{
+    gMoveSlide = new AnimAction(); // Set up per move in startMove()
+
+    let liftUp = new AnimAction();
+    liftUp.setScaleStart(1.0, 1.0);
+    liftUp.setScale(MOVE_LIFT_SCALE, MOVE_LIFT_SCALE, MOVE_TIME / 2.0, Easing.kQuadraticOut);
+
+    let putDown = new AnimAction(); // Starts where liftUp left off
+    putDown.setScale(1.0, 1.0, MOVE_TIME / 2.0, Easing.kQuadraticIn);
+
+    gMoveLift = new AnimSequence([liftUp, putDown]);
+
+    gSlidePlayer = new AnimPlayer();
+    gSlidePlayer.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) landMove(); });
+
+    gLiftPlayer = new AnimPlayer();
 }
 
 /*
@@ -246,6 +286,11 @@ function appUpdate(dt)
     {
         gGameTime += dt;
         updateTimeText();
+
+        // Lift first, so it's back to scale 1 when the slide lands and calls landMove()
+        gLiftPlayer.update(dt);
+        gSlidePlayer.update(dt);
+
         updateBot(dt);
     }
 
@@ -314,6 +359,13 @@ function appLayout()
     gRects.blackMan = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kBlack);
     gRects.blackKing = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kBlackKing);
     gRects.hint = makeRect(gTextures.ring, hintSize, hintSize, Colors.kHint);
+
+    // The piece in motion gets its own rect, so the animation can scale it without touching the shared ones
+    gRects.moving = {};
+    gRects.moving[RED] = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kRed);
+    gRects.moving[RED_KING] = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kRedKing);
+    gRects.moving[BLACK] = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kBlack);
+    gRects.moving[BLACK_KING] = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kBlackKing);
 
     gRects.overlay = makeRect(gTextures.square, w, h, Colors.kOverlay);
     gRects.overlay.setPos(0, 0);
@@ -464,7 +516,7 @@ function renderGame(isActive)
     for (const s of gLastMove)
         renderHighlight(s.r, s.c, Colors.kLastMove);
 
-    if (gTurn === HUMAN && gScreen === GameScreen.kPlaying && gChainPiece === null)
+    if (gTurn === HUMAN && gScreen === GameScreen.kPlaying && gChainPiece === null && gMoving === null)
     {
         for (let r = 0; r < BOARD_SIZE; r++)
         {
@@ -479,29 +531,25 @@ function renderGame(isActive)
     if (gSelected !== null)
         renderHighlight(gSelected.r, gSelected.c, Colors.kSelected);
 
-    // Pieces
-    const pieceOffset = (sq - Math.floor(sq * 0.86)) / 2;
-
+    // Pieces; a moving piece's destination is drawn by its own rect, below
     for (let r = 0; r < BOARD_SIZE; r++)
     {
         for (let c = 0; c < BOARD_SIZE; c++)
         {
-            let rect = null;
+            if (gMoving !== null && r === gMoving.to.r && c === gMoving.to.c)
+                continue;
 
-            switch (gBoard[r][c])
-            {
-                case RED: rect = gRects.redMan; break;
-                case BLACK: rect = gRects.blackMan; break;
-                case RED_KING: rect = gRects.redKing; break;
-                case BLACK_KING: rect = gRects.blackKing; break;
-            }
-
-            if (rect !== null)
-            {
-                rect.setPos(Math.round(squareX(c) + pieceOffset), Math.round(squareY(r) + pieceOffset));
-                gBatcher.submit(rect, Layers.kPieces);
-            }
+            renderPiece(gBoard[r][c], r, c);
         }
+    }
+
+    // The moving piece, on top of the others (same layer and material, so submission order holds)
+    if (gMoving !== null)
+    {
+        if (gMoving.captured !== null)
+            renderPiece(gMoving.captured.piece, gMoving.captured.r, gMoving.captured.c); // Until it's landed on
+
+        gBatcher.submit(gMoving.rect, Layers.kPieces);
     }
 
     gBatcher.submitDrawable(gSparks, Layers.kPieces); // Drawn after the layer's pieces, so on top
@@ -521,6 +569,26 @@ function renderGame(isActive)
     gBatcher.submit(gTexts.status, Layers.kUIText);
     gBatcher.submit(gTexts.time, Layers.kUIText);
     gButtons.menu.render(isActive);
+}
+
+// Draws piece p (EMPTY draws nothing) on (r, c) with the shared piece rects
+function renderPiece(p, r, c)
+{
+    let rect = null;
+
+    switch (p)
+    {
+        case RED: rect = gRects.redMan; break;
+        case BLACK: rect = gRects.blackMan; break;
+        case RED_KING: rect = gRects.redKing; break;
+        case BLACK_KING: rect = gRects.blackKing; break;
+    }
+
+    if (rect === null)
+        return;
+
+    rect.setPos(pieceX(c), pieceY(r));
+    gBatcher.submit(rect, Layers.kPieces);
 }
 
 function renderHighlight(r, c, color)
@@ -573,6 +641,11 @@ function emitJumpSparks(r, c)
 
 function squareX(c) { return gLayout.boardX + (c * gLayout.sq); }
 function squareY(r) { return gLayout.boardY + ((BOARD_SIZE - 1 - r) * gLayout.sq); }
+
+// A piece's bottom-left corner on a square: centered, at the size from appLayout()
+function pieceOffset() { return (gLayout.sq - Math.floor(gLayout.sq * 0.86)) / 2; }
+function pieceX(c) { return Math.round(squareX(c) + pieceOffset()); }
+function pieceY(r) { return Math.round(squareY(r) + pieceOffset()); }
 
 function updateStatusText()
 {
@@ -777,6 +850,9 @@ function resetGame()
     gBotTimer = 0.0;
     gBotPlan = null;
     gGameTime = 0.0;
+    gMoving = null;
+    gSlidePlayer?.stop();
+    gLiftPlayer?.stop();
     gSparks?.clear();
     updateStatusText();
     updateTimeText();
@@ -790,8 +866,8 @@ function startGame()
 
 function onBoardClick(r, c)
 {
-    if (gTurn !== HUMAN)
-        return;
+    if (gTurn !== HUMAN || gMoving !== null)
+        return; // Not the human's turn, or a piece is still moving
 
     // Move the selected piece
     if (gSelected !== null)
@@ -820,24 +896,68 @@ function performHumanStep(fr, fc, tr, tc)
     if (gChainPiece === null)
         gLastMove = [{ r: fr, c: fc }];
 
-    const result = applyStep(gBoard, fr, fc, tr, tc);
     gLastMove.push({ r: tr, c: tc });
+    gSelected = null;
 
-    // A capture plays only its landing sound for now; once moves animate, the click can play at the start too
+    playSFX(SFX_CLICK); // Picked up; a capture also plays its landing sound when it lands
+    startMove(fr, fc, tr, tc, (result) => onHumanLanded(tr, tc, result));
+}
+
+function onHumanLanded(r, c, result)
+{
     if (result.captured)
-        landJump(tr, tc);
-    else
-        playSFX(SFX_CLICK);
+        landJump(r, c);
 
-    if (result.captured && !result.promoted && getJumps(gBoard, tr, tc).length > 0)
+    if (result.captured && !result.promoted && getJumps(gBoard, r, c).length > 0)
     {
-        gChainPiece = { r: tr, c: tc };
-        gSelected = { r: tr, c: tc };
+        gChainPiece = { r, c };
+        gSelected = { r, c };
         updateStatusText();
             return;
     }
 
     endTurn();
+}
+
+/*
+    Makes a hop on the board right away, and animates the piece there: it slides
+    over MOVE_TIME while lifting and putting down. onLanded(result) gets
+    applyStep()'s result when it lands (see landMove()).
+*/
+function startMove(fr, fc, tr, tc, onLanded)
+{
+    const piece = gBoard[fr][fc];
+    let captured = null;
+
+    if (Math.abs(tr - fr) === 2)
+    {
+        const mr = (fr + tr) / 2;
+        const mc = (fc + tc) / 2;
+        captured = { r: mr, c: mc, piece: gBoard[mr][mc] };
+    }
+
+    const result = applyStep(gBoard, fr, fc, tr, tc);
+    const rect = gRects.moving[piece]; // The piece as it was, so a man crowned here shows its crown on landing
+
+    gMoveSlide.setTranslationStart(pieceX(fc), pieceY(fr));
+    gMoveSlide.setTranslation(pieceX(tc), pieceY(tr), MOVE_TIME, Easing.kQuadraticInOut);
+
+    gMoving = { piece, rect, to: { r: tr, c: tc }, captured, result, onLanded };
+
+    gLiftPlayer.play(rect, gMoveLift, AnimPlayMode.kOnce);
+    gSlidePlayer.play(rect, gMoveSlide, AnimPlayMode.kOnce);
+}
+
+// The slide finished (gSlidePlayer's callback): the piece is on its square, so the turn carries on
+function landMove()
+{
+    const move = gMoving;
+
+    if (move === null)
+        return;
+
+    gMoving = null;
+    move.onLanded(move.result);
 }
 
 function endTurn()
@@ -877,8 +997,9 @@ function playSFX(name)
 
 function updateBot(dt)
 {
-    if (gTurn !== BOT)
-        return;
+    // A landing earlier this frame can end the game (see landMove()), so check the screen here too
+    if (gScreen !== GameScreen.kPlaying || gTurn !== BOT || gMoving !== null)
+        return; // Game over, not the bot's turn, or waiting for a hop to land (see onBotLanded())
 
     gBotTimer -= dt;
 
@@ -888,21 +1009,35 @@ function updateBot(dt)
     // Pick a move, then show the chosen piece selected for a moment
     if (gBotPlan === null)
     {
-        gBotPlan = chooseBotTurn(gBoard);
+        gBotPlan = chooseBotTurn(gBoard) ?? null;
+
+        if (gBotPlan === null)
+        {
+            console.error("updateBot(): the bot has no move, but the game isn't over");
+                return;
+        }
+
         gLastMove = [gBotPlan[0]];
         gSelected = gBotPlan[0];
         gBotTimer = BOT_STEP_DELAY;
             return;
     }
 
-    // Make one hop of the move
+    // Make one hop of the move; the rest happens when it lands
     const from = gBotPlan[0];
     const to = gBotPlan[1];
-    if (applyStep(gBoard, from.r, from.c, to.r, to.c).captured)
-        landJump(to.r, to.c);
 
     gLastMove.push(to);
     gBotPlan.shift();
+    gSelected = null;
+
+    startMove(from.r, from.c, to.r, to.c, (result) => onBotLanded(to, result));
+}
+
+function onBotLanded(to, result)
+{
+    if (result.captured)
+        landJump(to.r, to.c);
 
     if (gBotPlan.length > 1)
     {
