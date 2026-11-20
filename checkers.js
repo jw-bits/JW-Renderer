@@ -35,6 +35,40 @@ const BOT_STEP_DELAY = 0.35;    // Seconds between each hop of the bot's move (a
 const MOVE_TIME = 0.35;         // Seconds per hop
 const MOVE_LIFT_SCALE = 1.2;
 
+// Title screen: a tiled checkerboard, with a red checker zig-zagging up its left side
+const TITLE_SQUARE_SIZE = 0.1;  // Of the smaller screen dimension
+const TITLE_BOARD_DIM = 0.35;   // The board's square colors are darkened to this, so the title stays readable
+const TITLE_PATH_COLUMN = 2;    // The zig-zag runs up this column and the one right of it (must be even)
+const TITLE_HOP_TIME = 1.0;     // Seconds per square
+const TITLE_HOP_DELAY = 0.5;    // Seconds the checker waits on a square before its next hop
+
+// The hops' easings: all of them
+const TITLE_HOP_EASINGS = [Easing.kLinear,
+                           Easing.kQuadraticIn, Easing.kQuadraticOut, Easing.kQuadraticInOut,
+                           Easing.kCubicIn, Easing.kCubicOut, Easing.kCubicInOut,
+                           Easing.kSineIn, Easing.kSineOut, Easing.kSineInOut,
+                           Easing.kBackIn, Easing.kBackOut, Easing.kBackInOut,
+                           Easing.kElasticOut, Easing.kBounceOut];
+
+// Shown beside the title checker for the hop it's making (see renderTitle())
+const EASING_NAMES = {
+    [Easing.kLinear]: "Linear",
+    [Easing.kQuadraticIn]: "Quadratic In",
+    [Easing.kQuadraticOut]: "Quadratic Out",
+    [Easing.kQuadraticInOut]: "Quadratic InOut",
+    [Easing.kCubicIn]: "Cubic In",
+    [Easing.kCubicOut]: "Cubic Out",
+    [Easing.kCubicInOut]: "Cubic InOut",
+    [Easing.kSineIn]: "Sine In",
+    [Easing.kSineOut]: "Sine Out",
+    [Easing.kSineInOut]: "Sine InOut",
+    [Easing.kBackIn]: "Back In",
+    [Easing.kBackOut]: "Back Out",
+    [Easing.kBackInOut]: "Back InOut",
+    [Easing.kElasticOut]: "Elastic Out",
+    [Easing.kBounceOut]: "Bounce Out"
+};
+
 // Sparks from the edge of a piece that lands a jump; speeds and sizes are in squares, so they follow the layout
 const SPARK_COUNT = 10;
 const SPARK_MAX_ALIVE = 256;
@@ -63,6 +97,14 @@ let gMoveSlide = null;   // AnimAction from square to square; its start and targ
 let gMoveLift = null;    // AnimSequence: up to MOVE_LIFT_SCALE, then back to 1
 let gSlidePlayer = null; // AnimPlayers on the moving piece's rect; they drive different channels
 let gLiftPlayer = null;
+
+// Title screen animation, created in loadAssets() (see setupTitleAnimation())
+let gTitleBoard = null;   // Material: a 2x2 checker texture, repeated by the title background's UV tiling
+let gTitleHop = null;     // AnimAction: one square diagonally; its start, target and easing are set per hop
+let gTitlePlayer = null;  // AnimPlayer on the title checker
+let gTitleSquare = { r: -1, c: 0 }; // The title square the checker is on, or hopping to; row -1 is just below the screen
+let gTitleEasing = -1;    // The easing last played, or -1 for none yet
+let gTitleDelay = 0.0;    // Seconds left before the next hop; 0 while hopping
 
 let gUIFont = null;    // System font for all menu text (the FontManager's default)
 let gTitleFont = null; // The title's font file, or the default font if it couldn't be loaded
@@ -129,7 +171,7 @@ let gScreenBeforeMenu = GameScreen.kTitle;
 const gInputListener = { onInputEvent: (e) => onInputEvent(e) };
 
 // Layout, in design units (WGLV's fixed design resolution), so it's built once
-let gLayout = { w: 0, h: 0, sq: 0, boardX: 0, boardY: 0 };
+let gLayout = { w: 0, h: 0, sq: 0, boardX: 0, boardY: 0, titleSq: 0 }; // titleSq: the title background's square size
 let gRects = {};
 let gTexts = {};
 let gButtons = {};
@@ -222,6 +264,7 @@ async function loadAssets()
     gSparks.setEndScale(SPARK_END_SCALE); // Gravity depends on the square size; set in appLayout()
 
     setupMoveAnimation();
+    setupTitleAnimation();
 }
 
 // The slide and lift every move plays (see startMove())
@@ -242,6 +285,94 @@ function setupMoveAnimation()
     gSlidePlayer.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) landMove(); });
 
     gLiftPlayer = new AnimPlayer();
+}
+
+/*
+    The title background's material and the checker's hop. The background is
+    one rect tiling a 2x2 checker texture (see appLayout()); REPEAT wraps it
+    and NEAREST keeps the square edges sharp. Square (c, r) of the title
+    board is dark when c + r is even, so (0, 0), at the bottom-left, is dark.
+*/
+function setupTitleAnimation()
+{
+    const gl = WGLV.context;
+    const dark = Colors.kDarkSquare;
+    const light = Colors.kLightSquare;
+    const toByte = (v) => Math.round(v * TITLE_BOARD_DIM * 255);
+    const darkPx = [toByte(dark.x), toByte(dark.y), toByte(dark.z), 255];
+    const lightPx = [toByte(light.x), toByte(light.y), toByte(light.z), 255];
+
+    // Not flipped, so the first row is the bottom
+    let texture = new Texture(false, false);
+    let sampler = new Sampler();
+    sampler.setWrap(gl.REPEAT, gl.REPEAT);
+    sampler.setFilter(gl.NEAREST, gl.NEAREST);
+
+    if (texture.loadPixels(2, 2, new Uint8Array([...darkPx, ...lightPx, ...lightPx, ...darkPx])) === false)
+        console.error("Couldn't build the title board texture; the title background won't show it");
+    else
+        gTitleBoard = gMaterialManager.load(Rect2D.getDefaultShader(), [texture], [sampler]);
+
+    gTitleHop = new AnimAction(); // Set up per hop in hopTitleChecker()
+
+    gTitlePlayer = new AnimPlayer();
+    gTitlePlayer.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) gTitleDelay = TITLE_HOP_DELAY; });
+}
+
+// Counts down the wait between hops, then starts the next one
+function updateTitle(dt)
+{
+    if (gTitleDelay <= 0.0)
+    {
+        gTitlePlayer.update(dt); // Hopping; landing starts the wait (see setupTitleAnimation())
+            return;
+    }
+
+    gTitleDelay -= dt;
+
+    if (gTitleDelay <= 0.0)
+    {
+        gTitleDelay = 0.0;
+        hopTitleChecker();
+    }
+}
+
+// Hops the title checker diagonally up a square, with a random easing other than the last one; off the top, it starts again below the bottom
+function hopTitleChecker()
+{
+    const checker = gRects.titleChecker;
+
+    if (checker === undefined)
+    {
+        console.error("hopTitleChecker() needs the title checker from appLayout()");
+            return;
+    }
+
+    // The top row is the first one fully above the screen
+    if (gTitleSquare.r >= Math.ceil(gLayout.h / gLayout.titleSq))
+        gTitleSquare = titleSquareOnRow(-1);
+
+    const from = gTitleSquare;
+    gTitleSquare = titleSquareOnRow(from.r + 1);
+    gTitleEasing = randomEasing(gTitleEasing);
+    gTexts.titleEasing.setText(EASING_NAMES[gTitleEasing] ?? "");
+
+    gTitleHop.setTranslationStart(titleSquareCenter(from.c), titleSquareCenter(from.r));
+    gTitleHop.setTranslation(titleSquareCenter(gTitleSquare.c), titleSquareCenter(gTitleSquare.r), TITLE_HOP_TIME, gTitleEasing);
+    gTitlePlayer.play(checker, gTitleHop);
+}
+
+// The zig-zag's square on row r: TITLE_PATH_COLUMN on even rows, one right of it on odd ones, so it's always a dark square
+function titleSquareOnRow(r) { return { r: r, c: TITLE_PATH_COLUMN + (r & 1) }; }
+
+// The center of a title board column or row, in design units
+function titleSquareCenter(i) { return Math.round((i + 0.5) * gLayout.titleSq); }
+
+// A random easing from TITLE_HOP_EASINGS, never exclude (pass -1 to allow any)
+function randomEasing(exclude)
+{
+    const choices = TITLE_HOP_EASINGS.filter((e) => e !== exclude);
+        return choices[Math.floor(Math.random() * choices.length)];
 }
 
 /*
@@ -293,6 +424,8 @@ function appUpdate(dt)
 
         updateBot(dt);
     }
+    else if (gScreen === GameScreen.kTitle)
+        updateTitle(dt); // Holds while the menu is open over the title
 
     // Sparks freeze while the menu is open, like the game; they finish on the game over screen
     if (gScreen !== GameScreen.kMenu)
@@ -343,7 +476,7 @@ function appLayout()
     const pieceSize = Math.floor(sq * 0.86);
     const hintSize = Math.floor(sq * 0.5);
 
-    gLayout = { w, h, sq, boardX, boardY };
+    gLayout = { w, h, sq, boardX, boardY, titleSq: Math.max(16, Math.round(unit * TITLE_SQUARE_SIZE)) };
     gSparks.setGravity(0, -SPARK_GRAVITY * sq);
 
     // makeRect() shares one Material per texture, so the board is one batch
@@ -376,6 +509,19 @@ function appLayout()
     gButtons.start = new Button("Start Game", w / 2, h * 0.42, unit * 0.38, unit * 0.10, unit * 0.045, unit * 0.035);
     gTexts.titleHint = makeText("Enter - Start      Esc - Menu", unit * 0.028, "normal", Colors.kTextDim, w / 2, h * 0.27);
 
+    // The title board fills the screen from the bottom-left; each tile of its texture is 2 x 2 squares
+    const titleSq = gLayout.titleSq;
+    gRects.titleBoard = new Rect2D();
+    gRects.titleBoard.load(gTitleBoard ?? gTextures.square, w, h);
+    gRects.titleBoard.setUVTile(w / (titleSq * 2), h / (titleSq * 2));
+    gRects.titleBoard.setPos(0, 0);
+
+    // Centered, as the hops move its center from square to square (see hopTitleChecker())
+    const titlePieceSize = Math.floor(titleSq * 0.86);
+    gRects.titleChecker = makeRect(gTextures.piece, titlePieceSize, titlePieceSize, Colors.kRed);
+    gRects.titleChecker.setPos(titleSquareCenter(gTitleSquare.c), titleSquareCenter(gTitleSquare.r), Alignment.kMiddleCenter);
+    gTexts.titleEasing = makeText("", unit * 0.03, "bold", Colors.kText, 0, 0, Alignment.kMiddleLeft); // Follows the checker (see renderTitle())
+
     // Game screen
     const boardTop = boardY + boardPx + border;
     gTexts.status = makeText("", unit * 0.04, "bold", Colors.kText, w / 2, boardTop + ((h - boardTop) / 2));
@@ -401,6 +547,9 @@ function appLayout()
     updateStatusText();
     updateTimeText();
     updateGameOverText();
+
+    gTitleDelay = 0.0;
+    hopTitleChecker(); // The checker is a new rect, so start it hopping again
 }
 
 function makeRect(texture, w, h, color)
@@ -489,6 +638,13 @@ function renderScreen(screen, isActive)
 
 function renderTitle(isActive)
 {
+    gBatcher.submit(gRects.titleBoard, Layers.kBoard);
+    gBatcher.submit(gRects.titleChecker, Layers.kPieces);
+
+    // The current hop's easing, just right of the checker
+    const checkerPos = gRects.titleChecker.getAnchor();
+    gTexts.titleEasing.setPos(Math.round(checkerPos.x + (gLayout.titleSq * 0.6)), Math.round(checkerPos.y), Alignment.kMiddleLeft);
+    gBatcher.submit(gTexts.titleEasing, Layers.kUIText);
     gBatcher.submit(gTexts.title, Layers.kUIText);
     gBatcher.submit(gTexts.subtitle, Layers.kUIText);
     gButtons.start.render(isActive);

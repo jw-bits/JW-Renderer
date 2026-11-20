@@ -324,10 +324,10 @@ class Easing extends Interpolator
 
     getEasingType() { return this.#easingType; }
 
-    // True for one of the easing types below (Easing.kQuadraticIn - Easing.kBounceInOut)
+    // True for one of the easing types below (Easing.kQuadraticIn - Easing.kBounceOut)
     static isValid(easingType)
     {
-        return (Number.isInteger(easingType) === true && easingType >= Easing.kQuadraticIn && easingType <= Easing.kBounceInOut);
+        return (Number.isInteger(easingType) === true && easingType >= Easing.kQuadraticIn && easingType <= Easing.kBounceOut);
     }
 
     /*
@@ -411,15 +411,7 @@ class Easing extends Interpolator
                     return 0.5 * ((t3 * t3 * (((c2 + 1.0) * t3) + c2)) + 2.0);
             }
 
-            // Elastic: a springy wobble around the start (In) or end (Out)
-            case Easing.kElasticIn:
-            {
-                if (t <= 0.0 || t >= 1.0)
-                    return (t <= 0.0) ? 0.0 : 1.0;
-
-                return -Math.pow(2.0, (10.0 * t) - 10.0) * Math.sin(((10.0 * t) - 10.75) * Easing.#kElasticC4);
-            }
-
+            // Elastic: overshoots the end and wobbles to a stop, like a spring
             case Easing.kElasticOut:
             {
                 if (t <= 0.0 || t >= 1.0)
@@ -428,33 +420,9 @@ class Easing extends Interpolator
                 return (Math.pow(2.0, -10.0 * t) * Math.sin(((10.0 * t) - 0.75) * Easing.#kElasticC4)) + 1.0;
             }
 
-            case Easing.kElasticInOut:
-            {
-                if (t <= 0.0 || t >= 1.0)
-                    return (t <= 0.0) ? 0.0 : 1.0;
-
-                const s = Math.sin(((20.0 * t) - 11.125) * Easing.#kElasticC5);
-
-                if (t < 0.5)
-                    return -0.5 * Math.pow(2.0, (20.0 * t) - 10.0) * s;
-
-                return (0.5 * Math.pow(2.0, (-20.0 * t) + 10.0) * s) + 1.0;
-            }
-
-            // Bounce: bounces off the end (Out) like a dropped ball, or off the start (In)
-            case Easing.kBounceIn:
-                return 1.0 - Easing.#bounceOut(1.0 - t);
-
+            // Bounce: bounces off the end like a dropped ball
             case Easing.kBounceOut:
                 return Easing.#bounceOut(t);
-
-            case Easing.kBounceInOut:
-            {
-                if (t < 0.5)
-                    return 0.5 * (1.0 - Easing.#bounceOut(1.0 - (t * 2.0)));
-
-                return 0.5 * (1.0 + Easing.#bounceOut((t * 2.0) - 1.0));
-            }
 
             default:
                 return t;
@@ -496,8 +464,7 @@ class Easing extends Interpolator
 
     static #kBackC1 = 1.70158;                // How far Back overshoots (about 10%)
     static #kBackC3 = Easing.#kBackC1 + 1.0;
-    static #kElasticC4 = (2.0 * Math.PI) / 3.0;   // Elastic In / Out wobble period
-    static #kElasticC5 = (2.0 * Math.PI) / 4.5;   // Elastic InOut wobble period
+    static #kElasticC4 = (2.0 * Math.PI) / 3.0;   // Elastic Out wobble period
 
     // Easing types; the first six keep their original values
     static kQuadraticIn = 0;
@@ -513,18 +480,14 @@ class Easing extends Interpolator
     static kBackIn = 10;
     static kBackOut = 11;
     static kBackInOut = 12;
-    static kElasticIn = 13;
-    static kElasticOut = 14;
-    static kElasticInOut = 15;
-    static kBounceIn = 16;
-    static kBounceOut = 17;
-    static kBounceInOut = 18;
+    static kElasticOut = 13;
+    static kBounceOut = 14;
 
     static
     {
         for (const name of ["kQuadraticIn", "kQuadraticOut", "kQuadraticInOut", "kCubicIn", "kCubicOut", "kCubicInOut",
                             "kLinear", "kSineIn", "kSineOut", "kSineInOut", "kBackIn", "kBackOut", "kBackInOut",
-                            "kElasticIn", "kElasticOut", "kElasticInOut", "kBounceIn", "kBounceOut", "kBounceInOut"])
+                            "kElasticOut", "kBounceOut"])
             Object.defineProperty(Easing, name, { writable: false, configurable: false });
     }
 }
