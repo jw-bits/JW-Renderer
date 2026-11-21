@@ -36,6 +36,9 @@
 
     Sprites load from a Texture (the Sprite makes its own Material) or a Material
     built on Sprite.getDefaultShader(), e.g. one shared from MaterialManager.
+
+    The Texture can be a SubTexture of a TextureAtlas: frames (and the grid)
+    are then within the SubTexture, as if it were the whole texture.
 */
 class Sprite extends Model2D
 {
@@ -43,7 +46,8 @@ class Sprite extends Model2D
     static #kFullUVRect = new UVRect();   // The whole texture, for grid frames
     static #kUVScratch = new Vector4();   // For uploading u_vec1
 
-    #uvRect;         // The frame drawn now
+    #uvRect;         // The frame drawn now, within the texture (or SubTexture)
+    #atlasUVRect;    // #uvRect mapped into the atlas, when the texture is a SubTexture (see getUVRect())
 
     #gridRows;       // Grid over the whole atlas, for createSequence() and showFrame() without a sequence
     #gridCols;
@@ -63,6 +67,7 @@ class Sprite extends Model2D
         super();
 
         this.#uvRect = new UVRect();
+        this.#atlasUVRect = new UVRect();
         this.#gridRows = 1;
         this.#gridCols = 1;
         this.#sequences = new Map();
@@ -381,7 +386,12 @@ class Sprite extends Model2D
     // Always true once loaded: load() only accepts Materials on Sprite's shader
     canInstance() { return this.isLoaded(); }
 
-    getUVRect() { return this.#uvRect; }
+    // The frame drawn now, as part of the bound texture: mapped into the atlas for a SubTexture
+    getUVRect()
+    {
+        const sub = this._getSubTexture();
+            return (sub !== null) ? sub.mapUVRect(this.#uvRect, this.#atlasUVRect) : this.#uvRect;
+    }
 
     // Uploads the frame's UV rect (the captured one from MaterialBatcher, or this sprite's own), then draws
     draw(x, y, scaleX, scaleY, rotZ, color, uvRect = null)
@@ -389,7 +399,7 @@ class Sprite extends Model2D
         if (this.isLoaded() === false)
             return;
 
-        const r = uvRect ?? this.#uvRect;
+        const r = uvRect ?? this.getUVRect();
         Sprite.#kUVScratch.set(r.getX(), r.getY(), r.getWidth(), r.getHeight());
         this.getMaterial().setUniform("u_vec1", Sprite.#kUVScratch);
 

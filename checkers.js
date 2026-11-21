@@ -42,6 +42,16 @@ const TITLE_PATH_COLUMN = 2;    // The zig-zag runs up this column and the one r
 const TITLE_HOP_TIME = 1.0;     // Seconds per square
 const TITLE_HOP_DELAY = 0.5;    // Seconds the checker waits on a square before its next hop
 
+// The title text runs through each TextEffect in turn, then starts again
+const TITLE_EFFECT_STEPS = ["Fade In", "Drop Shadow", "Wave", "Fade Out"];
+const TITLE_FADE_TIME = 1.5;        // Seconds per fade
+const TITLE_EFFECT_HOLD = 3.0;      // Seconds the drop shadow and the wave each show
+const TITLE_SHADOW_OFFSET = 0.007;  // Of the smaller screen dimension, right and down
+const TITLE_SHADOW_COLOR = new Vector4(0.0, 0.0, 0.0, 0.75);
+const TITLE_WAVE_AMPLITUDE = 0.015; // Of the smaller screen dimension
+const TITLE_WAVE_SPEED = 0.75;      // Cycles per second
+const TITLE_WAVE_SPACING = 0.7;     // Radians along the wave from one letter to the next
+
 // The hops' easings: all of them
 const TITLE_HOP_EASINGS = [Easing.kLinear,
                            Easing.kQuadraticIn, Easing.kQuadraticOut, Easing.kQuadraticInOut,
@@ -82,6 +92,7 @@ const SPARK_END_SCALE = 0.4;              // Shrink to 40% over each life
 const SFX_CLICK = "click";        // The human picks up a piece to move it
 const SFX_JUMP_LAND = "jumpland"; // Any piece lands after capturing
 
+const ATLAS_URL = "./textures/checkers.json"; // The square, piece and king; its image is ./textures/checkers_texture.webp
 const FONT_FAMILY = "'Segoe UI', Arial, sans-serif";
 const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
 
@@ -108,6 +119,13 @@ let gTitleDelay = 0.0;    // Seconds left before the next hop; 0 while hopping
 
 let gUIFont = null;    // System font for all menu text (the FontManager's default)
 let gTitleFont = null; // The title's font file, or the default font if it couldn't be loaded
+let gTimeAtlas = null; // TextAtlas of the game time's glyphs (see appLayout())
+let gTitleAtlas = null; // TextAtlas of the title's glyphs, in the title font (see appLayout())
+
+// Title text effects, shown one at a time in order (see startTitleEffect())
+let gTitleEffect = null;     // TextEffect on gTexts.title
+let gTitleEffectStep = 0;    // Index into TITLE_EFFECT_STEPS
+let gTitleEffectTimer = 0.0; // Seconds left on a held step; 0 while fading
 
 class GameScreen
 {
@@ -235,25 +253,43 @@ async function loadAssets()
     gUIFont = gFontManager.getDefault();
 
     const files = {
-        square: "./textures/square.png",
-        piece: "./textures/checker_piece.png",
-        king: "./textures/checker_king.png",
         ring: "./textures/circle.png",
         particle: "./textures/particleA.png"
+    };
+
+    // gTextures name -> SubTexture name in the atlas
+    const atlasTextures = {
+        square: "square",
+        piece: "checker_piece",
+        king: "checker_king"
     };
 
     // Sound can't play until the user's first tap or key; a failed load only logs, and play() then does nothing
     AudioManager.init();
 
     const names = Object.keys(files);
-    const [textures, titleFont] = await Promise.all([
+    const [textures, atlas, titleFont] = await Promise.all([
         Promise.all(names.map((name) => gTextureManager.load(files[name]))),
+        gTextureManager.loadAtlas(ATLAS_URL),
         gFontManager.load(TITLE_FONT_URL),
         AudioManager.loadSFX(SFX_CLICK, "./audio/click.wav"),
         AudioManager.loadSFX(SFX_JUMP_LAND, "./audio/jumpland.wav")
     ]);
 
     names.forEach((name, i) => { gTextures[name] = textures[i]; });
+
+    // A failed atlas, or a name it doesn't have, falls back to the default texture like a failed image
+    for (const name of Object.keys(atlasTextures))
+    {
+        gTextures[name] = atlas?.getSubTexture(atlasTextures[name]) ?? null;
+
+        if (gTextures[name] === null)
+        {
+            console.error(`No "${atlasTextures[name]}" in ${ATLAS_URL}; using the default texture`);
+            gTextures[name] = gTextureManager.getDefault();
+        }
+    }
+
     gTitleFont = titleFont;
 
     gSparks = new Particles2D();
@@ -319,9 +355,68 @@ function setupTitleAnimation()
     gTitlePlayer.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) gTitleDelay = TITLE_HOP_DELAY; });
 }
 
-// Counts down the wait between hops, then starts the next one
+/*
+    Starts title effect step (an index into TITLE_EFFECT_STEPS), with only
+    that effect on. The fades move on when they finish (see TextEffect's
+    onDone); the drop shadow and wave are held for TITLE_EFFECT_HOLD.
+*/
+function startTitleEffect(step)
+{
+    if (gTitleEffect === null)
+        return;
+
+    const unit = Math.min(gLayout.w, gLayout.h);
+    const next = () => startTitleEffect((step + 1) % TITLE_EFFECT_STEPS.length);
+
+    gTitleEffectStep = step;
+    gTitleEffectTimer = 0.0;
+    gTitleEffect.disable(TextEffectType.kDropShadow | TextEffectType.kWave);
+    gTexts.titleEffect.setText(TITLE_EFFECT_STEPS[step]);
+
+    switch (TITLE_EFFECT_STEPS[step])
+    {
+        case "Fade In":
+            gTitleEffect.fadeIn(TITLE_FADE_TIME, next);
+            break;
+
+        case "Drop Shadow":
+            gTitleEffect.setDropShadow(unit * TITLE_SHADOW_OFFSET, -unit * TITLE_SHADOW_OFFSET, TITLE_SHADOW_COLOR);
+            gTitleEffectTimer = TITLE_EFFECT_HOLD;
+            break;
+
+        case "Wave":
+            gTitleEffect.setWave(unit * TITLE_WAVE_AMPLITUDE, TITLE_WAVE_SPEED, TITLE_WAVE_SPACING);
+            gTitleEffectTimer = TITLE_EFFECT_HOLD;
+            break;
+
+        case "Fade Out":
+            gTitleEffect.fadeOut(TITLE_FADE_TIME, next);
+            break;
+    }
+}
+
+// Advances the title effect, and moves on once a held step's time is up
+function updateTitleEffect(dt)
+{
+    if (gTitleEffect === null)
+        return;
+
+    gTitleEffect.update(dt); // A finished fade starts the next step itself
+
+    if (gTitleEffectTimer <= 0.0)
+        return; // Fading
+
+    gTitleEffectTimer -= dt;
+
+    if (gTitleEffectTimer <= 0.0)
+        startTitleEffect((gTitleEffectStep + 1) % TITLE_EFFECT_STEPS.length);
+}
+
+// Advances the title text effect; counts down the wait between hops, then starts the next one
 function updateTitle(dt)
 {
+    updateTitleEffect(dt);
+
     if (gTitleDelay <= 0.0)
     {
         gTitlePlayer.update(dt); // Hopping; landing starts the wait (see setupTitleAnimation())
@@ -463,6 +558,9 @@ function appLayout()
     for (const key in gButtons)
         gButtons[key].unload();
 
+    gTimeAtlas?.unload(); // After the texts, since the time and title texts draw with these
+    gTitleAtlas?.unload();
+
     gRects = {};
     gTexts = {};
     gButtons = {};
@@ -504,7 +602,15 @@ function appLayout()
     gRects.overlay.setPos(0, 0);
 
     // Title screen
-    gTexts.title = makeText("CHECKERS", unit * 0.15, "normal", Colors.kTitle, w / 2, h * 0.70, Alignment.kMiddleCenter, gTitleFont);
+    // The title is built from glyphs so TextEffect can run its effects on it (see startTitleEffect())
+    gTitleAtlas = new TextAtlas(gTitleFont, "CHECKERS", Math.max(8, Math.round(unit * 0.15)), "normal");
+    gTexts.title = new TextGlyphs2D(gTitleAtlas);
+    gTexts.title.setColor(Colors.kTitle);
+    gTexts.title.listenForRasterScale(true); // Redraws its glyphs when the view's scale changes, so it stays sharp
+    gTexts.title.setPos(Math.round(w / 2), Math.round(h * 0.70), Alignment.kMiddleCenter);
+    gTexts.title.setText("CHECKERS");
+    gTitleEffect = new TextEffect(gTexts.title);
+    gTexts.titleEffect = makeText("", unit * 0.03, "bold", Colors.kTextDim, w / 2, h * 0.86); // The effect showing now
     gTexts.subtitle = makeText("You play Red against the computer", unit * 0.035, "normal", Colors.kTextDim, w / 2, h * 0.57);
     gButtons.start = new Button("Start Game", w / 2, h * 0.42, unit * 0.38, unit * 0.10, unit * 0.045, unit * 0.035);
     gTexts.titleHint = makeText("Enter - Start      Esc - Menu", unit * 0.028, "normal", Colors.kTextDim, w / 2, h * 0.27);
@@ -529,7 +635,13 @@ function appLayout()
     const menuH = unit * 0.06;
     const margin = Math.round(unit * 0.03);
     gButtons.menu = new Button("Menu", margin + (menuW / 2), h - margin - (menuH / 2), menuW, menuH, unit * 0.03);
-    gTexts.time = makeText("", unit * 0.04, "bold", Colors.kText, w - margin, h - margin - (menuH / 2), Alignment.kMiddleRight);
+
+    // The time changes every second, so it's built from a TextAtlas's glyphs instead of drawing a new Text2D each time
+    gTimeAtlas = new TextAtlas(gUIFont, "0123456789:", Math.max(8, Math.round(unit * 0.04)), "bold");
+    gTexts.time = new TextGlyphs2D(gTimeAtlas);
+    gTexts.time.setColor(Colors.kText);
+    gTexts.time.listenForRasterScale(true); // Redraws its glyphs when the view's scale changes, so it stays sharp
+    gTexts.time.setPos(Math.round(w - margin), Math.round(h - margin - (menuH / 2)), Alignment.kMiddleRight);
 
     // Menu screen
     gTexts.menuTitle = makeText("MENU", unit * 0.10, "bold", Colors.kTitle, w / 2, h * 0.66);
@@ -550,6 +662,7 @@ function appLayout()
 
     gTitleDelay = 0.0;
     hopTitleChecker(); // The checker is a new rect, so start it hopping again
+    startTitleEffect(0); // The title is new too: start its effects from the first
 }
 
 function makeRect(texture, w, h, color)
@@ -645,7 +758,8 @@ function renderTitle(isActive)
     const checkerPos = gRects.titleChecker.getAnchor();
     gTexts.titleEasing.setPos(Math.round(checkerPos.x + (gLayout.titleSq * 0.6)), Math.round(checkerPos.y), Alignment.kMiddleLeft);
     gBatcher.submit(gTexts.titleEasing, Layers.kUIText);
-    gBatcher.submit(gTexts.title, Layers.kUIText);
+    gTitleEffect.submit(gBatcher, Layers.kUIText); // The title, with its current effect
+    gBatcher.submit(gTexts.titleEffect, Layers.kUIText);
     gBatcher.submit(gTexts.subtitle, Layers.kUIText);
     gButtons.start.render(isActive);
     gBatcher.submit(gTexts.titleHint, Layers.kUIText);
@@ -836,7 +950,7 @@ function updateTimeText()
     if (gTexts.time === undefined)
         return;
 
-    gTexts.time.setText(formatTime(gGameTime)); // Only re-rasterizes when the second changes
+    gTexts.time.setText(formatTime(gGameTime)); // Only rebuilds its glyph quads when the second changes
 }
 
 function updateGameOverText()

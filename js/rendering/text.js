@@ -1,0 +1,377 @@
+"use strict";
+
+/*
+    TextCanvas - Draws text onto one shared, hidden 2D canvas, ready to upload
+    into a texture (see Text2D, TextAtlas).
+
+    The text is drawn in white, centered, with the canvas sized to fit it plus
+    padding, so a color can be applied as a tint when it's drawn.
+
+    Usage:
+        const c = TextCanvas.draw("Hello", font, 32, "bold", WGLV.getViewScale());
+        if (c !== null)
+            texture.loadCanvas(c); // c.width x c.height pixels
+
+    The canvas is shared: upload it before the next draw() call.
+*/
+class TextCanvas
+{
+    static kPadding = 4; // Design units around the text, so anti-aliased edges aren't clipped
+
+    static #canvas = null;
+
+    /*
+        Draws text at fontSize * scale pixels (scale is device pixels per design unit,
+        so one texel lands on one screen pixel). Returns the canvas, or null on failure.
+    */
+    static draw(text, font, fontSize, fontWeight, scale)
+    {
+        if (text == null || font == null || font.isLoaded() === false || scale <= 0)
+            return null;
+
+        const c = TextCanvas.getCanvas();
+        let ctx = c.getContext("2d");
+
+        if (ctx === null)
+            return null;
+
+        const size = fontSize * scale;
+        const css = font.toCss(size, fontWeight);
+        const pad = Math.ceil(TextCanvas.kPadding * scale);
+
+        ctx.font = css;
+        const w = Math.max(1, Math.ceil(ctx.measureText(text).width) + (pad * 2));
+        const h = Math.max(1, TextCanvas.lineHeight(size) + (pad * 2));
+
+        c.width = w; // Resizing clears the canvas and resets the context state
+        c.height = h;
+
+        ctx.font = css;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(text, w / 2.0, h / 2.0);
+
+        return c;
+    }
+
+    // Pixels from the top of a line to the bottom, for a font size in pixels (without padding)
+    static lineHeight(sizePixels) { return Math.ceil(sizePixels * 1.3); }
+
+    static getCanvas()
+    {
+        if (TextCanvas.#canvas === null)
+            TextCanvas.#canvas = document.createElement("canvas");
+
+        return TextCanvas.#canvas;
+    }
+}
+
+/*
+    TextAtlas - A set of characters (glyphs) from a Font, drawn once into a
+    TextureAtlas at runtime, so text can be built from them without drawing
+    it again (see TextGlyphs2D). One TextAtlas can be shared by any number of
+    TextGlyphs2Ds, which all draw with its one Material.
+
+    Each glyph is a SubTexture named by its character, drawn in white like
+    Text2D (the color is a tint). A space and the fallback character "?" are
+    always included; a character that isn't in the atlas draws as "?".
+
+    The glyphs are drawn at fontSize times the view's scale when the TextAtlas
+    is created. By default they aren't drawn again: when the window's scale
+    changes, text made from them stretches with the view. rasterize() draws
+    them again at the current scale, keeping the same Material and Texture,
+    and tells every TextGlyphs2D on the atlas to rebuild its quads; a
+    TextGlyphs2D listening for raster scale changes calls it (see
+    TextGlyphs2D.listenForRasterScale()).
+
+    Usage:
+        const font = await gFontManager.load("./fonts/MyFont-Regular.ttf");
+        let digits = new TextAtlas(font, "0123456789:", 40, "bold");
+
+        let time = new TextGlyphs2D(digits);
+        time.setPos(100, 50, Alignment.kMiddleCenter);
+        time.setText("12:34"); // No drawing; just a new mesh of glyph quads
+
+    Glyphs sit side by side by their advance widths; kerning isn't applied.
+    Call unload() once nothing draws with it.
+*/
+class TextAtlas
+{
+    static kFallbackChar = "?";
+    static #kMaxRowPixels = 2048; // The atlas starts a new row of glyphs past this
+
+    #font;
+    #fontSize;
+    #fontWeight;
+    #atlas;      // TextureAtlas: one SubTexture per character
+    #material;   // The atlas Texture on Rect2D's default shader, shared by every TextGlyphs2D
+    #glyphs;     // Character -> { subTexture, advance, width, height }, in design units
+    #lineHeight; // Design units: the height of every glyph, padding included
+    #padding;    // Design units around each glyph
+    #chars;      // The characters drawn, in atlas order
+    #scale;      // The view scale the glyphs were last drawn at
+    #listeners;  // Functions called after rasterize() redraws the glyphs
+
+    /*
+        _font is a loaded Font, usually from the app's FontManager. _glyphs is a
+        string of the characters to draw (repeats are fine). Check isLoaded()
+        afterwards; it's false (with a console.error) if the glyphs couldn't
+        be built.
+    */
+    constructor(_font, _glyphs, _fontSize = 32, _fontWeight = "normal")
+    {
+        this.#font = _font;
+        this.#fontSize = _fontSize;
+        this.#fontWeight = _fontWeight;
+        this.#atlas = null;
+        this.#material = null;
+        this.#glyphs = new Map();
+        this.#lineHeight = 0;
+        this.#padding = 0;
+        this.#chars = [];
+        this.#scale = 0.0;
+        this.#listeners = new Set();
+
+        if (_font == null || _font.isLoaded() === false)
+        {
+            console.error("TextAtlas needs a loaded Font");
+                return;
+        }
+
+        if (typeof _glyphs !== "string")
+        {
+            console.error("TextAtlas needs a string of glyphs");
+                return;
+        }
+
+        // Unique characters (Array.from keeps surrogate pairs, e.g. emoji, whole), plus a space and the fallback
+        this.#chars = Array.from(new Set(Array.from(_glyphs + " " + TextAtlas.kFallbackChar)));
+
+        if (this.#build() === false)
+            this.unload();
+    }
+
+    /*
+        Draws the glyphs again at the view's current scale, if it changed since
+        they were last drawn, then calls every rasterize listener (each
+        TextGlyphs2D on the atlas rebuilds its quads). The Material and its
+        Texture stay the same objects. Returns false if not loaded or it failed.
+    */
+    rasterize()
+    {
+        if (this.isLoaded() === false)
+            return false;
+
+        if (WGLV.getViewScale() === this.#scale)
+            return true; // Already drawn at this scale
+
+        if (this.#build() === false)
+            return false;
+
+        for (const listener of Array.from(this.#listeners))
+            listener(this);
+
+        return true;
+    }
+
+    // The view scale the glyphs were last drawn at
+    getScale() { return this.#scale; }
+
+    // listener(textAtlas) is called after rasterize() redraws the glyphs (TextGlyphs2D uses this)
+    addRasterizeListener(listener)
+    {
+        if (typeof listener === "function")
+            this.#listeners.add(listener);
+    }
+
+    removeRasterizeListener(listener) { this.#listeners.delete(listener); }
+
+    getFont() { return this.#font; }
+    getFontSize() { return this.#fontSize; }
+    getFontWeight() { return this.#fontWeight; }
+
+    // The TextureAtlas of glyphs, and its Material (for TextGlyphs2D)
+    getTextureAtlas() { return this.#atlas; }
+    getMaterial() { return this.#material; }
+
+    // Design units
+    getLineHeight() { return this.#lineHeight; }
+    getPadding() { return this.#padding; }
+
+    isLoaded() { return (this.#material !== null); }
+
+    hasGlyph(char) { return this.#glyphs.has(char); }
+
+    // The characters in the atlas, as one string
+    getGlyphs() { return Array.from(this.#glyphs.keys()).join(""); }
+
+    // { subTexture, advance, width, height } (design units) for char, or for the fallback if it isn't in the atlas; null if not loaded
+    getGlyph(char) { return this.#glyphs.get(char) ?? this.#glyphs.get(TextAtlas.kFallbackChar) ?? null; }
+
+    // How wide text is in design units, padding included (like TextGlyphs2D's width)
+    measure(text)
+    {
+        if (this.isLoaded() === false || text == null)
+            return 0;
+
+        let width = this.#padding * 2.0;
+
+        for (const char of Array.from(text))
+            width += this.getGlyph(char).advance;
+
+        return width;
+    }
+
+    // Frees the atlas and Material; TextGlyphs2Ds using it stop drawing
+    unload()
+    {
+        if (this.#material !== null)
+        {
+            this.#material.unload(); // Leaves the shared shader alone
+            this.#material = null;
+        }
+
+        if (this.#atlas !== null)
+        {
+            this.#atlas.unload();
+            this.#atlas = null;
+        }
+
+        this.#glyphs.clear();
+        this.#listeners.clear();
+        this.#scale = 0.0;
+    }
+
+    // *** Internal Methods ***
+
+    /*
+        Draws every glyph into the shared TextCanvas, row by row, at the view's
+        scale. The first time it builds the atlas and Material from it; after
+        that it uploads into the same atlas Texture, so the Material is kept.
+    */
+    #build()
+    {
+        const chars = this.#chars;
+        const c = TextCanvas.getCanvas();
+        let ctx = c.getContext("2d");
+
+        if (ctx === null)
+        {
+            console.error("TextAtlas couldn't get a 2D canvas");
+                return false;
+        }
+
+        const scale = WGLV.getViewScale();
+        const size = this.#fontSize * scale;
+        const css = this.#font.toCss(size, this.#fontWeight);
+        const pad = Math.ceil(TextCanvas.kPadding * scale);
+        const cellHeight = TextCanvas.lineHeight(size) + (pad * 2);
+
+        // Measure each glyph and lay them out in rows
+        ctx.font = css;
+
+        let cells = [];
+        let x = 0;
+        let y = 0;
+        let canvasWidth = 1;
+
+        for (const char of chars)
+        {
+            const advance = ctx.measureText(char).width;
+            const cellWidth = Math.max(1, Math.ceil(advance) + (pad * 2));
+
+            if (x > 0 && x + cellWidth > TextAtlas.#kMaxRowPixels)
+            {
+                x = 0;
+                y += cellHeight;
+            }
+
+            cells.push({ char, advance, x, y, width: cellWidth });
+            x += cellWidth;
+            canvasWidth = Math.max(canvasWidth, x);
+        }
+
+        const canvasHeight = y + cellHeight;
+
+        c.width = canvasWidth; // Resizing clears the canvas and resets the context state
+        c.height = canvasHeight;
+
+        ctx.font = css;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#ffffff";
+
+        // Draw them, and describe each as a SubTexture (V up, so the canvas's top row is V 1)
+        let textures = {};
+
+        for (const cell of cells)
+        {
+            ctx.fillText(cell.char, cell.x + pad, cell.y + (cellHeight / 2.0));
+
+            textures[cell.char] = {
+                width: cell.width,
+                height: cellHeight,
+                uvs: {
+                    u0: cell.x / canvasWidth,
+                    v0: 1.0 - ((cell.y + cellHeight) / canvasHeight),
+                    u1: (cell.x + cell.width) / canvasWidth,
+                    v1: 1.0 - (cell.y / canvasHeight)
+                }
+            };
+        }
+
+        const name = `${this.#font.getFamily()} ${this.#fontSize} ${this.#fontWeight}`;
+
+        if (this.#atlas !== null)
+        {
+            // Drawn again: same atlas Texture, so the Material (and every model holding it) stays valid
+            if (this.#atlas.updateCanvas(c, textures) === false)
+            {
+                console.error(`TextAtlas couldn't draw "${name}" again`);
+                    return false;
+            }
+        }
+        else
+        {
+            let atlas = new TextureAtlas(false); // No mipmaps: it's drawn near the size it's rasterized
+
+            if (atlas.loadCanvas(c, textures, name) === false)
+            {
+                console.error("TextAtlas couldn't build its texture");
+                    return false;
+            }
+
+            const shader = Rect2D.getDefaultShader();
+            let material = new Material();
+
+            if (shader === null || material.load(shader, [atlas.getTexture()]) === false)
+            {
+                console.error("TextAtlas couldn't create its material");
+                atlas.unload();
+                    return false;
+            }
+
+            this.#atlas = atlas;
+            this.#material = material;
+        }
+
+        const atlas = this.#atlas;
+        this.#scale = scale;
+        this.#lineHeight = cellHeight / scale;
+        this.#padding = pad / scale;
+        this.#glyphs.clear();
+
+        for (const cell of cells)
+        {
+            this.#glyphs.set(cell.char, {
+                subTexture: atlas.getSubTexture(cell.char),
+                advance: cell.advance / scale,
+                width: cell.width / scale,
+                height: cellHeight / scale
+            });
+        }
+
+        return true;
+    }
+}

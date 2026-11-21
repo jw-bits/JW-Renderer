@@ -1,0 +1,40 @@
+{
+  "version": "1.0.0",
+  "atlas_name": "checkers",
+  "texture_name": "checkers_texture",
+  "texture_filepath": "D:/JW/Projects/JW-Renderer/tools/checkers/checkers_texture.webp",
+  "texture_width": 2048,
+  "texture_height": 512,
+  "textures": {
+    "checker_king": {
+      "width": 512,
+      "height": 512,
+      "uvs": {
+        "u0": 0.0,
+        "v0": 0.0,
+        "u1": 0.25,
+        "v1": 1.0
+      }
+    },
+    "checker_piece": {
+      "width": 512,
+      "height": 512,
+      "uvs": {
+        "u0": 0.2509765625,
+        "v0": 0.0,
+        "u1": 0.5009765625,
+        "v1": 1.0
+      }
+    },
+    "square": {
+      "width": 4,
+      "height": 4,
+      "uvs": {
+        "u0": 0.501953125,
+        "v0": 0.9921875,
+        "u1": 0.50390625,
+        "v1": 1.0
+      }
+    }
+  }
+}

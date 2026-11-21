@@ -23,6 +23,17 @@ class VertexFloatBuffer
             return true;
     }
 
+    // Replaces the contents with _data (a Float32Array) of the same length as set(), without reallocating
+    update(_data)
+    {
+        if ((_data instanceof Float32Array) === false || this.#bufferId === null)
+            return false;
+
+        WGLV.context.bindBuffer(WGLV.context.ARRAY_BUFFER, this.#bufferId);
+        WGLV.context.bufferSubData(WGLV.context.ARRAY_BUFFER, 0, _data);
+            return true;
+    }
+
     getBufferId() { return this.#bufferId; }
 
     unload()
@@ -144,6 +155,21 @@ class StaticMesh
         this.#vertexBuffers.get(materialAttribName)?.unload(); // Replacing one
         this.#vertexBuffers.set(materialAttribName, vb);
             return true;
+    }
+
+    /*
+        Replaces a vertex buffer's contents in place, e.g. positions moved each
+        frame. data must be a Float32Array with as many vertices as before; the
+        VAO keeps pointing at the same buffer, so bindAttribs() isn't needed again.
+    */
+    updateVertexData(materialAttribName, data)
+    {
+        const vb = this.#vertexBuffers.get(materialAttribName);
+
+        if (vb === undefined || data == null || (data.length / RenderAttributes.componentCount(materialAttribName)) !== this.#count)
+            return false;
+
+        return vb.update(data);
     }
 
     setIndexData(indices)

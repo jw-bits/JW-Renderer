@@ -20,6 +20,8 @@
         m.setSampler(0, repeatSampler);       // Or set / change one later
 
     Samplers and textures belong to the caller; one can be shared by many Materials.
+    A texture can be a SubTexture of a TextureAtlas: it binds the atlas, and
+    models draw only its part (see Model2D.getUVRect()).
 */
 class Material
 {
@@ -138,20 +140,25 @@ class Material
         Two Materials built from the same objects get the same key, e.g.
         "s3|t7,9|p-,12" (shader 3, textures 7 and 9, unit 0 default sampler,
         unit 1 sampler 12). Uniform values aren't part of it. null if not loaded.
+        Each SubTexture counts as its own texture, so models reading their
+        SubTexture from a shared Material get the right one.
     */
     getKey()
     {
         if (this.#shader === null)
             return null;
 
-        return `s${Material.#idOf(this.#shader)}|${this.getTextureKey()}`;
+        return `s${Material.#idOf(this.#shader)}|${this.#makeTextureKey(false)}`;
     }
 
     /*
         Like getKey() without the shader: just the textures and samplers, e.g.
         "t7,9|p-,12". Materials with different shaders but the same textures
         and samplers share it, which is what MaterialBatcher's instanced
-        drawing needs (it uses its own shader). null if not loaded.
+        drawing needs (it uses its own shader). A SubTexture counts as its
+        atlas's Texture, since that's what it binds: SubTextures of one atlas
+        (and the atlas Texture itself) batch together, each drawing its own
+        UV rect. null if not loaded.
     */
     getTextureKey()
     {
@@ -159,11 +166,7 @@ class Material
             return null;
 
         if (this.#textureKey === null)
-        {
-            const textures = this.#textures.map((t) => Material.#idOf(t));
-            const samplers = this.#textures.map((t, i) => (this.#samplers[i] !== null) ? Material.#idOf(this.#samplers[i]) : "-");
-            this.#textureKey = `t${textures.join(",")}|p${samplers.join(",")}`;
-        }
+            this.#textureKey = this.#makeTextureKey(true);
 
         return this.#textureKey;
     }
@@ -265,6 +268,14 @@ class Material
 
         const sampler = this.#samplers[textureIndex] ?? Material.#getDefaultSampler(t.hasMipmaps());
         sampler.bind(textureIndex);
+    }
+
+    // The textures and samplers part of a key; byAtlas counts each SubTexture as its atlas's Texture
+    #makeTextureKey(byAtlas)
+    {
+        const textures = this.#textures.map((t) => Material.#idOf((byAtlas === true && t instanceof SubTexture) ? t.getTexture() : t));
+        const samplers = this.#textures.map((t, i) => (this.#samplers[i] !== null) ? Material.#idOf(this.#samplers[i]) : "-");
+            return `t${textures.join(",")}|p${samplers.join(",")}`;
     }
 
     static #idOf(obj)

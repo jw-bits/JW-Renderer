@@ -155,6 +155,11 @@ class FontManager
 
     Requesting the same url (with the same options) again returns the same
     Texture, sharing an in-progress load, so an image is only loaded once.
+
+    Atlases (see TextureAtlas) are kept the same way, one per JSON url.
+    Their SubTextures are Textures, so they go wherever one does:
+        const atlas = await textures.loadAtlas("./textures/checkers.json");
+        rect.load(atlas.getSubTexture("checker_king"), 64, 64);
 */
 class TextureManager
 {
@@ -162,11 +167,13 @@ class TextureManager
                                              255, 255, 255, 255, 255, 0, 255, 255]);
 
     #textures;       // Key -> { texture, promise }
+    #atlases;        // Key -> { atlas, promise }
     #defaultTexture;
 
     constructor()
     {
         this.#textures = new Map();
+        this.#atlases = new Map();
         this.#defaultTexture = new Texture(true, false);
 
         if (this.#defaultTexture.loadPixels(2, 2, TextureManager.#kDefaultPixels) === false)
@@ -236,13 +243,83 @@ class TextureManager
         }
     }
 
-    // Unloads every texture except the default
+    /*
+        Loads a TextureAtlas: the JSON at atlasUrl and the image beside it. Resolves
+        to the loaded atlas, or null on failure (there's no default atlas).
+        Requesting the same url again returns the same atlas, sharing a load.
+    */
+    async loadAtlas(atlasUrl, useMipmaps = true)
+    {
+        if (typeof atlasUrl !== "string" || atlasUrl.length === 0)
+        {
+            console.error("TextureManager.loadAtlas() needs an atlas JSON url");
+                return null;
+        }
+
+        const key = this.#key(atlasUrl, true, useMipmaps);
+        let entry = this.#atlases.get(key);
+
+        if (entry === undefined)
+        {
+            const atlas = new TextureAtlas(useMipmaps);
+            const promise = new Promise((resolve) => {
+                const started = atlas.load(atlasUrl, () => resolve(true), () => resolve(false));
+
+                if (started === false)
+                    resolve(false);
+            });
+
+            entry = { atlas, promise };
+            this.#atlases.set(key, entry); // Stored before loading, so a second request shares this load
+        }
+
+        if (await entry.promise === false)
+        {
+            if (this.#atlases.get(key) === entry)
+                this.#atlases.delete(key); // Don't keep failed atlases; a later request tries again
+
+            console.error(`TextureManager couldn't load the atlas ${atlasUrl}`);
+                return null;
+        }
+
+        return entry.atlas;
+    }
+
+    // The TextureAtlas for a url, or null if it isn't loaded or loading. It may still be loading; check isLoaded().
+    getAtlas(atlasUrl, useMipmaps = true)
+    {
+        return this.#atlases.get(this.#key(atlasUrl, true, useMipmaps))?.atlas ?? null;
+    }
+
+    hasAtlas(atlasUrl, useMipmaps = true)
+    {
+        return this.#atlases.has(this.#key(atlasUrl, true, useMipmaps));
+    }
+
+    // Unloads an atlas; its SubTextures stop being loaded
+    unloadAtlas(atlasUrl, useMipmaps = true)
+    {
+        const key = this.#key(atlasUrl, true, useMipmaps);
+        const entry = this.#atlases.get(key);
+
+        if (entry !== undefined)
+        {
+            entry.atlas.unload();
+            this.#atlases.delete(key);
+        }
+    }
+
+    // Unloads every texture and atlas except the default
     unloadAll()
     {
         for (const entry of this.#textures.values())
             entry.texture.unload();
 
+        for (const entry of this.#atlases.values())
+            entry.atlas.unload();
+
         this.#textures.clear();
+        this.#atlases.clear();
     }
 
     // *** Internal Methods ***

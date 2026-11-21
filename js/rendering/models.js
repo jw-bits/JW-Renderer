@@ -26,7 +26,9 @@
 
     UV rect: the part of the texture a model draws (getUVRect()); the whole
     texture unless a subclass says otherwise (Sprite draws one atlas frame,
-    Rect2D can tile and offset it).
+    Rect2D can tile and offset it). With a SubTexture (see TextureAtlas) in
+    texture unit 0, it's that SubTexture's part of the atlas, and a Sprite's
+    frames are within it.
 
     Instancing: canInstance() says whether MaterialBatcher may draw the model
     with its instanced shader: a plain quad filling width x height, drawing a
@@ -115,7 +117,7 @@ class Model2D
     canInstance() { return false; }
 
     // The part of the texture drawn, as a UVRect. Shared and read-only for models that draw all of it; don't change it.
-    getUVRect() { return Model2D.#kFullUVRect; }
+    getUVRect() { return this._getTextureUVRect(); }
 
     // Starts or stops calling onRasterScaleChanged() when WGLV's view scale changes
     listenForRasterScale(listen)
@@ -222,6 +224,16 @@ class Model2D
 
     _setLoaded(isLoaded) { this.#isLoaded = isLoaded; }
 
+    // Texture unit 0 if it's a SubTexture (see TextureAtlas), else null
+    _getSubTexture()
+    {
+        const t = this.#material?.getTexture(0) ?? null;
+            return (t instanceof SubTexture) ? t : null;
+    }
+
+    // The part of texture unit 0 to draw: a SubTexture's UV rect, or the whole texture. Read-only.
+    _getTextureUVRect() { return this._getSubTexture()?.getUVRect() ?? Model2D.#kFullUVRect; }
+
     /*
         For a subclass's load(): the Material to draw with. A loaded Texture gets a
         new Material on shader; a loaded Material is used as is. Returns null (with
@@ -278,6 +290,9 @@ class Model2D
     it to scroll). The texture's Sampler must wrap with REPEAT (or
     MIRRORED_REPEAT) for anything outside 0..1; the default sampler clamps. Both
     are part of getUVRect(), so tiled Rect2Ds still batch (see MaterialBatcher).
+
+    A SubTexture (see TextureAtlas) can't tile or offset: REPEAT would wrap the
+    whole atlas. It's drawn once, and setting a tile or offset logs an error.
 */
 class Rect2D extends Model2D
 {
@@ -295,12 +310,14 @@ class Rect2D extends Model2D
     setUVTile(x, y = x)
     {
         this.#uvRect.setUnclamped(this.#uvRect.getX(), this.#uvRect.getY(), x, y);
+        this.#checkSubTextureUVs("setUVTile");
     }
 
     // Shifts the texture, in texture widths (x) and heights (y)
     setUVOffset(x, y)
     {
         this.#uvRect.setUnclamped(x, y, this.#uvRect.getWidth(), this.#uvRect.getHeight());
+        this.#checkSubTextureUVs("setUVOffset");
     }
 
     getUVTileX() { return this.#uvRect.getWidth(); }
@@ -308,8 +325,8 @@ class Rect2D extends Model2D
     getUVOffsetX() { return this.#uvRect.getX(); }
     getUVOffsetY() { return this.#uvRect.getY(); }
 
-    // The offset and tile, for draw() and MaterialBatcher
-    getUVRect() { return this.#uvRect; }
+    // The offset and tile, for draw() and MaterialBatcher; a SubTexture's UV rect instead (no tiling)
+    getUVRect() { return this._getSubTexture()?.getUVRect() ?? this.#uvRect; }
 
     // _source is a Texture or a loaded Material. _width / _height default to its texture's size.
     load(_source, _width, _height)
@@ -342,6 +359,7 @@ class Rect2D extends Model2D
         this._setMaterial(material);
         this._setMesh(mesh);
         this._setLoaded(true);
+        this.#checkSubTextureUVs("load");
             return true;
     }
 
@@ -369,6 +387,17 @@ class Rect2D extends Model2D
         }
 
         return Rect2D.#kShader;
+    }
+
+    // *** Internal Methods ***
+
+    // Reports a tile or offset set on a SubTexture, which can't use them (see the top of Rect2D)
+    #checkSubTextureUVs(methodName)
+    {
+        const r = this.#uvRect;
+
+        if (this._getSubTexture() !== null && (r.getX() !== 0.0 || r.getY() !== 0.0 || r.getWidth() !== 1.0 || r.getHeight() !== 1.0))
+            console.error(`Rect2D.${methodName}(): a SubTexture can't be tiled or offset; it's drawn once`);
     }
 }
 
@@ -718,282 +747,244 @@ class Text2D extends Model2D
 }
 
 /*
-    Particles2D - Textured particles in design units, drawn as instanced quads
-    and simulated on the GPU (see Particles2DShaderSource).
+    TextGlyphs2D - Text built from a TextAtlas's glyphs: one quad per
+    character, in one mesh, drawn in one call. setText() only rebuilds that
+    mesh, so it's cheap to change every frame (a timer, a score). Every
+    TextGlyphs2D on the same TextAtlas shares its Material, so MaterialBatcher
+    draws them one after another with a single bind.
 
-    emit() writes one particle into the next slot of a ring buffer; nothing
-    about it changes afterwards. Each frame the shader works out every
-    particle's position from its start, velocity, the gravity and the time
-    since it was emitted, and fades it out over its life. So update() only
-    advances the clock, and render() is one draw call with no per-particle
-    work on the CPU. Only newly emitted particles are uploaded.
+    Like Text2D: sizes and positions are in design units, the glyphs are
+    white and setColor() tints them, and its size is the text plus the
+    padding around it, so alignment matches Text2D's.
+
+    Raster scale: by default it isn't drawn again when the view's scale
+    changes, so it stretches with the view. listenForRasterScale(true)
+    makes it redraw its TextAtlas at the new scale, like Text2D, so it stays
+    sharp; the setting is kept through unload() and setText(). The atlas is
+    shared, so every TextGlyphs2D on it rebuilds its quads and gets sharp
+    too, listening or not.
 
     Usage:
-        let sparks = new Particles2D();
-        sparks.load(256, texture);         // Up to 256 alive at once
-        sparks.setGravity(0, -600);        // Design units per second squared
-        sparks.setEndScale(0.3);           // Shrink to 30% over each life
+        let digits = new TextAtlas(font, "0123456789:", 40, "bold");
+        let time = new TextGlyphs2D(digits);
+        time.setColor(new Vector4(1, 1, 0, 1));
+        time.setPos(400, 300, Alignment.kMiddleCenter);
+        time.setText("12:34"); // isLoaded() is true once this succeeds
+        ...
+        time.render();
 
-        sparks.emit(x, y, vx, vy, 0.6, 12, color); // Position, velocity, life (s), size, color
+    Characters missing from the TextAtlas draw as its fallback "?". The
+    TextAtlas belongs to the caller; unload it after the TextGlyphs2Ds.
 
-        // Each frame
-        sparks.update(dt);
-        batcher.submitDrawable(sparks, layer); // Or sparks.render()
-
-    When the ring is full, a new particle replaces the oldest one.
+    Each glyph can be moved on its own with setGlyphOffsets() (see
+    TextEffect's wave); that re-uploads the positions only. setText()
+    clears the offsets.
 */
-class Particles2D
+class TextGlyphs2D extends Model2D
 {
-    static #kShader = null;
-    static #kFloatsPerParticle = 11; // Motion (4), start time + life + size (3), color (4)
-    static #kRebaseTime = 600.0;     // Seconds; the clock restarts after this once nothing's alive
+    #textAtlas;
+    #text;
+    #mesh;         // The mesh given to the base, kept to update its positions
+    #positions;    // Each glyph quad's corners without offsets (x, y, z per vertex)
+    #moved;        // Scratch for #positions plus offsets
+    #glyphCount;
+    #wantsRasterScale;  // Set by listenForRasterScale(); kept through unload()
+    #onAtlasRasterized; // Given to the TextAtlas: rebuilds the quads after it draws the glyphs again
 
-    // Scratch values for uploading uniforms in render()
-    static #kRes = new Vector2();
-    static #kGravityScaleTime = new Vector4(); // u_vec0: (gravityX, gravityY, endScale, time)
-
-    #material;
-    #mesh;        // InstancedQuadMesh
-    #data;        // CPU copy of the instance buffer
-
-    #capacity;
-    #next;        // Next slot to write
-    #dirtyMin;    // Slots written since the last upload
-    #dirtyMax;
-
-    #time;        // Seconds since the clock (re)started
-    #aliveUntil;  // When the last particle emitted so far dies
-
-    #gravity;
-    #endScale;
-
-    #isLoaded;
-
-    constructor()
+    // _textAtlas is a loaded TextAtlas, which can be shared by many TextGlyphs2Ds
+    constructor(_textAtlas)
     {
-        this.#material = null;
-        this.#mesh = new InstancedQuadMesh();
-        this.#data = null;
+        super();
 
-        this.#capacity = 0;
-        this.#next = 0;
-        this.#dirtyMin = Infinity;
-        this.#dirtyMax = -1;
+        this.#textAtlas = _textAtlas;
+        this.#text = null;
+        this.#mesh = null;
+        this.#positions = null;
+        this.#moved = null;
+        this.#glyphCount = 0;
+        this.#wantsRasterScale = false;
+        this.#onAtlasRasterized = () => {
+            if (this.#text !== null)
+                this.#buildMesh(this.#text); // New UVs and sizes; glyph offsets are cleared
+        };
 
-        this.#time = 0.0;
-        this.#aliveUntil = 0.0;
-
-        this.#gravity = new Vector2();
-        this.#endScale = 1.0;
-
-        this.#isLoaded = false;
+        if ((_textAtlas instanceof TextAtlas) === false)
+        {
+            console.error("TextGlyphs2D needs a TextAtlas");
+            this.#textAtlas = null;
+        }
     }
 
-    /*
-        maxParticles is how many can be alive at once. The texture is drawn on each
-        particle; sampler is optional (see Material). Returns false on failure.
-    */
-    load(maxParticles, texture, sampler = null)
+    // Returns false if the text is null, the TextAtlas isn't loaded, or the mesh couldn't be built
+    setText(_text)
     {
-        if (this.#isLoaded === true)
-            return false; // Unload first
-
-        if (Number.isInteger(maxParticles) === false || maxParticles <= 0)
-        {
-            console.error("Particles2D.load() needs a particle count > 0");
-                return false;
-        }
-
-        if ((texture instanceof Texture) === false || texture.isLoaded() === false)
-        {
-            console.error("Particles2D.load() needs a loaded Texture");
-                return false;
-        }
-
-        const shader = Particles2D.#getShader();
-
-        if (shader === null)
+        if (_text == null)
             return false;
 
-        let material = new Material();
-
-        if (material.load(shader, [texture], (sampler !== null) ? [sampler] : null) === false)
+        if (this.#textAtlas === null || this.#textAtlas.isLoaded() === false)
         {
-            console.error("Particles2D couldn't create its material");
+            console.error("TextGlyphs2D.setText(): the TextAtlas isn't loaded");
                 return false;
         }
 
-        const stride = Particles2D.#kFloatsPerParticle;
+        if (_text === this.#text && this.isLoaded() === true)
+            return true; // Nothing changed
 
-        // Unit quad centered on the particle, shared by every instance, plus the interleaved per-particle values
-        const attribs = [
-            [Particles2DShaderSource.kMotionLocation, 4, 0],
-            [Particles2DShaderSource.kLifeLocation, 3, 4],
-            [Particles2DShaderSource.kColorLocation, 4, 7]
-        ];
-
-        if (this.#mesh.load(new Float32Array([-0.5, -0.5,  0.5, -0.5,  0.5, 0.5,  -0.5, 0.5]), stride, attribs) === false)
+        if (this.#buildMesh(_text) === false)
             return false;
 
-        this.#material = material;
-        this.#capacity = maxParticles;
-        this.#data = new Float32Array(maxParticles * stride); // All zero: life 0, so every slot starts dead
-        this.#mesh.setInstanceData(this.#data);               // Allocated once; then only changed slots are uploaded
-
-        this.#next = 0;
-        this.#dirtyMin = Infinity;
-        this.#dirtyMax = -1;
-        this.#time = 0.0;
-        this.#aliveUntil = 0.0;
-        this.#isLoaded = true;
+        this.#text = _text;
             return true;
     }
 
-    // Design units per second squared, e.g. (0, -600) pulls particles down
-    setGravity(gx, gy) { this.#gravity.set(gx, gy); }
-    getGravity() { return this.#gravity; }
+    getText() { return this.#text; }
+    getTextAtlas() { return this.#textAtlas; }
 
-    // How big a particle is at the end of its life, as a fraction of its starting size (1 keeps the size)
-    setEndScale(scale) { this.#endScale = scale; }
-    getEndScale() { return this.#endScale; }
+    // Characters in the text (each one quad)
+    getGlyphCount() { return this.#glyphCount; }
 
     /*
-        Starts one particle at (x, y), moving at (vx, vy) design units per second,
-        living for life seconds, size design units across, tinted by color (its alpha
-        fades to 0 over the life). Returns false if not loaded or life <= 0.
+        true redraws the TextAtlas at the new scale when the view's scale changes,
+        so the text stays sharp; false (the default) lets it stretch with the
+        view. The setting is kept through unload() and setText().
     */
-    emit(x, y, vx, vy, life, size, color)
+    listenForRasterScale(listen)
     {
-        if (this.#isLoaded === false || life <= 0.0)
+        this.#wantsRasterScale = (listen === true);
+        super.listenForRasterScale(this.#wantsRasterScale);
+    }
+
+    isListeningForRasterScale() { return this.#wantsRasterScale; }
+
+    // The view scale changed while listening: redraw the atlas, which rebuilds the quads of every TextGlyphs2D on it
+    onRasterScaleChanged(newScale)
+    {
+        if (this.#text !== null && this.#textAtlas !== null)
+            this.#textAtlas.rasterize();
+    }
+
+    /*
+        Moves each glyph by (x, y) design units from where the text puts it:
+        offsets holds x, y pairs, one per glyph (getGlyphCount()), or is null to
+        put them all back. The size and alignment don't change. Returns false
+        if not loaded or offsets is too short.
+    */
+    setGlyphOffsets(offsets)
+    {
+        if (this.isLoaded() === false || this.#mesh === null)
             return false;
 
-        const slot = this.#next;
-        this.#next = (slot + 1) % this.#capacity;
+        if (offsets === null)
+            return this.#mesh.updateVertexData(RenderAttributes.kPosition, this.#positions);
 
-        let d = this.#data;
-        let o = slot * Particles2D.#kFloatsPerParticle;
+        if (offsets.length < this.#glyphCount * 2)
+        {
+            console.error(`TextGlyphs2D.setGlyphOffsets() needs ${this.#glyphCount * 2} values (x, y per glyph)`);
+                return false;
+        }
 
-        d[o++] = x;
-        d[o++] = y;
-        d[o++] = vx;
-        d[o++] = vy;
-        d[o++] = this.#time;
-        d[o++] = life;
-        d[o++] = size;
-        d[o++] = color.x;
-        d[o++] = color.y;
-        d[o++] = color.z;
-        d[o++] = color.w;
+        const base = this.#positions;
+        let moved = this.#moved;
 
-        this.#markDirty(slot, slot);
-        this.#aliveUntil = Math.max(this.#aliveUntil, this.#time + life);
-            return true;
+        for (let i = 0; i < this.#glyphCount; ++i)
+        {
+            const dx = offsets[i * 2];
+            const dy = offsets[(i * 2) + 1];
+
+            for (let corner = 0; corner < 4; ++corner)
+            {
+                const p = (i * 12) + (corner * 3);
+                moved[p] = base[p] + dx;
+                moved[p + 1] = base[p + 1] + dy;
+                moved[p + 2] = base[p + 2];
+            }
+        }
+
+        return this.#mesh.updateVertexData(RenderAttributes.kPosition, moved);
     }
 
-    // Advances the clock; the GPU does the rest
-    update(dt)
-    {
-        if (this.#isLoaded === false)
-            return;
-
-        this.#time += dt;
-
-        // Keep the clock small (float precision on the GPU): restart it once nothing's alive
-        if (this.#time > Particles2D.#kRebaseTime && this.#time >= this.#aliveUntil)
-            this.clear();
-    }
-
-    // True while any emitted particle is still alive
-    hasLiveParticles() { return (this.#isLoaded === true && this.#time < this.#aliveUntil); }
-
-    getCapacity() { return this.#capacity; }
-    isLoaded() { return this.#isLoaded; }
-
-    // Kills every particle and restarts the clock
-    clear()
-    {
-        if (this.#isLoaded === false)
-            return;
-
-        this.#data.fill(0.0); // Life 0: dead
-        this.#markDirty(0, this.#capacity - 1);
-        this.#next = 0;
-        this.#time = 0.0;
-        this.#aliveUntil = 0.0;
-    }
-
-    // One instanced draw call; skipped when nothing's alive
-    render()
-    {
-        if (this.hasLiveParticles() === false)
-            return;
-
-        this.#upload();
-
-        const m = this.#material;
-        Particles2D.#kRes.set(WGLV.getWidth(), WGLV.getHeight());
-        Particles2D.#kGravityScaleTime.set(this.#gravity.x, this.#gravity.y, this.#endScale, this.#time);
-
-        m.bind(); // Shader, texture, sampler
-        m.setUniform(RenderUniforms.kResolution, Particles2D.#kRes);
-        m.setUniform(RenderUniforms.kVector0, Particles2D.#kGravityScaleTime);
-
-        this.#mesh.render(this.#capacity);
-    }
-
-    // Frees the GPU objects; load() can be called again afterwards. The texture belongs to the caller.
+    // Frees the mesh; the TextAtlas belongs to the caller. setText() loads it again, listening again if it was.
     unload()
     {
-        this.#mesh.unload();
+        const wantsRasterScale = this.#wantsRasterScale;
 
-        if (this.#material !== null)
-            this.#material.unload(); // Leaves the shared shader and the texture alone
-
-        this.#material = null;
-        this.#data = null;
-        this.#capacity = 0;
-        this.#isLoaded = false;
+        super.unload(); // Stops listening, through listenForRasterScale(false)
+        this.#wantsRasterScale = wantsRasterScale;
+        this.#textAtlas?.removeRasterizeListener(this.#onAtlasRasterized);
+        this.#text = null;
+        this.#mesh = null;
+        this.#positions = null;
+        this.#moved = null;
+        this.#glyphCount = 0;
     }
 
     // *** Internal Methods ***
 
-    #markDirty(first, last)
+    /*
+        One quad per character, each its glyph's whole cell, placed side by side
+        by advance width from the left padding. Its UVs are the glyph's
+        SubTexture rect in the atlas, so it draws with the atlas Texture as is.
+    */
+    #buildMesh(text)
     {
-        this.#dirtyMin = Math.min(this.#dirtyMin, first);
-        this.#dirtyMax = Math.max(this.#dirtyMax, last);
-    }
+        const ta = this.#textAtlas;
+        const chars = Array.from(text);
+        const quadCount = Math.max(1, chars.length); // Empty text: one empty quad, so it still has a mesh and a size
+        const height = ta.getLineHeight();
 
-    // Sends the slots written since the last upload, as one range
-    #upload()
-    {
-        if (this.#dirtyMax < this.#dirtyMin)
-            return;
+        let pos = new Float32Array(quadCount * 4 * 3);
+        let uvs = new Float32Array(quadCount * 4 * 2);
+        let indices = ((quadCount * 4) > 65535) ? new Uint32Array(quadCount * 6) : new Uint16Array(quadCount * 6);
+        let penX = 0.0; // Each cell's left edge: the advances so far (the cell holds the left padding)
 
-        const stride = Particles2D.#kFloatsPerParticle;
-        const first = this.#dirtyMin * stride;
-        const count = (this.#dirtyMax - this.#dirtyMin + 1) * stride;
-
-        this.#mesh.updateInstanceData(this.#data, first, count);
-
-        this.#dirtyMin = Infinity;
-        this.#dirtyMax = -1;
-    }
-
-    static #getShader()
-    {
-        if (Particles2D.#kShader === null)
+        for (let i = 0; i < chars.length; ++i)
         {
-            let shader = new Shader();
+            const glyph = ta.getGlyph(chars[i]);
+            const r = glyph.subTexture.getUVRect();
+            const left = penX;
+            const right = penX + glyph.width;
+            const p = i * 12;
+            const t = i * 8;
+            const v = i * 4;
 
-            if (shader.load(Particles2DShaderSource.VS, Particles2DShaderSource.FS) === false)
-            {
-                console.error("Particles2D couldn't build its shader");
-                    return null;
-            }
+            // 3 - 2
+            // |   |
+            // 0 - 1
+            pos.set([left, 0.0, 0.0,  right, 0.0, 0.0,  right, height, 0.0,  left, height, 0.0], p);
+            uvs.set([r.getLeft(), r.getBottom(),  r.getRight(), r.getBottom(),  r.getRight(), r.getTop(),  r.getLeft(), r.getTop()], t);
+            indices.set([v, v + 1, v + 2,  v + 2, v + 3, v], i * 6);
 
-            Particles2D.#kShader = shader;
+            penX += glyph.advance;
         }
 
-        return Particles2D.#kShader;
+        if (chars.length === 0)
+            indices.set([0, 1, 2,  2, 3, 0], 0); // All corners at (0, 0): draws nothing
+
+        let mesh = new StaticMesh();
+
+        if (mesh.setVertexData(RenderAttributes.kPosition, pos) === false || mesh.setVertexData(RenderAttributes.kUV0, uvs) === false || mesh.setIndexData(indices) === false)
+        {
+            console.error("TextGlyphs2D couldn't build its mesh for: " + text);
+            mesh.unload();
+                return false;
+        }
+
+        mesh.bindAttribs();
+        this._setMesh(mesh); // Frees the old one
+        this.#mesh = mesh;
+        this.#positions = pos;
+        this.#moved = new Float32Array(pos.length);
+        this.#glyphCount = chars.length;
+        this._setSize(penX + (ta.getPadding() * 2.0), height); // Keeps the anchor and alignment from setPos()
+        this._setMaterial(ta.getMaterial());
+        this._setLoaded(true);
+
+        // Rebuild when the atlas draws its glyphs again; listen for scale changes if asked to
+        ta.addRasterizeListener(this.#onAtlasRasterized);
+
+        if (this.#wantsRasterScale === true)
+            super.listenForRasterScale(true);
+
+            return true;
     }
 }

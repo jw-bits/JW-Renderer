@@ -172,6 +172,8 @@ const Rect2DInstancedShaderSource = {
     collapsed off-screen, so dead slots cost almost nothing.
 
     Uniforms: u_res, and u_vec0 = (gravityX, gravityY, endScale, time), time in seconds.
+    u_uvOffset / u_uvTile are the part of the texture drawn on each particle:
+    (0, 0) / (1, 1) for all of it, or a SubTexture's UV rect (see TextureAtlas).
 
     The mesh is a unit quad (-0.5, -0.5) - (0.5, 0.5), centered on the particle.
     Per instance:
@@ -192,6 +194,8 @@ const Particles2DShaderSource = {
 
         uniform vec2 u_res;
         uniform vec4 u_vec0; // (gravityX, gravityY, endScale, time)
+        uniform vec2 u_uvOffset;
+        uniform vec2 u_uvTile;
 
         out vec2 v_uv0;
         out vec4 v_color;
@@ -214,7 +218,7 @@ const Particles2DShaderSource = {
 
             gl_Position = vec4(((p / u_res) * 2.0) - 1.0, 0.0, 1.0);
 
-            v_uv0 = a_pos + 0.5;
+            v_uv0 = u_uvOffset + ((a_pos + 0.5) * u_uvTile);
             v_color = vec4(a_iColor.rgb, a_iColor.a * (1.0 - t));
         }
     `,

@@ -8,6 +8,11 @@
     Options, set when it's created:
         _flipY       Flip rows on upload, so V runs up (matches the 2D models)
         _makeMipmaps Build mipmaps on every upload, so a Sampler can use a *_MIPMAP_* filter
+        _isView      For SubTexture only: no GL texture of its own (it overrides every method)
+
+    A TextureAtlas (texture_atlas.js) holds one Texture and names parts of it
+    as SubTextures, which are Textures too, so anything that takes a Texture
+    takes one of them.
 */
 class Texture
 {
@@ -25,14 +30,18 @@ class Texture
     static #pixels = new Uint8Array([255, 0, 255, 255, 255, 255, 255, 255,
                                     255, 255, 255, 255, 255, 0, 255, 255]);
 
-    constructor(_flipY = true, _makeMipmaps = true)
+    constructor(_flipY = true, _makeMipmaps = true, _isView = false)
     {
         this.#flipY = _flipY;
         this.#hasMipmaps = _makeMipmaps;
         this.#url = null;
         this.#isLoaded = false;
+        this.#texId = 0;
+        this.#width = 0;
+        this.#height = 0;
 
-        this.#initTexture();
+        if (_isView === false)
+            this.#initTexture();
     }
 
     // Loads an image. onLoadFailCB is called if the image can't be loaded (the texture is unloaded first).
