@@ -248,7 +248,7 @@ function appSetup()
     loadAssets().then(appOnAssetsLoaded);
 }
 
-// Failed loads come back as the managers' default texture / font, so this always finishes
+// Failed loads come back as the managers' white texture / default font, so this always finishes
 async function loadAssets()
 {
     gTextureManager = new TextureManager();
@@ -283,15 +283,15 @@ async function loadAssets()
 
     names.forEach((name, i) => { gTextures[name] = textures[i]; });
 
-    // A failed atlas, or a name it doesn't have, falls back to the default texture like a failed image
+    // A failed atlas, or a name it doesn't have, falls back to the white texture like a failed image
     for (const name of Object.keys(atlasTextures))
     {
         gTextures[name] = atlas?.getSubTexture(atlasTextures[name]) ?? null;
 
         if (gTextures[name] === null)
         {
-            console.error(`No "${atlasTextures[name]}" in ${ATLAS_URL}; using the default texture`);
-            gTextures[name] = gTextureManager.getDefault();
+            console.error(`No "${atlasTextures[name]}" in ${ATLAS_URL}; using the white texture`);
+            gTextures[name] = gTextureManager.getWhiteTexture();
         }
     }
 

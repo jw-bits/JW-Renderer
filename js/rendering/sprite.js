@@ -96,9 +96,8 @@ class SpriteSequence
 
     Sprites load from a Texture (the Sprite makes its own Material) or a Material
     built on Sprite.getDefaultShader(), e.g. one shared from MaterialManager.
-
-    The Texture can be a SubTexture of a TextureAtlas: frames (and the grid)
-    are then within the SubTexture, as if it were the whole texture.
+    With a SubTexture of a TextureAtlas, frames (and the grid) are within it,
+    as if it were the whole texture.
 */
 class Sprite extends Model2D
 {
@@ -136,10 +135,12 @@ class Sprite extends Model2D
     }
 
     /*
-        _source is a loaded Texture, or a loaded Material built on Sprite.getDefaultShader().
-        rows x cols is the grid over the whole atlas (1 x 1: the whole texture is one frame).
-        _width / _height are the size in design units; by default one grid frame's size in
-        texture pixels. Shows grid frame 0. Returns false on failure.
+        _source is one of:
+            A loaded Texture (or a SubTexture of a TextureAtlas)
+            A loaded Material built on Sprite.getDefaultShader()
+        rows x cols is the grid over the whole texture or SubTexture (1 x 1: all of it
+        is one frame). _width / _height are the size in design units; by default one grid
+        frame's size in texture pixels. Shows grid frame 0. Returns false on failure.
     */
     load(_source, _width, _height, rows = 1, cols = 1)
     {

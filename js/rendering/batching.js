@@ -38,6 +38,15 @@
     Anything else that draws itself (e.g. Particles2D) can go on a layer with
     submitDrawable(obj, layer): obj.render() is called after that layer's
     models, in submission order. Nothing is captured; it draws as it is then.
+
+    Lighting: setLayerLit(layer, true) lights every instanced model on that
+    layer with the LightSet's lights (see lighting.js), still one draw call per
+    group. A layer is all lit or not lit at all. Models keep their usual
+    Materials: the batcher swaps its instanced shader for a lit one. A group
+    whose Material has a second texture uses it as the normal map. Models
+    drawn one at a time (RoundedRect2D, NinePatch2D, custom shaders) and
+    drawables draw as they always do. Call LightSet.apply() each frame before
+    render().
 */
 class MaterialBatcher
 {
@@ -51,6 +60,7 @@ class MaterialBatcher
     #layers;      // Per layer: the submitted entries
     #groups;      // Per layer: group key (texture key string for instanced, else the Material) -> group number, in order of first submission
     #drawables;   // Per layer: objects with render(), drawn after the layer's models
+    #litLayers;   // Per layer: true if its instanced models are lit
     #pool;        // Entry objects reused from frame to frame
     #poolUsed;
 
@@ -61,6 +71,10 @@ class MaterialBatcher
     #instData;
     #instCapacity;
 
+    // Lit instanced drawing (LightSet's shaders): [one texture, with a normal map], each
+    // { shader, resLocation }; null until first needed, false if it couldn't be built
+    #litShaders;
+
     #drawCalls;     // Draw calls made by the last render()
 
     constructor()
@@ -68,13 +82,17 @@ class MaterialBatcher
         this.#layers = [];
         this.#groups = [];
         this.#drawables = [];
+        this.#litLayers = [];
 
         for (let i = 0; i < MaterialBatcher.kLayerCount; ++i)
         {
             this.#layers.push([]);
             this.#groups.push(new Map());
             this.#drawables.push([]);
+            this.#litLayers.push(false);
         }
+
+        this.#litShaders = [null, null];
 
         this.#pool = [];
         this.#poolUsed = 0;
@@ -163,6 +181,25 @@ class MaterialBatcher
             return true;
     }
 
+    /*
+        Lights every instanced model on a layer (true) or none of them (false, the
+        default). Kept until changed; clear() and render() leave it alone. Returns
+        false if the layer isn't valid.
+    */
+    setLayerLit(layer, lit)
+    {
+        if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
+        {
+            console.error(`MaterialBatcher.setLayerLit(): layer must be ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}`);
+                return false;
+        }
+
+        this.#litLayers[layer] = (lit === true);
+            return true;
+    }
+
+    isLayerLit(layer) { return (this.#litLayers[layer] === true); }
+
     // Draws everything submitted since the last render(), back layer to front, then empties the batcher
     render()
     {
@@ -170,7 +207,7 @@ class MaterialBatcher
 
         for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
         {
-            this.#renderModels(this.#layers[l]);
+            this.#renderModels(this.#layers[l], this.#litLayers[l]);
 
             for (const d of this.#drawables[l])
             {
@@ -217,12 +254,13 @@ class MaterialBatcher
         this.#instShader = null;
         this.#instData = null;
         this.#instCapacity = 0;
+        this.#litShaders = [null, null]; // LightSet's; shared, so left loaded
     }
 
     // *** Internal Methods ***
 
-    // Draws one layer's models, grouped by Material
-    #renderModels(list)
+    // Draws one layer's models, grouped by Material; lit lights the instanced groups
+    #renderModels(list, lit)
     {
         if (list.length === 0)
             return;
@@ -242,7 +280,7 @@ class MaterialBatcher
                 ++end;
 
             if (list[i].instanced === true)
-                this.#drawInstanced(list, i, end);
+                this.#drawInstanced(list, i, end, lit);
             else
                 this.#drawEach(list, i, end);
 
@@ -276,8 +314,8 @@ class MaterialBatcher
         }
     }
 
-    // Draws quads sharing textures and samplers in one instanced call
-    #drawInstanced(list, start, end)
+    // Draws quads sharing textures and samplers in one instanced call; lit uses a lit shader
+    #drawInstanced(list, start, end, lit)
     {
         const gl = WGLV.context;
         const count = end - start;
@@ -311,10 +349,25 @@ class MaterialBatcher
             d[o++] = e.uvRect.getHeight();
         }
 
-        // Any Material in the group binds the same textures and samplers; then switch to the instanced shader
-        list[start].material.bind();
-        this.#instShader.bind();
-        gl.uniform2f(this.#instResLocation, WGLV.getWidth(), WGLV.getHeight());
+        // Any Material in the group has the same textures and samplers; bind just those, then the instanced shader
+        const material = list[start].material;
+        let shader = this.#instShader;
+        let resLocation = this.#instResLocation;
+
+        if (lit === true)
+        {
+            const litShader = this.#getLitShader(material.getTexture(1) !== null); // Texture 1 is the normal map
+
+            if (litShader !== false)
+            {
+                shader = litShader.shader;
+                resLocation = litShader.resLocation;
+            }
+        }
+
+        material.bind(false, true);
+        shader.bind();
+        gl.uniform2f(resLocation, WGLV.getWidth(), WGLV.getHeight());
 
         this.#instMesh.updateInstanceData(d, 0, count * stride);
         this.#instMesh.render(count);
@@ -336,6 +389,35 @@ class MaterialBatcher
         this.#instData = new Float32Array(capacity * MaterialBatcher.#kFloatsPerInstance);
         this.#instCapacity = capacity;
         this.#instMesh.setInstanceData(this.#instData);
+    }
+
+    // LightSet's lit instanced shader, set up the first time; false (drawn unlit) if it can't be built
+    #getLitShader(withNormalMap)
+    {
+        const i = (withNormalMap === true) ? 1 : 0;
+
+        if (this.#litShaders[i] === null)
+        {
+            const gl = WGLV.context;
+            const shader = (withNormalMap === true) ? LightSet.getInstancedNormalMapShader() : LightSet.getInstancedShader();
+
+            if (shader === null)
+            {
+                console.error("MaterialBatcher: a lit shader couldn't be built; lit layers will draw unlit");
+                this.#litShaders[i] = false;
+            }
+            else
+            {
+                // Texture units never change; uniform values stay with the program
+                shader.bind();
+                gl.uniform1i(shader.getUniform("u_tex0"), 0);
+                gl.uniform1i(shader.getUniform("u_tex1"), 1); // null location (no normal map) is ignored
+
+                this.#litShaders[i] = { shader: shader, resLocation: shader.getUniform("u_res") };
+            }
+        }
+
+        return this.#litShaders[i];
     }
 
     #setupInstancing()

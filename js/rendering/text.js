@@ -115,7 +115,7 @@ class TextCanvas
 
     Usage:
         const font = await gFontManager.load("./fonts/MyFont-Regular.ttf");
-        let digits = new TextAtlas(font, "0123456789:", 40, "bold");
+        let digits = new TextAtlas(font, TextAtlas.kDigits + ":", 40, "bold"); // Or kAlphabet, kAscii
 
         let time = new TextGlyphs2D(digits);
         time.setPos(100, 50, Alignment.kMiddleCenter);
@@ -128,6 +128,11 @@ class TextAtlas
 {
     static kFallbackChar = "?";
     static #kMaxRowPixels = 2048; // The atlas starts a new row of glyphs past this
+
+    // Character presets for the constructor's _glyphs; join them for more than one (e.g. kDigits + ":")
+    static kDigits = "0123456789";
+    static kAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    static kAscii = String.fromCharCode(...Array.from({ length: 95 }, (_, i) => 32 + i)); // Every printable ASCII character, space (32) - tilde (126)
 
     #font;
     #fontSize;

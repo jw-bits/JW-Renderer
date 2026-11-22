@@ -38,7 +38,7 @@ class BaseTexture
     // The part of getTexture() this is, as a UVRect: all of it (UVRect.kFull). Shared and read-only.
     getUVRect() { return UVRect.kFull; }
 
-    // *** For subclasses ***
+    // *** Subclass Methods ***
 
     _setSize(width, height)
     {

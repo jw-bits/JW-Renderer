@@ -51,6 +51,166 @@ const Rect2DShaderSource = {
 };
 
 /*
+    Per-pixel lighting for Rect2D, RoundedRect2D and NinePatch2D (they share
+    Rect2D's vertex inputs and uniforms). The lights come from a LightSet
+    (lighting.js), which uploads them once per frame.
+
+    The 2D view lies on the z = 0 plane, in design units, +Y up: lights at
+    negative z are behind it, positive z in front. Each pixel is lit at
+    (x, y, 0) with a surface normal of (0, 0, 1), facing the viewer, or the
+    normal map's (LitNormalMapRect2DShaderSource).
+
+        u_ambient       (r, g, b, lightCount); the color is used as is, lightCount (0 - 4,
+                        1 by default) is how many of slots 0 - 3 are lit; 0 is ambient only
+        u_lightPosN     Point light: (x, y, z, range), range > 0, falling off to nothing at range
+                        Directional light: (direction toward the light, normalized, 0)
+        u_lightColorN   (r, g, b, intensity); intensity 0 is off
+
+    Lighting is ambient plus Lambert diffuse, multiplied with the texture,
+    then with u_color. Alpha is the texture's times u_color's.
+*/
+const LightingSharedSource = {
+    // Vertex shader: Rect2D's, plus v_pos, the pixel's position in design units
+    VS: `#version 300 es
+        layout(location = 5) in vec3 a_pos;
+        layout(location = 1) in vec2 a_uv0;
+
+        uniform vec2 u_res;
+        uniform vec3 u_scale;
+
+        // u_vec0 is (x, y, width / 2, height / 2); scale and rotation pivot on the rect's center
+        uniform vec4 u_vec0;
+
+        uniform vec2 u_uvOffset;
+        uniform vec2 u_uvTile;
+
+        out vec2 v_uv0;
+        out vec2 v_pos;
+
+        void main() {
+            vec2 ssPos = (a_pos.xy - u_vec0.zw) * u_scale.xy;
+
+            float sa = sin(u_scale.z);
+            float ca = cos(u_scale.z);
+
+            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
+                             ssPos.x * -sa + ssPos.y * ca);
+
+            v_pos = rPos + u_vec0.zw + u_vec0.xy;
+
+            vec2 cs = ((v_pos / u_res) * 2.0) - 1.0;
+            gl_Position = vec4(cs, 0.0, 1.0);
+
+            v_uv0 = u_uvOffset + (a_uv0 * u_uvTile);
+        }
+    `,
+
+    // Fragment shader code shared by both lit shaders: the uniforms and lightAll()
+    FS: `
+        uniform vec4 u_ambient;
+        uniform vec4 u_lightPos0;
+        uniform vec4 u_lightPos1;
+        uniform vec4 u_lightPos2;
+        uniform vec4 u_lightPos3;
+        uniform vec4 u_lightColor0;
+        uniform vec4 u_lightColor1;
+        uniform vec4 u_lightColor2;
+        uniform vec4 u_lightColor3;
+
+        // One light's diffuse at surface point p with unit normal n
+        vec3 lightOne(vec4 lightPos, vec4 lightColor, vec3 p, vec3 n) {
+            if (lightColor.a <= 0.0)
+                return vec3(0.0);
+
+            vec3 l = lightPos.xyz;
+            float falloff = 1.0;
+
+            if (lightPos.w > 0.0) {
+                vec3 toLight = lightPos.xyz - p;
+                float dist = length(toLight);
+                float f = clamp(1.0 - (dist / lightPos.w), 0.0, 1.0);
+
+                l = toLight / max(dist, 0.0001);
+                falloff = f * f;
+            }
+
+            return lightColor.rgb * (lightColor.a * falloff * max(dot(n, l), 0.0));
+        }
+
+        // Ambient plus the first u_ambient.w lights (0 - 4; 0 is ambient only), at p with unit normal n
+        vec3 lightAll(vec3 p, vec3 n) {
+            int count = int(u_ambient.w + 0.5);
+            vec3 c = u_ambient.rgb;
+
+            if (count >= 1) c += lightOne(u_lightPos0, u_lightColor0, p, n);
+            if (count >= 2) c += lightOne(u_lightPos1, u_lightColor1, p, n);
+            if (count >= 3) c += lightOne(u_lightPos2, u_lightColor2, p, n);
+            if (count >= 4) c += lightOne(u_lightPos3, u_lightColor3, p, n);
+
+            return c;
+        }
+    `
+};
+
+// Lit with one texture (u_tex0); every pixel faces the viewer
+const LitRect2DShaderSource = {
+    VS: LightingSharedSource.VS,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+        uniform vec4 u_color;
+
+        in vec2 v_uv0;
+        in vec2 v_pos;
+        out vec4 fragColor;
+        ${LightingSharedSource.FS}
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            vec3 light = lightAll(vec3(v_pos, 0.0), vec3(0.0, 0.0, 1.0));
+            fragColor = vec4(c.rgb * light, c.a) * u_color;
+        }
+    `
+};
+
+/*
+    Lit with a texture (u_tex0) and a tangent-space normal map (u_tex1), read
+    with the same UVs. The normal map is OpenGL style (green is +Y, up the
+    texture), which matches textures uploaded with flipY (Texture's default).
+    The normals turn with the model's rotation and flip with a negative scale.
+*/
+const LitNormalMapRect2DShaderSource = {
+    VS: LightingSharedSource.VS,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+        uniform sampler2D u_tex1;
+        uniform vec4 u_color;
+        uniform vec3 u_scale;
+
+        in vec2 v_uv0;
+        in vec2 v_pos;
+        out vec4 fragColor;
+        ${LightingSharedSource.FS}
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            vec3 n = (texture(u_tex1, v_uv0).xyz * 2.0) - 1.0;
+
+            // Into the view: mirror with the scale, then the vertex shader's rotation
+            n.xy *= sign(u_scale.xy);
+
+            float sa = sin(u_scale.z);
+            float ca = cos(u_scale.z);
+            n.xy = vec2(n.x * ca + n.y * sa, n.x * -sa + n.y * ca);
+
+            vec3 light = lightAll(vec3(v_pos, 0.0), normalize(n));
+            fragColor = vec4(c.rgb * light, c.a) * u_color;
+        }
+    `
+};
+
+/*
     TextGlyphs2D: Rect2D's shader plus a color per vertex (a_color, the
     glyph's color from TextGlyphs2D.setGlyphColors(); white when not set),
     multiplied with u_color, so each glyph can have its own tint.
@@ -219,6 +379,98 @@ const Rect2DInstancedShaderSource = {
 };
 
 /*
+    Lit instanced Rect2D: Rect2DInstancedShaderSource lit like
+    LitRect2DShaderSource, for MaterialBatcher's lit layers. Same instance
+    attributes and locations, so it draws with the same mesh. The lights come
+    from a LightSet (lighting.js).
+*/
+const LitRect2DInstancedShaderSource = {
+    // Rect2DInstancedShaderSource's vertex shader, plus v_pos (the pixel's position in design units) and the instance's scale and rotation
+    VS: `#version 300 es
+        layout(location = 5) in vec2 a_pos;
+        layout(location = 8) in vec4 a_iRect;
+        layout(location = 9) in vec3 a_iScaleRot;
+        layout(location = 10) in vec4 a_iColor;
+        layout(location = 11) in vec4 a_iUVRect;
+
+        uniform vec2 u_res;
+
+        out vec2 v_uv0;
+        out vec4 v_color;
+        out vec2 v_pos;
+        flat out vec3 v_scaleRot;
+
+        void main() {
+            vec2 halfSize = a_iRect.zw;
+            vec2 ssPos = ((a_pos * halfSize * 2.0) - halfSize) * a_iScaleRot.xy;
+
+            float sa = sin(a_iScaleRot.z);
+            float ca = cos(a_iScaleRot.z);
+
+            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
+                             ssPos.x * -sa + ssPos.y * ca);
+
+            v_pos = rPos + halfSize + a_iRect.xy;
+
+            vec2 cs = ((v_pos / u_res) * 2.0) - 1.0;
+            gl_Position = vec4(cs, 0.0, 1.0);
+
+            v_uv0 = a_iUVRect.xy + (a_pos * a_iUVRect.zw);
+            v_color = a_iColor;
+            v_scaleRot = a_iScaleRot;
+        }
+    `,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+
+        in vec2 v_uv0;
+        in vec4 v_color;
+        in vec2 v_pos;
+        out vec4 fragColor;
+        ${LightingSharedSource.FS}
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            vec3 light = lightAll(vec3(v_pos, 0.0), vec3(0.0, 0.0, 1.0));
+            fragColor = vec4(c.rgb * light, c.a) * v_color;
+        }
+    `
+};
+
+// Lit instanced Rect2D with a normal map in u_tex1, like LitNormalMapRect2DShaderSource; each instance's normals turn with its rotation
+const LitNormalMapRect2DInstancedShaderSource = {
+    VS: LitRect2DInstancedShaderSource.VS,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+        uniform sampler2D u_tex1;
+
+        in vec2 v_uv0;
+        in vec4 v_color;
+        in vec2 v_pos;
+        flat in vec3 v_scaleRot;
+        out vec4 fragColor;
+        ${LightingSharedSource.FS}
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            vec3 n = (texture(u_tex1, v_uv0).xyz * 2.0) - 1.0;
+
+            // Into the view: mirror with the scale, then the vertex shader's rotation
+            n.xy *= sign(v_scaleRot.xy);
+
+            float sa = sin(v_scaleRot.z);
+            float ca = cos(v_scaleRot.z);
+            n.xy = vec2(n.x * ca + n.y * sa, n.x * -sa + n.y * ca);
+
+            vec3 light = lightAll(vec3(v_pos, 0.0), normalize(n));
+            fragColor = vec4(c.rgb * light, c.a) * v_color;
+        }
+    `
+};
+
+/*
     Particles2D: instanced quads simulated on the GPU. Each particle is written
     once when emitted; the shader works out where it is from the time since then:
 
@@ -232,6 +484,11 @@ const Rect2DInstancedShaderSource = {
     Uniforms: u_res, and u_vec0 = (gravityX, gravityY, endScale, time), time in seconds.
     u_uvOffset / u_uvTile are the part of the texture drawn on each particle:
     (0, 0) / (1, 1) for all of it, or a SubTexture's UV rect (see TextureAtlas).
+
+    Frames: u_vec1 = (cols, rows, firstFrame, frameCount) splits that part into
+    a cols x rows grid, numbered row by row from the top-left like Sprite's.
+    Each particle steps through frameCount frames from firstFrame, evenly over
+    its life. (1, 1, 0, 1) is one frame: the whole part.
 
     The mesh is a unit quad (-0.5, -0.5) - (0.5, 0.5), centered on the particle.
     Per instance:
@@ -252,6 +509,7 @@ const Particles2DShaderSource = {
 
         uniform vec2 u_res;
         uniform vec4 u_vec0; // (gravityX, gravityY, endScale, time)
+        uniform vec4 u_vec1; // (cols, rows, firstFrame, frameCount)
         uniform vec2 u_uvOffset;
         uniform vec2 u_uvTile;
 
@@ -276,7 +534,14 @@ const Particles2DShaderSource = {
 
             gl_Position = vec4(((p / u_res) * 2.0) - 1.0, 0.0, 1.0);
 
-            v_uv0 = u_uvOffset + ((a_pos + 0.5) * u_uvTile);
+            // The frame for its age, then its cell in the grid; rows count down from the top, V runs up
+            float cols = u_vec1.x;
+            float rows = u_vec1.y;
+            float frame = u_vec1.z + min(floor(t * u_vec1.w), u_vec1.w - 1.0);
+            float row = floor(frame / cols);
+            vec2 cell = vec2(frame - (row * cols), rows - 1.0 - row);
+
+            v_uv0 = u_uvOffset + (((a_pos + 0.5 + cell) / vec2(cols, rows)) * u_uvTile);
             v_color = vec4(a_iColor.rgb, a_iColor.a * (1.0 - t));
         }
     `,

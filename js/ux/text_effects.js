@@ -119,7 +119,7 @@ class BaseTextEffect
     // Draws the text (and its shadow, first) right away
     render() { this.#draw((model) => model.render()); }
 
-    // *** For subclasses ***
+    // *** Subclass Methods ***
 
     _onUpdate(dt) { }
     _onStop() { }

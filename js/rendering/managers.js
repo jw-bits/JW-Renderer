@@ -142,11 +142,11 @@ class FontManager
     TextureManager - Keeps one Texture per image url (and flip/mipmap options).
     Filtering and wrapping are sampler state, set on the Material (see Sampler).
 
-    The constructor creates the default texture: a magenta/white checkerboard,
-    so a missing image is easy to spot. Any request for a texture that fails,
-    for any reason, logs a console.error and returns the default texture
-    instead, so callers always get a loaded Texture back. Create it after
-    WGLV.init().
+    The constructor creates the white texture (getWhiteTexture()): pure white,
+    so a model drawn with it shows just its color, e.g. a solid panel. Any
+    request for a texture that fails, for any reason, logs a console.error
+    and returns the white texture instead, so callers always get a loaded
+    Texture back. Create it after WGLV.init().
 
     Usage:
         let textures = new TextureManager();
@@ -163,32 +163,33 @@ class FontManager
 */
 class TextureManager
 {
-    static #kDefaultPixels = new Uint8Array([255, 0, 255, 255,   255, 255, 255, 255,
-                                             255, 255, 255, 255, 255, 0, 255, 255]);
+    static #kDefaultPixels = new Uint8Array([255, 255, 255, 255,   255, 255, 255, 255,
+                                             255, 255, 255, 255,   255, 255, 255, 255]); // 2 x 2, pure white
 
     #textures;       // Key -> { texture, promise }
     #atlases;        // Key -> { atlas, promise }
-    #defaultTexture;
+    #whiteTexture;
 
     constructor()
     {
         this.#textures = new Map();
         this.#atlases = new Map();
-        this.#defaultTexture = new Texture(true, false);
+        this.#whiteTexture = new Texture(true, false);
 
-        if (this.#defaultTexture.loadPixels(2, 2, TextureManager.#kDefaultPixels) === false)
-            console.error("TextureManager couldn't create its default texture (was WGLV.init() called first?)");
+        if (this.#whiteTexture.loadPixels(2, 2, TextureManager.#kDefaultPixels) === false)
+            console.error("TextureManager couldn't create its white texture (was WGLV.init() called first?)");
     }
 
-    getDefault() { return this.#defaultTexture; }
+    // Pure white; also what failed loads return. Shared: don't unload it.
+    getWhiteTexture() { return this.#whiteTexture; }
 
-    // Loads an image. Always resolves to a loaded Texture: this image's, or the default texture on failure.
+    // Loads an image. Always resolves to a loaded Texture: this image's, or the white texture on failure.
     async load(url, flipY = true, useMipmaps = true)
     {
         if (typeof url !== "string" || url.length === 0)
         {
-            console.error("TextureManager.load() needs an image url; using the default texture");
-                return this.#defaultTexture;
+            console.error("TextureManager.load() needs an image url; using the white texture");
+                return this.#whiteTexture;
         }
 
         const key = this.#key(url, flipY, useMipmaps);
@@ -213,8 +214,8 @@ class TextureManager
             if (this.#textures.get(key) === entry)
                 this.#textures.delete(key); // Don't keep failed textures; a later request tries again
 
-            console.error(`TextureManager couldn't load ${url}; using the default texture`);
-                return this.#defaultTexture;
+            console.error(`TextureManager couldn't load ${url}; using the white texture`);
+                return this.#whiteTexture;
         }
 
         return entry.texture;
@@ -309,7 +310,7 @@ class TextureManager
         }
     }
 
-    // Unloads every texture and atlas except the default
+    // Unloads every texture and atlas except the white texture
     unloadAll()
     {
         for (const entry of this.#textures.values())

@@ -122,7 +122,7 @@ class Model2D
     canInstance() { return false; }
 
     // The part of the texture drawn, as a UVRect. Shared and read-only for models that draw all of it; don't change it.
-    getUVRect() { return this._getTextureUVRect(); }
+    getUVRect() { return this.#getTextureUVRect(); }
 
     // Starts or stops calling onRasterScaleChanged() when WGLV's view scale changes
     listenForRasterScale(listen)
@@ -212,7 +212,7 @@ class Model2D
         this.#isLoaded = false;
     }
 
-    // *** For subclasses ***
+    // *** Subclass Methods ***
 
     // Keeps the anchor and alignment, so the bottom-left corner moves with the size
     _setSize(width, height)
@@ -241,9 +241,6 @@ class Model2D
         const t = this.#material?.getTexture(0) ?? null;
             return (t instanceof SubTexture) ? t : null;
     }
-
-    // The part of texture unit 0 to draw: a SubTexture's UV rect, or the whole texture. Read-only.
-    _getTextureUVRect() { return this.#material?.getTexture(0)?.getUVRect() ?? UVRect.kFull; }
 
     /*
         For a subclass's load(): the Material to draw with. A loaded Texture gets a
@@ -285,6 +282,9 @@ class Model2D
     }
 
     // *** Internal Methods ***
+
+    // The part of texture unit 0 to draw: a SubTexture's UV rect, or the whole texture. Read-only.
+    #getTextureUVRect() { return this.#material?.getTexture(0)?.getUVRect() ?? UVRect.kFull; }
 
     #updatePosition()
     {
@@ -371,6 +371,39 @@ class Rect2D extends Model2D
         this._setMesh(mesh);
         this._setLoaded(true);
         this.#checkSubTextureUVs("load");
+            return true;
+    }
+
+    /*
+        Changes the size in design units, keeping the anchor and alignment from setPos()
+        (a centered rect stays centered). Rebuilds the quad. Returns false if not loaded
+        or the size isn't above 0.
+    */
+    setSize(width, height)
+    {
+        if (this.isLoaded() === false)
+        {
+            console.error("Rect2D.setSize(): load it first");
+                return false;
+        }
+
+        if (Number.isFinite(width) === false || Number.isFinite(height) === false || width <= 0 || height <= 0)
+        {
+            console.error("Rect2D.setSize() needs a width and height above 0");
+                return false;
+        }
+
+        if (width === this.getWidth() && height === this.getHeight())
+            return true;
+
+        let mesh = Shapes.makeQuad(0, 0, 0, width, height, Alignment.kBottomLeft);
+
+        if (mesh == null)
+            return false;
+
+        mesh.bindAttribs();
+        this._setMesh(mesh); // Frees the old one
+        this._setSize(width, height);
             return true;
     }
 

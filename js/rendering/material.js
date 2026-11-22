@@ -10,7 +10,7 @@
     Uniform values (position, color, ...) belong to whatever is being drawn,
     not the Material. Bind the Material, then upload them:
 
-        material.bind();                       // Shader, textures, samplers
+        material.bind();                       // Shader, every texture and sampler
         material.setUniform("u_color", color); // Uploaded right away
         mesh.render();
 
@@ -39,7 +39,7 @@ class Material
 
     // Looked up once in load(), from the uniforms the shader actually uses
     #uniforms;     // Name -> { location, componentCount, value } (value: the texture unit for samplers, else null)
-    #textureUnits; // The sampler uniforms with a texture to bind, for bind()
+    #textureUnits; // The shader's sampler uniforms that have a texture, for bind() to point at their units
     #textureKey;   // Cached getTextureKey(); null until asked for, or after a change
 
     constructor()
@@ -171,15 +171,27 @@ class Material
         return this.#textureKey;
     }
 
-    // Binds the shader, and each texture with its sampler. Call before setUniform() and drawing.
-    bind()
+    /*
+        Binds the shader, and every texture with its sampler (each in its own unit,
+        whether or not the shader reads it). Call before setUniform() and drawing.
+        Either part can be skipped, e.g. MaterialBatcher binds only the textures and
+        then a shader of its own.
+    */
+    bind(bindShader = true, bindTextures = true)
     {
-        this.#shader.bind();
-
-        for (const u of this.#textureUnits)
+        if (bindShader === true)
         {
-            this.#bindTexture(u.value);
-            WGLV.context.uniform1i(u.location, u.value);
+            this.#shader.bind();
+
+            // Point the shader's samplers at their units; needs the shader bound
+            for (const u of this.#textureUnits)
+                WGLV.context.uniform1i(u.location, u.value);
+        }
+
+        if (bindTextures === true)
+        {
+            for (let i = 0; i < this.#textures.length; ++i)
+                this.#bindTexture(i);
         }
     }
 
@@ -230,7 +242,7 @@ class Material
 
             if (componentCount === 0)
             {
-                console.error(`Material: the shader uses "${uName}", which isn't in RenderUniforms; add it there or use u_vec0 - u_vec3`);
+                console.error(`Material: the shader uses "${uName}", which isn't in RenderUniforms; add it there or use u_vec0 - u_vec7`);
                 continue;
             }
 
