@@ -29,7 +29,7 @@
         batcher.submit(label, 5);  // A Text2D
         batcher.render();          // Draws everything and empties the batcher
 
-    submit() captures the model's position, scale, rotation, color and UV rect
+    submit() captures the model's transform (position, scale, rotation), color and UV rect
     (a Sprite's frame) at that moment, so one model can be drawn many times per
     frame (like a board square).
     Its size, mesh and Material are read when it's drawn, so don't unload or
@@ -130,11 +130,8 @@ class MaterialBatcher
         e.group = group;
         e.instanced = instanced;
         e.uvRect.copy(model.getUVRect());
-        e.x = model.getX();
-        e.y = model.getY();
-        e.scaleX = model.getScaleX();
-        e.scaleY = model.getScaleY();
-        e.rotZ = model.getRotation();
+        e.transform.copy(model.getTransform());
+        e.transform.setPosition(model.getX(), model.getY()); // Drawn from the bottom-left corner, not the anchor (see Model2D.draw())
 
         const c = model.getColor();
         e.color.set(c.x, c.y, c.z, c.w);
@@ -259,7 +256,7 @@ class MaterialBatcher
         {
             this.#pool.push({
                 model: null, material: null, group: 0, instanced: false,
-                x: 0, y: 0, scaleX: 1, scaleY: 1, rotZ: 0, color: new Vector4(), uvRect: new UVRect()
+                transform: new Transform2D(), color: new Vector4(), uvRect: new UVRect()
             });
         }
 
@@ -274,7 +271,7 @@ class MaterialBatcher
         for (let i = start; i < end; ++i)
         {
             const e = list[i];
-            e.model.draw(e.x, e.y, e.scaleX, e.scaleY, e.rotZ, e.color, e.uvRect);
+            e.model.draw(e.transform, e.color, e.uvRect);
             ++this.#drawCalls;
         }
     }
@@ -295,14 +292,15 @@ class MaterialBatcher
         {
             const e = list[i];
             const m = e.model;
+            const t = e.transform;
 
-            d[o++] = e.x;
-            d[o++] = e.y;
+            d[o++] = t.getX();
+            d[o++] = t.getY();
             d[o++] = m.getWidth() / 2.0;
             d[o++] = m.getHeight() / 2.0;
-            d[o++] = e.scaleX;
-            d[o++] = e.scaleY;
-            d[o++] = e.rotZ;
+            d[o++] = t.getScaleX();
+            d[o++] = t.getScaleY();
+            d[o++] = t.getRotation();
             d[o++] = e.color.x;
             d[o++] = e.color.y;
             d[o++] = e.color.z;

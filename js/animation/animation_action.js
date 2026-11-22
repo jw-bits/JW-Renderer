@@ -28,8 +28,8 @@
 */
 class AnimAction
 {
-    #start;         // AnimTransform: the set starts (only the channels in #startChannels)
-    #target;        // AnimTransform
+    #start;         // Transform2D: the set starts (only the channels in #startChannels); position is the anchor
+    #target;        // Transform2D
     #channels;      // AnimChannel flags animated
     #startChannels; // AnimChannel flags with a set start
 
@@ -40,8 +40,8 @@ class AnimAction
 
     constructor()
     {
-        this.#start = new AnimTransform();
-        this.#target = new AnimTransform();
+        this.#start = new Transform2D();
+        this.#target = new Transform2D();
         this.#channels = AnimChannel.kNone;
         this.#startChannels = AnimChannel.kNone;
 
@@ -57,7 +57,7 @@ class AnimAction
         if (AnimAction.#isValid([x, y], duration, easing, "setTranslation") === false)
             return false;
 
-        this.#target.setTranslation(x, y);
+        this.#target.setPosition(x, y);
         AnimAction.#setTiming(this.#posTiming, duration, easing);
         this.#channels |= AnimChannel.kTranslation;
             return true;
@@ -93,7 +93,7 @@ class AnimAction
         if (AnimAction.#isValid([x, y], 0.0, Easing.kLinear, "setTranslationStart") === false)
             return false;
 
-        this.#start.setTranslation(x, y);
+        this.#start.setPosition(x, y);
         this.#startChannels |= AnimChannel.kTranslation;
             return true;
     }
@@ -154,28 +154,28 @@ class AnimAction
         return longest;
     }
 
-    // *** For AnimPlayer ***
+    // *** For AnimPlayer (Transform2Ds, position is the model's anchor) ***
 
-    // The transform this action starts from, given current (the model's when it begins): current with the set starts on top
+    // The Transform2D this action starts from, given current (the model's when it begins): current with the set starts on top
     resolveStart(current, out)
     {
         out.copy(current);
-        out.copy(this.#start, this.#startChannels);
+        AnimAction.#copyChannels(out, this.#start, this.#startChannels);
             return out;
     }
 
     /*
         Writes the animated channels seconds into the action, from start (see
         resolveStart()), into out; other channels of out are left as they are.
-        start and out must be different AnimTransforms.
+        start and out must be different Transform2Ds.
     */
     evaluate(start, seconds, out)
     {
         if ((this.#channels & AnimChannel.kTranslation) !== 0)
         {
             const e = AnimAction.#progress(this.#posTiming, seconds);
-            out.setTranslation(MathUtil.lerp(start.getX(), this.#target.getX(), e),
-                               MathUtil.lerp(start.getY(), this.#target.getY(), e));
+            out.setPosition(MathUtil.lerp(start.getX(), this.#target.getX(), e),
+                            MathUtil.lerp(start.getY(), this.#target.getY(), e));
         }
 
         if ((this.#channels & AnimChannel.kScale) !== 0)
@@ -194,7 +194,33 @@ class AnimAction
         return out;
     }
 
+    // Writes the AnimChannel parts in channels of transform (position is the anchor) to model; the model keeps its alignment
+    static applyChannels(transform, model, channels = AnimChannel.kAll)
+    {
+        if ((channels & AnimChannel.kTranslation) !== 0)
+            model.setPos(transform.getX(), transform.getY(), model.getAlignment());
+
+        if ((channels & AnimChannel.kScale) !== 0)
+            model.setScale(transform.getScaleX(), transform.getScaleY());
+
+        if ((channels & AnimChannel.kRotation) !== 0)
+            model.setRotation(transform.getRotation());
+    }
+
     // *** Internal Methods ***
+
+    // Copies the AnimChannel parts in channels from one Transform2D to another
+    static #copyChannels(out, from, channels)
+    {
+        if ((channels & AnimChannel.kTranslation) !== 0)
+            out.setPosition(from.getX(), from.getY());
+
+        if ((channels & AnimChannel.kScale) !== 0)
+            out.setScale(from.getScaleX(), from.getScaleY());
+
+        if ((channels & AnimChannel.kRotation) !== 0)
+            out.setRotation(from.getRotation());
+    }
 
     #timingOf(channel)
     {

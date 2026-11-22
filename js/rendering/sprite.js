@@ -103,7 +103,6 @@ class SpriteSequence
 class Sprite extends Model2D
 {
     static #kShader = null;               // Default shader, also needed by Materials given to load()
-    static #kFullUVRect = new UVRect();   // The whole texture, for grid frames
     static #kUVScratch = new Vector4();   // For uploading u_vec1
 
     #uvRect;         // The frame drawn now, within the texture (or SubTexture)
@@ -212,7 +211,7 @@ class Sprite extends Model2D
     */
     createSequence(name, startRow, startCol, endRow, endCol, duration, playMode = SpritePlayMode.kLoop)
     {
-        const frames = Sprite.#gridRangeFrames(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, startRow, startCol, endRow, endCol);
+        const frames = Sprite.#gridRangeFrames(UVRect.kFull, this.#gridRows, this.#gridCols, startRow, startCol, endRow, endCol);
 
         if (frames === null)
             return false;
@@ -451,7 +450,7 @@ class Sprite extends Model2D
     }
 
     // Uploads the frame's UV rect (the captured one from MaterialBatcher, or this sprite's own), then draws
-    draw(x, y, scaleX, scaleY, rotZ, color, uvRect = null)
+    draw(transform, color, uvRect = null)
     {
         if (this.isLoaded() === false)
             return;
@@ -460,7 +459,7 @@ class Sprite extends Model2D
         Sprite.#kUVScratch.set(r.getX(), r.getY(), r.getWidth(), r.getHeight());
         this.getMaterial().setUniform("u_vec1", Sprite.#kUVScratch);
 
-        super.draw(x, y, scaleX, scaleY, rotZ, color);
+        super.draw(transform, color);
     }
 
     // Frees the mesh and forgets its sequences; the texture belongs to the caller
@@ -470,7 +469,7 @@ class Sprite extends Model2D
 
         this.#sequences.clear();
         this.#resetPlayback();
-        this.#uvRect.copy(Sprite.#kFullUVRect);
+        this.#uvRect.copy(UVRect.kFull);
         this.#gridRows = 1;
         this.#gridCols = 1;
     }
@@ -520,7 +519,7 @@ class Sprite extends Model2D
     #showGridFrame(index)
     {
         this.#frame = index;
-        Sprite.#gridFrame(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, index, this.#uvRect);
+        Sprite.#gridFrame(UVRect.kFull, this.#gridRows, this.#gridCols, index, this.#uvRect);
     }
 
     // *** Static Internal Helpers ***

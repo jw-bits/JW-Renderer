@@ -5,8 +5,7 @@
     Sprite frame animation (UVs) belongs to rendering; its types are in
     render_defines.js.
 
-        AnimTransform  Translation, scale and rotation
-        AnimAction     Per channel: start, target, duration and easing
+        AnimAction     Per channel: start, target, duration and easing (each a Transform2D, see math/transform.js)
         AnimSequence   AnimActions, one after another
         AnimPlayer     Plays an AnimAction or AnimSequence on one Model2D
 */

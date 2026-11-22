@@ -86,7 +86,7 @@ class WGLV
                 return false;
         }
 
-        const defaultAttributes = {antialias: true, depth: true, stencil: false, premultipliedAlpha: true, alpha: true};
+        const defaultAttributes = {antialias: true, depth: false, stencil: false, premultipliedAlpha: true, alpha: true};
         const contextAttributes = (ctxAttributes !== null) ? ctxAttributes : defaultAttributes;
 
         try
@@ -205,7 +205,7 @@ class WGLV
             return;
 
         const gl = WGLV.context;
-        const bits = gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT;
+        const bits = gl.COLOR_BUFFER_BIT; // No depth buffer: 2D draws in layer order
 
         WGLV.restoreView();
 

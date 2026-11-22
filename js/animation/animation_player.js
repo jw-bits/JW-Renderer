@@ -39,9 +39,9 @@ class AnimPlayer
     #motion;        // The AnimAction or AnimSequence, or null
     #playMode;      // AnimPlayMode
     #actions;       // The actions, as they were when play() was called
-    #starts;        // AnimTransform per action: where it starts (see AnimAction.resolveStart())
+    #starts;        // Transform2D per action: where it starts (see AnimAction.resolveStart())
     #offsets;       // Seconds into the motion each action starts; one more on the end for the duration
-    #current;       // AnimTransform the actions are worked out into
+    #current;       // Transform2D the actions are worked out into (position is the model's anchor)
     #time;          // Seconds into the motion
     #index;         // The action last applied
     #isReversed;    // True while ping-ponging back
@@ -58,7 +58,7 @@ class AnimPlayer
         this.#actions = [];
         this.#starts = [];
         this.#offsets = [0.0];
-        this.#current = new AnimTransform();
+        this.#current = new Transform2D();
         this.#time = 0.0;
         this.#index = 0;
         this.#isReversed = false;
@@ -99,7 +99,7 @@ class AnimPlayer
         this.#actions = (motion instanceof AnimAction) ? [motion] : motion.getActions().slice();
 
         // Where each action starts: carry the model's transform through the actions
-        this.#current.readFrom(model);
+        this.#current.copy(model.getTransform());
         this.#offsets.length = this.#actions.length + 1;
         this.#offsets[0] = 0.0;
 
@@ -108,7 +108,7 @@ class AnimPlayer
             const action = this.#actions[i];
 
             if (i >= this.#starts.length)
-                this.#starts.push(new AnimTransform());
+                this.#starts.push(new Transform2D());
 
             action.resolveStart(this.#current, this.#starts[i]);
             action.evaluate(this.#starts[i], action.getDuration(), this.#current); // Now where it ends
@@ -262,7 +262,7 @@ class AnimPlayer
         const action = this.#actions[i];
 
         action.evaluate(this.#starts[i], seconds, this.#current);
-        this.#current.applyTo(this.#target, action.getChannels());
+        AnimAction.applyChannels(this.#current, this.#target, action.getChannels());
     }
 
     // Stops at the end it reached; the model stays there

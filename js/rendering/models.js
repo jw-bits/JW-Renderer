@@ -20,6 +20,10 @@
     of the model sits on it (bottom-left by default). The model keeps its
     alignment when its size changes, e.g. centered text stays centered.
 
+    Transform: the anchor, scale and rotation are a Transform2D (getTransform()),
+    changed through setPos(), setScale() and setRotation(). The model scales
+    and rotates about its center.
+
     Raster scale: a model that draws into a texture at screen resolution can
     call listenForRasterScale(true) and override onRasterScaleChanged(newScale)
     (see WGLV). unload() stops listening.
@@ -37,41 +41,34 @@
 */
 class Model2D
 {
-    static #kFullUVRect = new UVRect(); // getUVRect() for models that draw the whole texture
-
     // Scratch values for uploading uniforms in render()
     static #kRes = new Vector2();
     static #kRect = new Vector4();
     static #kScaleRot = new Vector3();
     static #kUVOffset = new Vector2();
     static #kUVTile = new Vector2();
+    static #kDrawTransform = new Transform2D(); // render(): the transform at the bottom-left corner
 
-    #anchor;     // Where setPos() put it
+    #transform;   // Position is the anchor (where setPos() put it), plus scale and rotation
     #align;       // Which part of the model sits on the anchor
     #position;    // The bottom-left corner, from the anchor, alignment and size
     #material;
     #width;
     #height;
     #mesh;
-    #scaleX;
-    #scaleY;
-    #rotZ;
     #color;
     #isLoaded;
     #isListening; // For raster scale changes
 
     constructor()
     {
-        this.#anchor = new Vector2();
+        this.#transform = new Transform2D();
         this.#align = Alignment.kBottomLeft;
         this.#position = new Vector2();
         this.#material = null;
         this.#width = 0;
         this.#height = 0;
         this.#mesh = null;
-        this.#scaleX = 1.0;
-        this.#scaleY = 1.0;
-        this.#rotZ = 0.0;
         this.#color = new Vector4(1, 1, 1, 1);
         this.#isLoaded = false;
         this.#isListening = false;
@@ -80,17 +77,22 @@ class Model2D
     // (x, y) is the anchor point; align says which part of the model sits on it
     setPos(x, y, align = Alignment.kBottomLeft)
     {
-        this.#anchor.set(x, y);
+        this.#transform.setPosition(x, y);
         this.#align = align;
         this.#updatePosition();
     }
 
-    setRotation(rotZ) { this.#rotZ = rotZ; }
+    // Radians, about the model's center
+    setRotation(rotZ) { this.#transform.setRotation(rotZ); }
 
-    setScale(sx, sy = sx)
+    // About the model's center
+    setScale(sx, sy = sx) { this.#transform.setScale(sx, sy); }
+
+    // The transform's position is the anchor; the alignment is kept
+    setTransform(transform)
     {
-        this.#scaleX = sx;
-        this.#scaleY = sy;
+        this.#transform.copy(transform);
+        this.#updatePosition();
     }
 
     setColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
@@ -101,14 +103,17 @@ class Model2D
     getY() { return this.#position.y; }
 
     // As given to setPos()
-    getAnchor() { return this.#anchor; }
+    getAnchor() { return this.#transform.getPosition(); }
     getAlignment() { return this.#align; }
+
+    // The anchor, scale and rotation. Read-only; change it with setPos(), setScale(), setRotation() or setTransform().
+    getTransform() { return this.#transform; }
 
     getWidth() { return this.#width; }
     getHeight() { return this.#height; }
-    getScaleX() { return this.#scaleX; }
-    getScaleY() { return this.#scaleY; }
-    getRotation() { return this.#rotZ; }
+    getScaleX() { return this.#transform.getScaleX(); }
+    getScaleY() { return this.#transform.getScaleY(); }
+    getRotation() { return this.#transform.getRotation(); }
     getColor() { return this.#color; }
     getMaterial() { return this.#material; }
     isLoaded() { return this.#isLoaded; }
@@ -146,8 +151,11 @@ class Model2D
                 return;
         }
 
+        const t = Model2D.#kDrawTransform.copy(this.#transform);
+        t.setPosition(this.#position.x, this.#position.y);
+
         this.#material.bind();
-        this.draw(this.#position.x, this.#position.y, this.#scaleX, this.#scaleY, this.#rotZ, this.#color);
+        this.draw(t, this.#color);
     }
 
     /*
@@ -156,13 +164,16 @@ class Model2D
         binds a material once for many models and replays the values captured
         when each was submitted.
 
+        transform is a Transform2D whose position is the bottom-left corner to
+        draw at (as getPos() gives it), not the anchor.
+
         uvRect is the captured getUVRect(), or null for the model's current one.
         It's uploaded as u_uvOffset (x, y) and u_uvTile (width, height); shaders
         that don't use them ignore it. Uniforms keep their value per shader, so
         this sets them every draw: models sharing Rect2D's shader (RoundedRect2D,
         NinePatch2D) get the whole texture back after a tiled Rect2D.
     */
-    draw(x, y, scaleX, scaleY, rotZ, color, uvRect = null)
+    draw(transform, color, uvRect = null)
     {
         if (this.#isLoaded === false)
             return;
@@ -171,8 +182,8 @@ class Model2D
         const r = uvRect ?? this.getUVRect();
 
         Model2D.#kRes.set(WGLV.getWidth(), WGLV.getHeight());
-        Model2D.#kRect.set(x, y, this.#width / 2.0, this.#height / 2.0);
-        Model2D.#kScaleRot.set(scaleX, scaleY, rotZ);
+        Model2D.#kRect.set(transform.getX(), transform.getY(), this.#width / 2.0, this.#height / 2.0);
+        Model2D.#kScaleRot.set(transform.getScaleX(), transform.getScaleY(), transform.getRotation());
         Model2D.#kUVOffset.set(r.getX(), r.getY());
         Model2D.#kUVTile.set(r.getWidth(), r.getHeight());
 
@@ -232,7 +243,7 @@ class Model2D
     }
 
     // The part of texture unit 0 to draw: a SubTexture's UV rect, or the whole texture. Read-only.
-    _getTextureUVRect() { return this._getSubTexture()?.getUVRect() ?? Model2D.#kFullUVRect; }
+    _getTextureUVRect() { return this.#material?.getTexture(0)?.getUVRect() ?? UVRect.kFull; }
 
     /*
         For a subclass's load(): the Material to draw with. A loaded Texture gets a
@@ -241,7 +252,7 @@ class Model2D
     */
     _resolveMaterial(source, shader, className)
     {
-        if (source instanceof Texture)
+        if (source instanceof BaseTexture)
         {
             if (source.isLoaded() === false)
             {
@@ -277,8 +288,8 @@ class Model2D
 
     #updatePosition()
     {
-        this.#position.set(this.#anchor.x + Alignment.offsetX(this.#align, this.#width),
-                           this.#anchor.y + Alignment.offsetY(this.#align, this.#height));
+        this.#position.set(this.#transform.getX() + Alignment.offsetX(this.#align, this.#width),
+                           this.#transform.getY() + Alignment.offsetY(this.#align, this.#height));
     }
 }
 

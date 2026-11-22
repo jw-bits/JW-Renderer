@@ -89,7 +89,7 @@ class Particles2D
                 return false;
         }
 
-        if ((texture instanceof Texture) === false || texture.isLoaded() === false)
+        if ((texture instanceof BaseTexture) === false || texture.isLoaded() === false)
         {
             console.error("Particles2D.load() needs a loaded Texture");
                 return false;
@@ -224,19 +224,9 @@ class Particles2D
         m.setUniform(RenderUniforms.kVector0, Particles2D.#kGravityScaleTime);
 
         // The whole texture, or a SubTexture's part of its atlas
-        const tex = m.getTexture(0);
-
-        if (tex instanceof SubTexture)
-        {
-            const r = tex.getUVRect();
-            Particles2D.#kUVOffset.set(r.getX(), r.getY());
-            Particles2D.#kUVTile.set(r.getWidth(), r.getHeight());
-        }
-        else
-        {
-            Particles2D.#kUVOffset.set(0.0, 0.0);
-            Particles2D.#kUVTile.set(1.0, 1.0);
-        }
+        const r = m.getTexture(0).getUVRect();
+        Particles2D.#kUVOffset.set(r.getX(), r.getY());
+        Particles2D.#kUVTile.set(r.getWidth(), r.getHeight());
 
         m.setUniform(RenderUniforms.kUVOffset, Particles2D.#kUVOffset);
         m.setUniform(RenderUniforms.kUVTile, Particles2D.#kUVTile);

@@ -157,7 +157,7 @@ class FontManager
     Texture, sharing an in-progress load, so an image is only loaded once.
 
     Atlases (see TextureAtlas) are kept the same way, one per JSON url.
-    Their SubTextures are Textures, so they go wherever one does:
+    Their SubTextures are BaseTextures like Texture, so they go wherever one does:
         const atlas = await textures.loadAtlas("./textures/checkers.json");
         rect.load(atlas.getSubTexture("checker_king"), 64, 64);
 */

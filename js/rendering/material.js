@@ -268,7 +268,7 @@ class Material
     // The textures and samplers part of a key; byAtlas counts each SubTexture as its atlas's Texture
     #makeTextureKey(byAtlas)
     {
-        const textures = this.#textures.map((t) => Material.#idOf((byAtlas === true && t instanceof SubTexture) ? t.getTexture() : t));
+        const textures = this.#textures.map((t) => Material.#idOf((byAtlas === true) ? t.getTexture() : t));
         const samplers = this.#textures.map((t, i) => (this.#samplers[i] !== null) ? Material.#idOf(this.#samplers[i]) : "-");
             return `t${textures.join(",")}|p${samplers.join(",")}`;
     }

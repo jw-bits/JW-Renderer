@@ -3,8 +3,8 @@
 /*
     TextureAtlas - One Texture holding many named images (SubTextures), laid
     out by a JSON file. Load it once and give its SubTextures to any number of
-    models: a SubTexture is a Texture, so anything that takes a Texture takes
-    one. Models drawing SubTextures of the same atlas still batch into one
+    models: a SubTexture is a BaseTexture, like a Texture, so anything that
+    takes a Texture to draw with takes one. Models drawing SubTextures of the same atlas still batch into one
     instanced draw call (see Material.getTextureKey()).
 
     The JSON:
@@ -187,7 +187,7 @@ class TextureAtlas
     hasSubTexture(name) { return this.#subTextures.has(name); }
     getSubTextureNames() { return Array.from(this.#subTextures.keys()); }
 
-    // The whole atlas image; it can be drawn like any Texture
+    // The whole atlas image, as a Texture
     getTexture() { return this.#texture; }
 
     getWidth() { return this.#texture.getWidth(); }
@@ -284,35 +284,33 @@ class TextureAtlas
 }
 
 /*
-    SubTexture - One named image in a TextureAtlas. It's a Texture, so models,
-    Materials and Particles2D take it like any other: it binds its atlas's
-    Texture, its width and height are its own size in pixels, and it's loaded
-    while its atlas is. Models draw only its part of the atlas (see getUVRect()).
+    SubTexture - One named image in a TextureAtlas. It's a BaseTexture, so
+    models, Materials and Particles2D take it like a Texture: it binds its
+    atlas's Texture, its width and height are its own size in pixels, and
+    it's loaded while its atlas is. Models draw only its part of the atlas
+    (see getUVRect()).
 
-    The pixels belong to the atlas: load() and the other upload methods fail,
-    and unload() does nothing (unload the TextureAtlas instead).
+    The pixels belong to the atlas, so it has no load methods, and unload()
+    does nothing (unload the TextureAtlas instead).
 
     Its UV rect is pulled in by half a texel on each side, so filtering never
     blends in the atlas pixels around it (a 4 x 4 square stretched over a
     board square keeps sharp edges).
 */
-class SubTexture extends Texture
+class SubTexture extends BaseTexture
 {
     #atlas;
     #name;
-    #width;   // In pixels: the JSON's, or worked out from the UVs
-    #height;
     #uvRect;  // Half a texel in from the JSON's rect
 
-    // Made by TextureAtlas once its image has loaded; _width / _height are in pixels
+    // Made by TextureAtlas once its image has loaded; _width / _height are in pixels (the JSON's, or worked out from the UVs)
     constructor(_atlas, _name, _u0, _v0, _u1, _v1, _width, _height)
     {
-        super(true, false, true); // A view: no GL texture of its own
+        super();
 
         this.#atlas = _atlas;
         this.#name = _name;
-        this.#width = _width;
-        this.#height = _height;
+        this._setSize(_width, _height);
 
         // Half a texel in, unless the rect is a texel or less across
         const halfU = (_width > 1) ? 0.5 / _atlas.getWidth() : 0.0;
@@ -342,33 +340,15 @@ class SubTexture extends Texture
                                 rect.getWidth() * r.getWidth(), rect.getHeight() * r.getHeight());
     }
 
-    // *** Texture ***
+    // *** BaseTexture ***
 
     isLoaded() { return (this.#atlas.isLoaded() === true && this.#atlas.getSubTexture(this.#name) === this); }
     hasMipmaps() { return this.getTexture().hasMipmaps(); }
-
-    // In atlas pixels: the JSON's size, or worked out from the UVs if it has none
-    getWidth() { return this.#width; }
-    getHeight() { return this.#height; }
 
     // The atlas JSON's url, with "#name" on the end
     getURL() { return `${this.#atlas.getAtlasURL()}#${this.#name}`; }
 
     bind() { this.getTexture().bind(); }
 
-    load(imageUrl, onLoadSuccessCB = null, onLoadFailCB = null) { return this.#notSupported("load"); }
-    loadPixels(width, height, rgbaPixels) { return this.#notSupported("loadPixels"); }
-    loadCanvas(canvas) { return this.#notSupported("loadCanvas"); }
-    updateCanvas(canvas) { return this.#notSupported("updateCanvas"); }
-
-    // The pixels belong to the atlas; unload the TextureAtlas instead
-    unload() { }
-
-    // *** Internal Methods ***
-
-    #notSupported(methodName)
-    {
-        console.error(`SubTexture.${methodName}(): a SubTexture's pixels belong to its TextureAtlas`);
-            return false;
-    }
+    // unload() does nothing (from BaseTexture): the pixels belong to the atlas; unload the TextureAtlas instead
 }

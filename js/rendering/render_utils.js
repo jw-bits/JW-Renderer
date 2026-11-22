@@ -11,9 +11,19 @@
 
     Values are clamped to 0..1, except through setUnclamped(), which is for
     tiling and scrolling a repeating texture (see Rect2D.setUVTile()).
+
+    UVRect.kFull is the whole texture (0, 0, 1, 1), shared: read it, copy
+    it, but don't change it.
 */
 class UVRect
 {
+    static kFull = new UVRect();
+
+    static
+    {
+        Object.defineProperty(UVRect, "kFull", { writable: false, configurable: false });
+    }
+
     #x;
     #y;
     #width;

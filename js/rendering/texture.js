@@ -1,4 +1,53 @@
 /*
+    BaseTexture - What every texture can be asked, whether it holds its own
+    pixels (Texture) or names part of an atlas (SubTexture, see
+    texture_atlas.js). Anything that draws with a texture takes a BaseTexture.
+
+        getTexture()  The Texture holding the pixels, which bind() binds (itself for a Texture)
+        getUVRect()   Its part of that Texture as a UVRect (all of it, 0 - 1, for a Texture)
+        getWidth() / getHeight()  In pixels
+
+    Subclasses set the size with _setSize() and override what differs:
+    isLoaded(), hasMipmaps(), getURL(), bind(), unload(), getTexture(),
+    getUVRect().
+*/
+class BaseTexture
+{
+    #width;  // Pixels
+    #height;
+
+    constructor()
+    {
+        this.#width = 0;
+        this.#height = 0;
+    }
+
+    getWidth() { return this.#width; }
+    getHeight() { return this.#height; }
+
+    isLoaded() { return false; }
+    hasMipmaps() { return false; }
+    getURL() { return null; }
+
+    bind() { }
+    unload() { }
+
+    // The Texture holding the pixels
+    getTexture() { return this; }
+
+    // The part of getTexture() this is, as a UVRect: all of it (UVRect.kFull). Shared and read-only.
+    getUVRect() { return UVRect.kFull; }
+
+    // *** For subclasses ***
+
+    _setSize(width, height)
+    {
+        this.#width = width;
+        this.#height = height;
+    }
+}
+
+/*
     Texture - The pixels of a 2D texture (and their mipmaps).
 
     How the texture is filtered and wrapped is sampler state, which lives in
@@ -8,17 +57,19 @@
     Options, set when it's created:
         _flipY       Flip rows on upload, so V runs up (matches the 2D models)
         _makeMipmaps Build mipmaps on every upload, so a Sampler can use a *_MIPMAP_* filter
-        _isView      For SubTexture only: no GL texture of its own (it overrides every method)
+
+    The GL texture is created by load(), loadPixels() or loadCanvas(), not
+    the constructor, so a Texture can be made before WGLV.init(). Each fails
+    if the texture already exists (loaded, or an image still loading);
+    unload() it first.
 
     A TextureAtlas (texture_atlas.js) holds one Texture and names parts of it
-    as SubTextures, which are Textures too, so anything that takes a Texture
-    takes one of them.
+    as SubTextures. Both are BaseTextures, so anything that takes one takes
+    the other.
 */
-class Texture
+class Texture extends BaseTexture
 {
     #texId;
-    #width;
-    #height;
     #url;
     #isLoaded;
 
@@ -30,18 +81,15 @@ class Texture
     static #pixels = new Uint8Array([255, 0, 255, 255, 255, 255, 255, 255,
                                     255, 255, 255, 255, 255, 0, 255, 255]);
 
-    constructor(_flipY = true, _makeMipmaps = true, _isView = false)
+    constructor(_flipY = true, _makeMipmaps = true)
     {
+        super();
+
         this.#flipY = _flipY;
         this.#hasMipmaps = _makeMipmaps;
         this.#url = null;
         this.#isLoaded = false;
         this.#texId = 0;
-        this.#width = 0;
-        this.#height = 0;
-
-        if (_isView === false)
-            this.#initTexture();
     }
 
     // Loads an image. onLoadFailCB is called if the image can't be loaded (the texture is unloaded first).
@@ -50,12 +98,10 @@ class Texture
         if (imageUrl == null)
             return false; // Nothing to load
 
-        if (this.#isLoaded === true)
-            return false; // Already loaded... free first
+        if (this.#texId !== 0)
+            return false; // Already loaded or loading... free first
 
-        if (this.#texId === 0)
-            this.#initTexture();
-
+        this.#initTexture();
         this.#url = imageUrl;
 
         const img = new Image();
@@ -85,14 +131,13 @@ class Texture
     // Loads raw RGBA pixels (a Uint8Array of width * height * 4). Ready right away.
     loadPixels(width, height, rgbaPixels)
     {
-        if (this.#isLoaded === true)
-            return false; // Already loaded... free first
+        if (this.#texId !== 0)
+            return false; // Already loaded or loading... free first
 
         if (rgbaPixels == null || rgbaPixels.length !== width * height * 4)
             return false;
 
-        if (this.#texId === 0)
-            this.#initTexture();
+        this.#initTexture();
 
         const gl = WGLV.context;
 
@@ -108,14 +153,13 @@ class Texture
     // Loads the pixels of a canvas (or any image source texImage2D accepts). Ready right away.
     loadCanvas(canvas)
     {
-        if (this.#isLoaded === true)
-            return false; // Already loaded... free first, or use updateCanvas()
+        if (this.#texId !== 0)
+            return false; // Already loaded or loading... free first, or use updateCanvas()
 
         if (canvas == null)
             return false;
 
-        if (this.#texId === 0)
-            this.#initTexture();
+        this.#initTexture();
 
         this.#upload(canvas, canvas.width, canvas.height);
         this.#isLoaded = true;
@@ -134,11 +178,19 @@ class Texture
 
     isLoaded() { return this.#isLoaded; }
     hasMipmaps() { return this.#hasMipmaps; }
-    getWidth() { return this.#width; }
-    getHeight() { return this.#height; }
     getURL() { return this.#url; }
 
-    bind() { WGLV.context.bindTexture(WGLV.context.TEXTURE_2D, this.#texId); }
+    // Fails (with a console.error) if there's no GL texture yet, i.e. before a load or after unload()
+    bind()
+    {
+        if (this.#texId === 0)
+        {
+            console.error("Texture.bind(): there's no GL texture to bind; load it first");
+                return;
+        }
+
+        WGLV.context.bindTexture(WGLV.context.TEXTURE_2D, this.#texId);
+    }
 
     unload()
     {
@@ -149,8 +201,7 @@ class Texture
 
         this.#texId = 0;
         this.#url = null;
-        this.#width = 0;
-        this.#height = 0;
+        this._setSize(0, 0);
         this.#isLoaded = false;
     }
 
@@ -178,8 +229,7 @@ class Texture
 
         gl.bindTexture(gl.TEXTURE_2D, null);
 
-        this.#width = width;
-        this.#height = height;
+        this._setSize(width, height);
     }
 
     #initTexture()
@@ -187,11 +237,10 @@ class Texture
         const gl = WGLV.context;
 
         this.#texId = gl.createTexture();
-        this.#width = 2;
-        this.#height = 2;
+        this._setSize(2, 2);
 
         gl.bindTexture(gl.TEXTURE_2D, this.#texId);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.#width, this.#height, 0, gl.RGBA, gl.UNSIGNED_BYTE, Texture.#pixels);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, Texture.#pixels);
 
         if (this.#hasMipmaps === true)
             gl.generateMipmap(gl.TEXTURE_2D); // So the placeholder works with a mipmap sampler too
