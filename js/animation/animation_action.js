@@ -16,7 +16,7 @@
     Usage:
         let slide = new AnimAction();
         slide.setTranslation(400, 200, 0.35, Easing.kQuadraticInOut); // From wherever the model is
-        slide.setRotation(Math.PI, 0.2);                               // Half a turn, faster
+        slide.setRotation(MathDefines.kPi, 0.2);                       // Half a turn, faster
         slide.setScaleStart(0.5, 0.5);                                 // Grows from half size...
         slide.setScale(1.0, 1.0, 0.35, Easing.kBackOut);               // ...to full size
 
@@ -213,7 +213,7 @@ class AnimAction
         if (timing.duration <= 0.0)
             return 1.0;
 
-        return Easing.ease(timing.easing, Math.min(1.0, Math.max(0.0, seconds / timing.duration)));
+        return Easing.ease(timing.easing, MathUtil.clamp01(seconds / timing.duration));
     }
 
     static #setTiming(timing, duration, easing)

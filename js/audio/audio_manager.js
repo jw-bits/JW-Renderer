@@ -50,7 +50,7 @@ class AudioManager
 
     static #kMinPitch = 0.0625; // The range <audio> elements accept
     static #kMaxPitch = 16.0;
-    static #kStreamLoadTimeout = 5000; // Milliseconds; see #waitForMedia()
+    static #kStreamLoadTimeout = 5.0 * MathDefines.kMsPerSecond; // Milliseconds; see #waitForMedia()
 
     static #context = null;
     static #masterGain = null;
@@ -602,7 +602,7 @@ class AudioManager
                 return fallback;
         }
 
-        return Math.min(Math.max(value, 0.0), 1.0);
+        return MathUtil.clamp01(value);
     }
 
     // value clamped to the pitch range, or fallback (with a console.error) if it isn't a number

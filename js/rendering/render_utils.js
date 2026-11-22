@@ -31,10 +31,10 @@ class UVRect
     // (x, y) is the bottom-left corner
     set(x, y, width, height)
     {
-        const left = UVRect.#clamp01(x);
-        const bottom = UVRect.#clamp01(y);
-        const right = UVRect.#clamp01(x + width);
-        const top = UVRect.#clamp01(y + height);
+        const left = MathUtil.clamp01(x);
+        const bottom = MathUtil.clamp01(y);
+        const right = MathUtil.clamp01(x + width);
+        const top = MathUtil.clamp01(y + height);
 
         this.#x = Math.min(left, right);
         this.#y = Math.min(bottom, top);
@@ -136,11 +136,6 @@ class UVRect
     }
 
     // *** Internal Methods ***
-
-    static #clamp01(v)
-    {
-        return Math.min(1.0, Math.max(0.0, v));
-    }
 
     // Where pixel (0, 0) sits, in pixels from the bottom-left, and which way x and y run from it
     static #getOrigin(texWidth, texHeight, origin, method)
@@ -244,10 +239,10 @@ class Shapes
 
         // Corner arc centers, counter-clockwise starting bottom-right
         const corners = [
-            { cx: x + w - r, cy: y + r,     start: -Math.PI / 2.0 }, // Bottom right
-            { cx: x + w - r, cy: y + h - r, start: 0.0 },            // Top right
-            { cx: x + r,     cy: y + h - r, start: Math.PI / 2.0 },  // Top left
-            { cx: x + r,     cy: y + r,     start: Math.PI }         // Bottom left
+            { cx: x + w - r, cy: y + r,     start: -MathDefines.kHalfPi }, // Bottom right
+            { cx: x + w - r, cy: y + h - r, start: 0.0 },                  // Top right
+            { cx: x + r,     cy: y + h - r, start: MathDefines.kHalfPi },  // Top left
+            { cx: x + r,     cy: y + r,     start: MathDefines.kPi }       // Bottom left
         ];
 
         let v = 1;
@@ -255,7 +250,7 @@ class Shapes
         {
             for (let i = 0; i <= seg; ++i)
             {
-                const a = c.start + ((i / seg) * (Math.PI / 2.0));
+                const a = c.start + ((i / seg) * MathDefines.kHalfPi);
                 setVert(v++, c.cx + (Math.cos(a) * r), c.cy + (Math.sin(a) * r));
             }
         }

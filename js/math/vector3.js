@@ -54,7 +54,7 @@ class Vector3
     {
         let ls = this.lengthSquared();
 
-        if (ls > 0.000001)
+        if (ls > MathDefines.kEpsilon)
         {
             let oneOverLen = 1.0 / Math.sqrt(ls);
         
@@ -84,6 +84,15 @@ class Vector3
     static subtract(v1, v2)
     {       
         return new Vector3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+    }
+
+    // a to b by t, written into out and returned, so nothing new is created
+    static lerp(out, a, b, t)
+    {
+        out.x = a.x + ((b.x - a.x) * t);
+        out.y = a.y + ((b.y - a.y) * t);
+        out.z = a.z + ((b.z - a.z) * t);
+            return out;
     }
 
     // *** Static Vars ***

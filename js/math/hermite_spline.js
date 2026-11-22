@@ -27,7 +27,7 @@ class HermiteSpline {
         if (count === 1) return new Vector3(this.#points[0].x, this.#points[0].y, this.#points[0].z);
 
         // Clamp t to the valid range [0, 1]
-        const clampT = Math.max(0, Math.min(1, t));
+        const clampT = MathUtil.clamp01(t);
 
         // Calculate which segment we are in
         const numSegments = count - 1;

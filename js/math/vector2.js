@@ -15,7 +15,7 @@ class Vector2
 	// Methods
 	dot(vec)
     {
-        return (x * vec.x) + (y * vec.y);
+        return ((this.x * vec.x) + (this.y * vec.y));
     }
 
     scale(sx, sy)
@@ -28,7 +28,7 @@ class Vector2
     {
         let ls = this.lengthSquared();
 
-        if (ls > 0.000001)
+        if (ls > MathDefines.kEpsilon)
         {
             let oneOverLen = 1.0 / Math.sqrt(ls);
         
@@ -45,6 +45,16 @@ class Vector2
 	lengthSquared()
     {
 	    return ((this.x * this.x) + (this.y * this.y));
+    }
+
+    // *** Static Methods ***
+
+    // a to b by t, written into out and returned, so nothing new is created
+    static lerp(out, a, b, t)
+    {
+        out.x = a.x + ((b.x - a.x) * t);
+        out.y = a.y + ((b.y - a.y) * t);
+            return out;
     }
 
     // *** Static Vars ***

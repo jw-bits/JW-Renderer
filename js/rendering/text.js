@@ -4,8 +4,9 @@
     TextCanvas - Draws text onto one shared, hidden 2D canvas, ready to upload
     into a texture (see Text2D, TextAtlas).
 
-    The text is drawn in white, centered, with the canvas sized to fit it plus
-    padding, so a color can be applied as a tint when it's drawn.
+    The text is drawn centered, in white by default (so a color can be applied
+    as a tint when it's drawn), with the canvas sized to fit it plus padding.
+    It can also be drawn in a color, with a drop shadow behind it.
 
     Usage:
         const c = TextCanvas.draw("Hello", font, 32, "bold", WGLV.getViewScale());
@@ -23,8 +24,13 @@ class TextCanvas
     /*
         Draws text at fontSize * scale pixels (scale is device pixels per design unit,
         so one texel lands on one screen pixel). Returns the canvas, or null on failure.
+
+        color is a Vector4 (0 - 1). shadowColor, if not null, draws the text
+        again behind itself in that color, shadowOffsetX / shadowOffsetY design
+        units away (negative y is down). The canvas grows by the offset on
+        every side, so the text stays centered in it.
     */
-    static draw(text, font, fontSize, fontWeight, scale)
+    static draw(text, font, fontSize, fontWeight, scale, color = Vector4.kWhite, shadowColor = null, shadowOffsetX = 0.0, shadowOffsetY = 0.0)
     {
         if (text == null || font == null || font.isLoaded() === false || scale <= 0)
             return null;
@@ -38,10 +44,14 @@ class TextCanvas
         const size = fontSize * scale;
         const css = font.toCss(size, fontWeight);
         const pad = Math.ceil(TextCanvas.kPadding * scale);
+        const sx = (shadowColor !== null) ? (shadowOffsetX * scale) : 0.0;
+        const sy = (shadowColor !== null) ? (-shadowOffsetY * scale) : 0.0; // The canvas's y is down
+        const padX = pad + Math.ceil(Math.abs(sx));
+        const padY = pad + Math.ceil(Math.abs(sy));
 
         ctx.font = css;
-        const w = Math.max(1, Math.ceil(ctx.measureText(text).width) + (pad * 2));
-        const h = Math.max(1, TextCanvas.lineHeight(size) + (pad * 2));
+        const w = Math.max(1, Math.ceil(ctx.measureText(text).width) + (padX * 2));
+        const h = Math.max(1, TextCanvas.lineHeight(size) + (padY * 2));
 
         c.width = w; // Resizing clears the canvas and resets the context state
         c.height = h;
@@ -49,7 +59,14 @@ class TextCanvas
         ctx.font = css;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = "#ffffff";
+
+        if (shadowColor !== null)
+        {
+            ctx.fillStyle = TextCanvas.#toCssColor(shadowColor);
+            ctx.fillText(text, (w / 2.0) + sx, (h / 2.0) + sy);
+        }
+
+        ctx.fillStyle = TextCanvas.#toCssColor(color);
         ctx.fillText(text, w / 2.0, h / 2.0);
 
         return c;
@@ -64,6 +81,17 @@ class TextCanvas
             TextCanvas.#canvas = document.createElement("canvas");
 
         return TextCanvas.#canvas;
+    }
+
+    // *** Internal Methods ***
+
+    // A Vector4 (0 - 1) as a CSS rgba() color
+    static #toCssColor(color)
+    {
+        const r = Math.round(MathUtil.clamp01(color.x) * MathDefines.kByteMax);
+        const g = Math.round(MathUtil.clamp01(color.y) * MathDefines.kByteMax);
+        const b = Math.round(MathUtil.clamp01(color.z) * MathDefines.kByteMax);
+            return `rgba(${r}, ${g}, ${b}, ${MathUtil.clamp01(color.w)})`;
     }
 }
 
@@ -209,18 +237,34 @@ class TextAtlas
     // { subTexture, advance, width, height } (design units) for char, or for the fallback if it isn't in the atlas; null if not loaded
     getGlyph(char) { return this.#glyphs.get(char) ?? this.#glyphs.get(TextAtlas.kFallbackChar) ?? null; }
 
-    // How wide text is in design units, padding included (like TextGlyphs2D's width)
+    // How wide text is in design units, padding included (like TextGlyphs2D's width): its widest line, with "\n" / "\r\n" breaking lines
     measure(text)
     {
         if (this.isLoaded() === false || text == null)
             return 0;
 
-        let width = this.#padding * 2.0;
+        let widest = 0.0;
 
-        for (const char of Array.from(text))
-            width += this.getGlyph(char).advance;
+        for (const line of text.split(/\r?\n/))
+        {
+            let width = 0.0;
 
-        return width;
+            for (const char of Array.from(line))
+                width += this.getGlyph(char).advance;
+
+            widest = Math.max(widest, width);
+        }
+
+        return widest + (this.#padding * 2.0);
+    }
+
+    // How tall text is in design units (like TextGlyphs2D's height): a line height per line
+    measureHeight(text)
+    {
+        if (this.isLoaded() === false || text == null)
+            return 0;
+
+        return this.#lineHeight * text.split(/\r?\n/).length;
     }
 
     // Frees the atlas and Material; TextGlyphs2Ds using it stop drawing
@@ -342,7 +386,7 @@ class TextAtlas
                     return false;
             }
 
-            const shader = Rect2D.getDefaultShader();
+            const shader = TextGlyphs2D.getDefaultShader(); // Rect2D's, plus a color per glyph
             let material = new Material();
 
             if (shader === null || material.load(shader, [atlas.getTexture()]) === false)

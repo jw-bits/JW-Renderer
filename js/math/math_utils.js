@@ -13,7 +13,12 @@ class MathUtil
 
     static degToRad(d)
     {
-        return d * (Math.PI / 180.0);
+        return d * MathDefines.kDegToRad;
+    }
+
+    static radToDeg(r)
+    {
+        return r * MathDefines.kRadToDeg;
     }
 
     static randomFloat(minF, maxF)
@@ -28,29 +33,10 @@ class MathUtil
         return a + ((b - a) * t);
     }
 
-    // The vector lerps write into out and return it, so nothing new is created
-    static lerpVector2(out, a, b, t)
+    // v held between 0 and 1
+    static clamp01(v)
     {
-        out.x = a.x + ((b.x - a.x) * t);
-        out.y = a.y + ((b.y - a.y) * t);
-            return out;
-    }
-
-    static lerpVector3(out, a, b, t)
-    {
-        out.x = a.x + ((b.x - a.x) * t);
-        out.y = a.y + ((b.y - a.y) * t);
-        out.z = a.z + ((b.z - a.z) * t);
-            return out;
-    }
-
-    static lerpVector4(out, a, b, t)
-    {
-        out.x = a.x + ((b.x - a.x) * t);
-        out.y = a.y + ((b.y - a.y) * t);
-        out.z = a.z + ((b.z - a.z) * t);
-        out.w = a.w + ((b.w - a.w) * t);
-            return out;
+        return Math.min(1.0, Math.max(0.0, v));
     }
 }
 
@@ -204,9 +190,9 @@ class Interpolator
         switch (this.#componentCount)
         {
             case 1: this.#value = MathUtil.lerp(this.#a, this.#b, t); break;
-            case 2: MathUtil.lerpVector2(this.#value, this.#a, this.#b, t); break;
-            case 3: MathUtil.lerpVector3(this.#value, this.#a, this.#b, t); break;
-            case 4: MathUtil.lerpVector4(this.#value, this.#a, this.#b, t); break;
+            case 2: Vector2.lerp(this.#value, this.#a, this.#b, t); break;
+            case 3: Vector3.lerp(this.#value, this.#a, this.#b, t); break;
+            case 4: Vector4.lerp(this.#value, this.#a, this.#b, t); break;
         }
     }
 
@@ -381,13 +367,13 @@ class Easing extends Interpolator
 
             // Sine: a gentler start / stop than quadratic
             case Easing.kSineIn:
-                return 1.0 - Math.cos(t * Math.PI * 0.5);
+                return 1.0 - Math.cos(t * MathDefines.kHalfPi);
 
             case Easing.kSineOut:
-                return Math.sin(t * Math.PI * 0.5);
+                return Math.sin(t * MathDefines.kHalfPi);
 
             case Easing.kSineInOut:
-                return -0.5 * (Math.cos(t * Math.PI) - 1.0);
+                return -0.5 * (Math.cos(t * MathDefines.kPi) - 1.0);
 
             // Back: pulls back before starting (In), or overshoots and settles (Out)
             case Easing.kBackIn:
@@ -464,7 +450,7 @@ class Easing extends Interpolator
 
     static #kBackC1 = 1.70158;                // How far Back overshoots (about 10%)
     static #kBackC3 = Easing.#kBackC1 + 1.0;
-    static #kElasticC4 = (2.0 * Math.PI) / 3.0;   // Elastic Out wobble period
+    static #kElasticC4 = MathDefines.kTwoPi / 3.0;   // Elastic Out wobble period
 
     // Easing types; the first six keep their original values
     static kQuadraticIn = 0;

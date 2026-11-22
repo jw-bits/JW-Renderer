@@ -40,6 +40,18 @@ class Vector4
     B() { return this.z; }
     A() { return this.w; }
 
+    // *** Static Methods ***
+
+    // a to b by t, written into out and returned, so nothing new is created
+    static lerp(out, a, b, t)
+    {
+        out.x = a.x + ((b.x - a.x) * t);
+        out.y = a.y + ((b.y - a.y) * t);
+        out.z = a.z + ((b.z - a.z) * t);
+        out.w = a.w + ((b.w - a.w) * t);
+            return out;
+    }
+
     // *** Static Vars ***
 
     // Shared, read-only constants: frozen, and the class property can't be reassigned.

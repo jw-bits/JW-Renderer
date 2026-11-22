@@ -51,6 +51,64 @@ const Rect2DShaderSource = {
 };
 
 /*
+    TextGlyphs2D: Rect2D's shader plus a color per vertex (a_color, the
+    glyph's color from TextGlyphs2D.setGlyphColors(); white when not set),
+    multiplied with u_color, so each glyph can have its own tint.
+*/
+const TextGlyphs2DShaderSource = {
+    VS: `#version 300 es
+        layout(location = 5) in vec3 a_pos;
+        layout(location = 1) in vec2 a_uv0;
+        layout(location = 7) in vec4 a_color;
+
+        uniform vec2 u_res;
+        uniform vec3 u_scale;
+
+        // u_vec0 is (x, y, width / 2, height / 2); scale and rotation pivot on the rect's center
+        uniform vec4 u_vec0;
+
+        uniform vec2 u_uvOffset;
+        uniform vec2 u_uvTile;
+
+        out vec2 v_uv0;
+        out vec4 v_color;
+
+        void main() {
+            vec2 ssPos = (a_pos.xy - u_vec0.zw) * u_scale.xy;
+
+            float sa = sin(u_scale.z);
+            float ca = cos(u_scale.z);
+
+            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
+                             ssPos.x * -sa + ssPos.y * ca);
+
+            vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
+            vec2 cs = (zTo1 * 2.0) - 1.0;
+
+            gl_Position = vec4(cs, 0.0, 1.0);
+
+            v_uv0 = u_uvOffset + (a_uv0 * u_uvTile);
+            v_color = a_color;
+        }
+    `,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+        uniform vec4 u_color;
+
+        in vec2 v_uv0;
+        in vec4 v_color;
+        out vec4 fragColor;
+
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            fragColor = c * u_color * v_color;
+        }
+    `
+};
+
+/*
     Sprite: Rect2D's shader, drawing one rect of its texture (an atlas frame)
     instead of all of it. u_vec1 is the UV rect (u, v, width, height), with
     (u, v) its bottom-left corner and V up (see UVRect).

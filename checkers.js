@@ -35,22 +35,34 @@ const BOT_STEP_DELAY = 0.35;    // Seconds between each hop of the bot's move (a
 const MOVE_TIME = 0.35;         // Seconds per hop
 const MOVE_LIFT_SCALE = 1.2;
 
-// Title screen: a tiled checkerboard, with a red checker zig-zagging up its left side
+// Title screen: a tiled checkerboard, with a red checker zig-zagging up its left side and a black one up its right
 const TITLE_SQUARE_SIZE = 0.1;  // Of the smaller screen dimension
 const TITLE_BOARD_DIM = 0.35;   // The board's square colors are darkened to this, so the title stays readable
-const TITLE_PATH_COLUMN = 2;    // The zig-zag runs up this column and the one right of it (must be even)
+const TITLE_PATH_COLUMN = 2;    // The red zig-zag runs up this column and the one right of it (must be even); the black one mirrors it from the right edge
 const TITLE_HOP_TIME = 1.0;     // Seconds per square
 const TITLE_HOP_DELAY = 0.5;    // Seconds the checker waits on a square before its next hop
 
-// The title text runs through each TextEffect in turn, then starts again
-const TITLE_EFFECT_STEPS = ["Fade In", "Drop Shadow", "Wave", "Fade Out"];
+// The title text runs through each text effect in turn, then starts again
+const TITLE_EFFECT_STEPS = ["Fade In", "Wave", "Ease", "Ease One at a Time", "Scroll", "Fade Out"];
 const TITLE_FADE_TIME = 1.5;        // Seconds per fade
-const TITLE_EFFECT_HOLD = 3.0;      // Seconds the drop shadow and the wave each show
-const TITLE_SHADOW_OFFSET = 0.007;  // Of the smaller screen dimension, right and down
-const TITLE_SHADOW_COLOR = new Vector4(0.0, 0.0, 0.0, 0.75);
+const TITLE_EFFECT_HOLD = 3.0;      // Seconds the wave shows
+const TITLE_EASE_HOLD = 1.0;        // Seconds an ease stays at its end before the next step
 const TITLE_WAVE_AMPLITUDE = 0.015; // Of the smaller screen dimension
 const TITLE_WAVE_SPEED = 0.75;      // Cycles per second
 const TITLE_WAVE_SPACING = 0.7;     // Radians along the wave from one letter to the next
+
+// "Ease": every letter grows and turns red together
+const TITLE_EASE_TINT = new Vector4(1.0, 0.45, 0.45, 1.0); // Multiplies the title color
+const TITLE_EASE_SCALE = 1.2;
+const TITLE_EASE_COLOR_TIME = 1.0;  // Seconds
+const TITLE_EASE_SCALE_TIME = 0.8;
+
+// "Ease One at a Time": each letter pops in, alternating left-to-right and right-to-left each time round
+const TITLE_POP_TIME = 0.25;        // Seconds per letter
+
+// "Scroll": the title scrolls left through a view its own size, once round
+const TITLE_SCROLL_GAP = 0.25;      // Of the title's width, between its end and its start coming round
+const TITLE_SCROLL_TIME = 3.0;      // Seconds to go once round
 
 // The hops' easings: all of them
 const TITLE_HOP_EASINGS = [Easing.kLinear,
@@ -60,25 +72,6 @@ const TITLE_HOP_EASINGS = [Easing.kLinear,
                            Easing.kBackIn, Easing.kBackOut, Easing.kBackInOut,
                            Easing.kElasticOut, Easing.kBounceOut];
 
-// Shown beside the title checker for the hop it's making (see renderTitle())
-const EASING_NAMES = {
-    [Easing.kLinear]: "Linear",
-    [Easing.kQuadraticIn]: "Quadratic In",
-    [Easing.kQuadraticOut]: "Quadratic Out",
-    [Easing.kQuadraticInOut]: "Quadratic InOut",
-    [Easing.kCubicIn]: "Cubic In",
-    [Easing.kCubicOut]: "Cubic Out",
-    [Easing.kCubicInOut]: "Cubic InOut",
-    [Easing.kSineIn]: "Sine In",
-    [Easing.kSineOut]: "Sine Out",
-    [Easing.kSineInOut]: "Sine InOut",
-    [Easing.kBackIn]: "Back In",
-    [Easing.kBackOut]: "Back Out",
-    [Easing.kBackInOut]: "Back InOut",
-    [Easing.kElasticOut]: "Elastic Out",
-    [Easing.kBounceOut]: "Bounce Out"
-};
-
 // Sparks from the edge of a piece that lands a jump; speeds and sizes are in squares, so they follow the layout
 const SPARK_COUNT = 10;
 const SPARK_MAX_ALIVE = 256;
@@ -87,6 +80,10 @@ const SPARK_LIFE = new Range(0.4, 0.7);   // Seconds
 const SPARK_SIZE = 0.14;                  // Squares
 const SPARK_GRAVITY = 6.0;                // Squares per second squared, downward
 const SPARK_END_SCALE = 0.4;              // Shrink to 40% over each life
+
+// Status text drop shadows (see updateStatusText()); offsets in design units, negative y is down
+const YOUR_TURN_SHADOW = { color: new Vector4(1.0, 0.0, 0.0, 0.9), x: 0, y: -5 };
+const CPU_TURN_SHADOW = { color: new Vector4(0.0, 0.0, 0.0, 0.9), x: 0, y: -5 };
 
 // Sound effects, by AudioManager name
 const SFX_CLICK = "click";        // The human picks up a piece to move it
@@ -111,11 +108,19 @@ let gLiftPlayer = null;
 
 // Title screen animation, created in loadAssets() (see setupTitleAnimation())
 let gTitleBoard = null;   // Material: a 2x2 checker texture, repeated by the title background's UV tiling
-let gTitleHop = null;     // AnimAction: one square diagonally; its start, target and easing are set per hop
-let gTitlePlayer = null;  // AnimPlayer on the title checker
-let gTitleSquare = { r: -1, c: 0 }; // The title square the checker is on, or hopping to; row -1 is just below the screen
-let gTitleEasing = -1;    // The easing last played, or -1 for none yet
-let gTitleDelay = 0.0;    // Seconds left before the next hop; 0 while hopping
+
+/*
+    The title checkers, red then black (see makeTitleChecker()). Each hops on its own:
+        color   Its piece color
+        column  The even column its zig-zag runs up, with the one right of it (set in appLayout())
+        square  The square it's on, or hopping to, { r, c }; row -1 is just below the screen
+        easing  The easing last played, or -1 for none yet
+        delay   Seconds left before its next hop; 0 while hopping
+        hop     AnimAction: one square diagonally; its start, target and easing are set per hop
+        player  AnimPlayer on its rect
+        rect    Its Rect2D (from appLayout()), or null
+*/
+let gTitleCheckers = [];
 
 let gUIFont = null;    // System font for all menu text (the FontManager's default)
 let gTitleFont = null; // The title's font file, or the default font if it couldn't be loaded
@@ -123,9 +128,10 @@ let gTimeAtlas = null; // TextAtlas of the game time's glyphs (see appLayout())
 let gTitleAtlas = null; // TextAtlas of the title's glyphs, in the title font (see appLayout())
 
 // Title text effects, shown one at a time in order (see startTitleEffect())
-let gTitleEffect = null;     // TextEffect on gTexts.title
+let gTitleEffect = null;     // The current BaseTextEffect on gTexts.title, or null before the layout
 let gTitleEffectStep = 0;    // Index into TITLE_EFFECT_STEPS
-let gTitleEffectTimer = 0.0; // Seconds left on a held step; 0 while fading
+let gTitleEffectTimer = 0.0; // Seconds left on a held step; 0 while fading or easing
+let gTitlePopLeftToRight = true; // Direction of the next "Ease One at a Time"
 
 class GameScreen
 {
@@ -153,8 +159,7 @@ const Colors = {
     kButtonHover: new Vector4(0.60, 0.40, 0.22, 1.0),
     kTitle: new Vector4(0.96, 0.80, 0.45, 1.0),
     kText: new Vector4(0.94, 0.94, 0.94, 1.0),
-    kTextDim: new Vector4(0.65, 0.65, 0.65, 1.0),
-    kWin: new Vector4(0.45, 0.95, 0.45, 1.0),
+    kTextDim: new Vector4(0.65, 0.65, 0.65, 1.0),    kWin: new Vector4(0.45, 0.95, 0.45, 1.0),
     kLose: new Vector4(1.0, 0.40, 0.35, 1.0),
     kBackground: new Vector4(0.12, 0.10, 0.09, 1.0),
     kBars: new Vector4(0.0, 0.0, 0.0, 1.0),  // Fills the window outside the design area
@@ -334,9 +339,9 @@ function setupTitleAnimation()
     const gl = WGLV.context;
     const dark = Colors.kDarkSquare;
     const light = Colors.kLightSquare;
-    const toByte = (v) => Math.round(v * TITLE_BOARD_DIM * 255);
-    const darkPx = [toByte(dark.x), toByte(dark.y), toByte(dark.z), 255];
-    const lightPx = [toByte(light.x), toByte(light.y), toByte(light.z), 255];
+    const toByte = (v) => Math.round(v * TITLE_BOARD_DIM * MathDefines.kByteMax);
+    const darkPx = [toByte(dark.x), toByte(dark.y), toByte(dark.z), MathDefines.kByteMax];
+    const lightPx = [toByte(light.x), toByte(light.y), toByte(light.z), MathDefines.kByteMax];
 
     // Not flipped, so the first row is the bottom
     let texture = new Texture(false, false);
@@ -349,47 +354,94 @@ function setupTitleAnimation()
     else
         gTitleBoard = gMaterialManager.load(Rect2D.getDefaultShader(), [texture], [sampler]);
 
-    gTitleHop = new AnimAction(); // Set up per hop in hopTitleChecker()
+    gTitleCheckers = [makeTitleChecker(Colors.kRed), makeTitleChecker(Colors.kBlack)];
+}
 
-    gTitlePlayer = new AnimPlayer();
-    gTitlePlayer.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) gTitleDelay = TITLE_HOP_DELAY; });
+// A title checker (see gTitleCheckers); its column and rect come from appLayout()
+function makeTitleChecker(color)
+{
+    let checker = {
+        color: color,
+        column: TITLE_PATH_COLUMN,
+        square: { r: -1, c: TITLE_PATH_COLUMN + 1 },
+        easing: -1,
+        delay: 0.0,
+        hop: new AnimAction(), // Set up per hop in hopTitleChecker()
+        player: new AnimPlayer(),
+        rect: null
+    };
+
+    // Landing starts the wait before the next hop
+    checker.player.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) checker.delay = TITLE_HOP_DELAY; });
+        return checker;
 }
 
 /*
     Starts title effect step (an index into TITLE_EFFECT_STEPS), with only
-    that effect on. The fades move on when they finish (see TextEffect's
-    onDone); the drop shadow and wave are held for TITLE_EFFECT_HOLD.
+    a new effect for it. The fades move on when they finish (see
+    FadeTextEffect's onDone); the eases hold their end for TITLE_EASE_HOLD; the wave is held
+    for TITLE_EFFECT_HOLD; the scroll for one time round, so the title ends
+    back where it started.
 */
 function startTitleEffect(step)
 {
-    if (gTitleEffect === null)
+    const title = gTexts.title;
+
+    if (title === undefined)
         return;
 
     const unit = Math.min(gLayout.w, gLayout.h);
     const next = () => startTitleEffect((step + 1) % TITLE_EFFECT_STEPS.length);
+    const holdEase = () => { gTitleEffectTimer = TITLE_EASE_HOLD; };
 
     gTitleEffectStep = step;
     gTitleEffectTimer = 0.0;
-    gTitleEffect.disable(TextEffectType.kDropShadow | TextEffectType.kWave);
-    gTexts.titleEffect.setText(TITLE_EFFECT_STEPS[step]);
+
+    if (gTitleEffect !== null)
+        gTitleEffect.stop(); // Puts the title's glyphs back
 
     switch (TITLE_EFFECT_STEPS[step])
     {
         case "Fade In":
+            gTitleEffect = new FadeTextEffect(title);
             gTitleEffect.fadeIn(TITLE_FADE_TIME, next);
             break;
 
-        case "Drop Shadow":
-            gTitleEffect.setDropShadow(unit * TITLE_SHADOW_OFFSET, -unit * TITLE_SHADOW_OFFSET, TITLE_SHADOW_COLOR);
+        case "Wave":
+            gTitleEffect = new WaveTextEffect(title);
+            gTitleEffect.set(unit * TITLE_WAVE_AMPLITUDE, TITLE_WAVE_SPEED, TITLE_WAVE_SPACING);
             gTitleEffectTimer = TITLE_EFFECT_HOLD;
             break;
 
-        case "Wave":
-            gTitleEffect.setWave(unit * TITLE_WAVE_AMPLITUDE, TITLE_WAVE_SPEED, TITLE_WAVE_SPACING);
-            gTitleEffectTimer = TITLE_EFFECT_HOLD;
+        case "Ease":
+            gTitleEffect = new EaseTextEffect(title);
+            gTitleEffect.setColor(Vector4.kWhite, TITLE_EASE_TINT, Easing.kSineInOut, TITLE_EASE_COLOR_TIME);
+            gTitleEffect.setScale(1.0, TITLE_EASE_SCALE, Easing.kBackOut, TITLE_EASE_SCALE_TIME);
+            gTitleEffect.setMode(EaseTextEffect.kModeAll);
+            gTitleEffect.play(holdEase);
             break;
+
+        case "Ease One at a Time":
+            gTitleEffect = new EaseTextEffect(title);
+            gTitleEffect.setColor(new Vector4(1.0, 1.0, 1.0, 0.0), Vector4.kWhite, Easing.kLinear, TITLE_POP_TIME);
+            gTitleEffect.setScale(0.0, 1.0, Easing.kBackOut, TITLE_POP_TIME);
+            gTitleEffect.setMode(EaseTextEffect.kModeIteration, gTitlePopLeftToRight ? EaseTextEffect.kLeftToRight : EaseTextEffect.kRightToLeft);
+            gTitleEffect.play(holdEase);
+            gTitlePopLeftToRight = !gTitlePopLeftToRight;
+            break;
+
+        case "Scroll":
+        {
+            // Gap above any letter's width, so once round is exactly the title's width plus the gap
+            const lap = title.getWidth() * (1.0 + TITLE_SCROLL_GAP);
+            gTitleEffect = new ScrollTextEffect(title);
+            gTitleEffect.set(ScrollTextEffect.kLeft, lap / TITLE_SCROLL_TIME, title.getWidth(), title.getHeight(), title.getWidth() * TITLE_SCROLL_GAP);
+            gTitleEffectTimer = TITLE_SCROLL_TIME;
+            break;
+        }
 
         case "Fade Out":
+            gTitleEffect = new FadeTextEffect(title);
             gTitleEffect.fadeOut(TITLE_FADE_TIME, next);
             break;
     }
@@ -412,53 +464,65 @@ function updateTitleEffect(dt)
         startTitleEffect((gTitleEffectStep + 1) % TITLE_EFFECT_STEPS.length);
 }
 
-// Advances the title text effect; counts down the wait between hops, then starts the next one
+// Advances the title text effect and each title checker
 function updateTitle(dt)
 {
     updateTitleEffect(dt);
 
-    if (gTitleDelay <= 0.0)
+    for (const checker of gTitleCheckers)
+        updateTitleChecker(checker, dt);
+}
+
+// Counts down a title checker's wait between hops, then starts the next one
+function updateTitleChecker(checker, dt)
+{
+    if (checker.delay <= 0.0)
     {
-        gTitlePlayer.update(dt); // Hopping; landing starts the wait (see setupTitleAnimation())
+        checker.player.update(dt); // Hopping; landing starts the wait (see makeTitleChecker())
             return;
     }
 
-    gTitleDelay -= dt;
+    checker.delay -= dt;
 
-    if (gTitleDelay <= 0.0)
+    if (checker.delay <= 0.0)
     {
-        gTitleDelay = 0.0;
-        hopTitleChecker();
+        checker.delay = 0.0;
+        hopTitleChecker(checker);
     }
 }
 
-// Hops the title checker diagonally up a square, with a random easing other than the last one; off the top, it starts again below the bottom
-function hopTitleChecker()
+// Hops a title checker diagonally up a square, with a random easing other than its last one; off the top, it starts again below the bottom
+function hopTitleChecker(checker)
 {
-    const checker = gRects.titleChecker;
-
-    if (checker === undefined)
+    if (checker.rect === null)
     {
-        console.error("hopTitleChecker() needs the title checker from appLayout()");
+        console.error("hopTitleChecker() needs the title checker's rect from appLayout()");
             return;
     }
 
     // The top row is the first one fully above the screen
-    if (gTitleSquare.r >= Math.ceil(gLayout.h / gLayout.titleSq))
-        gTitleSquare = titleSquareOnRow(-1);
+    if (checker.square.r >= Math.ceil(gLayout.h / gLayout.titleSq))
+        checker.square = titleSquareOnRow(checker.column, -1);
 
-    const from = gTitleSquare;
-    gTitleSquare = titleSquareOnRow(from.r + 1);
-    gTitleEasing = randomEasing(gTitleEasing);
-    gTexts.titleEasing.setText(EASING_NAMES[gTitleEasing] ?? "");
+    const from = checker.square;
+    checker.square = titleSquareOnRow(checker.column, from.r + 1);
+    checker.easing = randomEasing(checker.easing);
 
-    gTitleHop.setTranslationStart(titleSquareCenter(from.c), titleSquareCenter(from.r));
-    gTitleHop.setTranslation(titleSquareCenter(gTitleSquare.c), titleSquareCenter(gTitleSquare.r), TITLE_HOP_TIME, gTitleEasing);
-    gTitlePlayer.play(checker, gTitleHop);
+    checker.hop.setTranslationStart(titleSquareCenter(from.c), titleSquareCenter(from.r));
+    checker.hop.setTranslation(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r), TITLE_HOP_TIME, checker.easing);
+    checker.player.play(checker.rect, checker.hop);
 }
 
-// The zig-zag's square on row r: TITLE_PATH_COLUMN on even rows, one right of it on odd ones, so it's always a dark square
-function titleSquareOnRow(r) { return { r: r, c: TITLE_PATH_COLUMN + (r & 1) }; }
+// A zig-zag's square on row r: column on even rows, one right of it on odd ones, so with an even column it's always a dark square
+function titleSquareOnRow(column, r) { return { r: r, c: column + (r & 1) }; }
+
+// The black checker's column: TITLE_PATH_COLUMN mirrored from the right edge of a screen width wide, rounded down to even
+function rightTitlePathColumn(width)
+{
+    const columns = Math.ceil(width / gLayout.titleSq);
+    const column = columns - 2 - TITLE_PATH_COLUMN; // Its two columns mirror the red zig-zag's
+        return Math.max(0, column - (column & 1));
+}
 
 // The center of a title board column or row, in design units
 function titleSquareCenter(i) { return Math.round((i + 0.5) * gLayout.titleSq); }
@@ -495,7 +559,7 @@ function appOnAssetsLoaded()
 function appMain()
 {
     let now = Date.now();
-    dt = (now - prevTS) * 0.001;
+    dt = (now - prevTS) * MathDefines.kSecondsPerMs;
     prevTS = now;
 
     appUpdate(dt);
@@ -602,15 +666,14 @@ function appLayout()
     gRects.overlay.setPos(0, 0);
 
     // Title screen
-    // The title is built from glyphs so TextEffect can run its effects on it (see startTitleEffect())
+    // The title is built from glyphs so the text effects can run on it (see startTitleEffect())
     gTitleAtlas = new TextAtlas(gTitleFont, "CHECKERS", Math.max(8, Math.round(unit * 0.15)), "normal");
     gTexts.title = new TextGlyphs2D(gTitleAtlas);
     gTexts.title.setColor(Colors.kTitle);
     gTexts.title.listenForRasterScale(true); // Redraws its glyphs when the view's scale changes, so it stays sharp
     gTexts.title.setPos(Math.round(w / 2), Math.round(h * 0.70), Alignment.kMiddleCenter);
     gTexts.title.setText("CHECKERS");
-    gTitleEffect = new TextEffect(gTexts.title);
-    gTexts.titleEffect = makeText("", unit * 0.03, "bold", Colors.kTextDim, w / 2, h * 0.86); // The effect showing now
+    gTitleEffect = null; // The old one was on the old title; startTitleEffect(0) below makes the first
     gTexts.subtitle = makeText("You play Red against the computer", unit * 0.035, "normal", Colors.kTextDim, w / 2, h * 0.57);
     gButtons.start = new Button("Start Game", w / 2, h * 0.42, unit * 0.38, unit * 0.10, unit * 0.045, unit * 0.035);
     gTexts.titleHint = makeText("Enter - Start      Esc - Menu", unit * 0.028, "normal", Colors.kTextDim, w / 2, h * 0.27);
@@ -622,15 +685,22 @@ function appLayout()
     gRects.titleBoard.setUVTile(w / (titleSq * 2), h / (titleSq * 2));
     gRects.titleBoard.setPos(0, 0);
 
-    // Centered, as the hops move its center from square to square (see hopTitleChecker())
+    // The checkers: red up the left, black up the right. Centered, as the hops move their centers from square to square (see hopTitleChecker()).
     const titlePieceSize = Math.floor(titleSq * 0.86);
-    gRects.titleChecker = makeRect(gTextures.piece, titlePieceSize, titlePieceSize, Colors.kRed);
-    gRects.titleChecker.setPos(titleSquareCenter(gTitleSquare.c), titleSquareCenter(gTitleSquare.r), Alignment.kMiddleCenter);
-    gTexts.titleEasing = makeText("", unit * 0.03, "bold", Colors.kText, 0, 0, Alignment.kMiddleLeft); // Follows the checker (see renderTitle())
+
+    for (let i = 0; i < gTitleCheckers.length; ++i)
+    {
+        let checker = gTitleCheckers[i];
+        checker.column = (i === 0) ? TITLE_PATH_COLUMN : rightTitlePathColumn(w);
+        checker.square = titleSquareOnRow(checker.column, checker.square.r); // The black one's column may have moved
+        checker.rect = makeRect(gTextures.piece, titlePieceSize, titlePieceSize, checker.color);
+        checker.rect.setPos(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r), Alignment.kMiddleCenter);
+    }
 
     // Game screen
     const boardTop = boardY + boardPx + border;
-    gTexts.status = makeText("", unit * 0.04, "bold", Colors.kText, w / 2, boardTop + ((h - boardTop) / 2));
+    gTexts.status = makeText("", unit * 0.04, "bold", Vector4.kWhite, w / 2, boardTop + ((h - boardTop) / 2));
+    gTexts.status.setRasterizedTextColor(Colors.kText); // Drawn in its color, untinted, so its shadow keeps its own color
     const menuW = unit * 0.16;
     const menuH = unit * 0.06;
     const margin = Math.round(unit * 0.03);
@@ -660,8 +730,13 @@ function appLayout()
     updateTimeText();
     updateGameOverText();
 
-    gTitleDelay = 0.0;
-    hopTitleChecker(); // The checker is a new rect, so start it hopping again
+    // The checkers are new rects, so start them hopping again
+    for (const checker of gTitleCheckers)
+    {
+        checker.delay = 0.0;
+        hopTitleChecker(checker);
+    }
+
     startTitleEffect(0); // The title is new too: start its effects from the first
 }
 
@@ -752,14 +827,11 @@ function renderScreen(screen, isActive)
 function renderTitle(isActive)
 {
     gBatcher.submit(gRects.titleBoard, Layers.kBoard);
-    gBatcher.submit(gRects.titleChecker, Layers.kPieces);
 
-    // The current hop's easing, just right of the checker
-    const checkerPos = gRects.titleChecker.getAnchor();
-    gTexts.titleEasing.setPos(Math.round(checkerPos.x + (gLayout.titleSq * 0.6)), Math.round(checkerPos.y), Alignment.kMiddleLeft);
-    gBatcher.submit(gTexts.titleEasing, Layers.kUIText);
+    for (const checker of gTitleCheckers)
+        gBatcher.submit(checker.rect, Layers.kPieces);
+
     gTitleEffect.submit(gBatcher, Layers.kUIText); // The title, with its current effect
-    gBatcher.submit(gTexts.titleEffect, Layers.kUIText);
     gBatcher.submit(gTexts.subtitle, Layers.kUIText);
     gButtons.start.render(isActive);
     gBatcher.submit(gTexts.titleHint, Layers.kUIText);
@@ -896,7 +968,7 @@ function emitJumpSparks(r, c)
     const cx = squareX(c) + (sq / 2);
     const cy = squareY(r) + (sq / 2);
     const radius = Math.floor(sq * 0.86) / 2; // The piece's size, as in appLayout()
-    const step = (Math.PI * 2.0) / SPARK_COUNT;
+    const step = MathDefines.kTwoPi / SPARK_COUNT;
 
     for (let i = 0; i < SPARK_COUNT; i++)
     {
@@ -923,25 +995,41 @@ function updateStatusText()
         return;
 
     let text = "";
+    let shadow = null; // No shadow for "Keep jumping!"
 
     if (gTurn === BOT)
+    {
         text = "Computer is thinking...";
+        shadow = CPU_TURN_SHADOW;
+    }
     else if (gChainPiece !== null)
         text = "Keep jumping!";
-    else if (playerHasJump(gBoard, HUMAN))
-        text = "Your turn - you must capture";
     else
-        text = "Your turn";
+    {
+        text = playerHasJump(gBoard, HUMAN) ? "Your turn - you must capture" : "Your turn";
+        shadow = YOUR_TURN_SHADOW;
+    }
 
-    gTexts.status.setText(text);
+    let status = gTexts.status;
+    status.setText(text);
+
+    // Each of these only redraws the text when it changes something
+    if (shadow === null)
+        status.setDropShadowEnabled(false);
+    else
+    {
+        status.setRasterizedShadowColor(shadow.color);
+        status.setDropShadowOffset(shadow.x, shadow.y);
+        status.setDropShadowEnabled(true);
+    }
 }
 
 // Game time as "mm:ss"; minutes keep counting past 59
 function formatTime(seconds)
 {
     const total = Math.floor(seconds);
-    const mm = String(Math.floor(total / 60)).padStart(2, "0");
-    const ss = String(total % 60).padStart(2, "0");
+    const mm = String(Math.floor(total / MathDefines.kSecondsPerMinute)).padStart(2, "0");
+    const ss = String(total % MathDefines.kSecondsPerMinute).padStart(2, "0");
     return `${mm}:${ss}`;
 }
 

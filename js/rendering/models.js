@@ -560,9 +560,25 @@ class NinePatch2D extends Model2D
 /*
     Text2D - Screen-space text, drawn as a textured quad.
 
-    The text is drawn in white with TextCanvas and uploaded straight into the
-    Text2D's own texture (no image decode). The color is applied as a tint, so
-    setColor() never re-rasterizes; only setText() does.
+    The text is drawn with TextCanvas and uploaded straight into the Text2D's
+    own texture (no image decode). setColor() is a tint on top of it, so it
+    never re-rasterizes.
+
+    Rasterized colors: the text is drawn into the texture in
+    setRasterizedTextColor() (white by default), with an optional drop shadow
+    behind it in setRasterizedShadowColor(). With a white rasterized color,
+    setColor() colors the text; with colored text or a shadow, leave
+    setColor() at (1, 1, 1, a) so the rasterized colors stay as they are and
+    a fades the whole Text2D in or out. Changing a rasterized color, the
+    shadow's offset, or turning the shadow on / off re-rasterizes.
+
+        t.setRasterizedTextColor(new Vector4(1, 0.8, 0, 1));
+        t.setRasterizedShadowColor(new Vector4(0, 0, 0, 0.6));
+        t.setDropShadowOffset(3, -3); // Design units; negative y is down
+        t.setDropShadowEnabled(true); // Off by default
+
+    The shadow makes the quad bigger by its offset on every side, so the text
+    stays centered in it.
 
     Sizes and positions are in design units (see WGLV). The text is rasterized
     at the view's current scale so it stays sharp at any window size, and it
@@ -593,6 +609,12 @@ class Text2D extends Model2D
     #texture;  // Owned: updated in place each time the text is rasterized
     #material; // Owned: this texture with Rect2D's default shader (so MaterialBatcher can instance it)
 
+    // Drawn into the texture
+    #textColor;    // Vector4
+    #shadowColor;  // Vector4
+    #isShadowOn;
+    #shadowOffset; // Vector2, design units
+
     // _font is a Font, usually from the app's FontManager
     constructor(_font, _fontSize = 32, _fontWeight = "normal")
     {
@@ -613,6 +635,11 @@ class Text2D extends Model2D
 
         this.#texture = null;
         this.#material = null;
+
+        this.#textColor = new Vector4(1, 1, 1, 1);
+        this.#shadowColor = new Vector4(0, 0, 0, 0.6);
+        this.#isShadowOn = false;
+        this.#shadowOffset = new Vector2(3, -3);
     }
 
     // Returns false if the text is null, the Font isn't loaded, or the text couldn't be drawn
@@ -647,6 +674,52 @@ class Text2D extends Model2D
     getFontSize() { return this.#fontSize; }
     getFontWeight() { return this.#fontWeight; }
 
+    // *** Rasterized colors and drop shadow ***
+
+    // The color the text is drawn into the texture in, a Vector4 (copied); white by default
+    setRasterizedTextColor(color)
+    {
+        if (Text2D.#copyColor(this.#textColor, color) === true)
+            this.#rasterizeAgain();
+    }
+
+    // The color the drop shadow is drawn into the texture in, a Vector4 (copied)
+    setRasterizedShadowColor(color)
+    {
+        if (Text2D.#copyColor(this.#shadowColor, color) === true && this.#isShadowOn === true)
+            this.#rasterizeAgain();
+    }
+
+    getRasterizedTextColor() { return this.#textColor; }
+    getRasterizedShadowColor() { return this.#shadowColor; }
+
+    setDropShadowEnabled(enabled)
+    {
+        const isOn = (enabled === true);
+
+        if (isOn === this.#isShadowOn)
+            return;
+
+        this.#isShadowOn = isOn;
+        this.#rasterizeAgain();
+    }
+
+    isDropShadowEnabled() { return this.#isShadowOn; }
+
+    // The shadow is offsetX / offsetY design units from the text (negative y is down)
+    setDropShadowOffset(offsetX, offsetY)
+    {
+        if (offsetX === this.#shadowOffset.x && offsetY === this.#shadowOffset.y)
+            return;
+
+        this.#shadowOffset.set(offsetX, offsetY);
+
+        if (this.#isShadowOn === true)
+            this.#rasterizeAgain();
+    }
+
+    getDropShadowOffset() { return this.#shadowOffset; }
+
     // Always drawn with its own Material on Rect2D's default shader
     canInstance() { return this.isLoaded(); }
 
@@ -679,10 +752,19 @@ class Text2D extends Model2D
 
     // *** Internal Methods ***
 
+    // Draws the text again after a rasterized color or the shadow changed, if it has been drawn
+    #rasterizeAgain()
+    {
+        if (this.#text !== null && this.isLoaded() === true)
+            this.#rasterize();
+    }
+
     #rasterize()
     {
         const scale = WGLV.getViewScale();
-        const c = TextCanvas.draw(this.#text, this.#font, this.#fontSize, this.#fontWeight, scale);
+        const shadow = (this.#isShadowOn === true) ? this.#shadowColor : null;
+        const c = TextCanvas.draw(this.#text, this.#font, this.#fontSize, this.#fontWeight, scale,
+                                  this.#textColor, shadow, this.#shadowOffset.x, this.#shadowOffset.y);
 
         if (c === null)
         {
@@ -744,6 +826,16 @@ class Text2D extends Model2D
         this.listenForRasterScale(true);
             return true;
     }
+
+    // Copies color into target; returns true if it changed
+    static #copyColor(target, color)
+    {
+        if (target.x === color.x && target.y === color.y && target.z === color.z && target.w === color.w)
+            return false;
+
+        target.set(color.x, color.y, color.z, color.w);
+            return true;
+    }
 }
 
 /*
@@ -776,18 +868,43 @@ class Text2D extends Model2D
     Characters missing from the TextAtlas draw as its fallback "?". The
     TextAtlas belongs to the caller; unload it after the TextGlyphs2Ds.
 
-    Each glyph can be moved on its own with setGlyphOffsets() (see
-    TextEffect's wave); that re-uploads the positions only. setText()
-    clears the offsets.
+    Line breaks: "\n" (or "\r\n") starts a new line, one line height below
+    the last. Its size is the widest line by every line, and
+    setLineAlignment() lines up the shorter ones by an Alignment's column
+    (left, center or right; the row doesn't matter). Left by default, and
+    kept through unload() and setText(). Line breaks aren't glyphs:
+    they have no quad and aren't counted by getGlyphCount(), so glyph
+    indices run over the other characters only, line after line.
+
+        label.setLineAlignment(Alignment.kMiddleCenter); // Any center one
+        label.setText("GAME\nOVER");
+
+    Each glyph can be changed on its own (see BaseTextEffect):
+        setGlyphOffsets()  Moves it
+        setGlyphScales()   Scales it about its own center
+        setGlyphColors()   Tints it; multiplied with setColor()
+    Each only re-uploads its own vertex data. setText() clears all three.
+    getGlyphX() / getGlyphY() / getGlyphWidth() / getGlyphHeight() say
+    where each glyph's quad is before any of them.
+
+    It draws with its own shader (getDefaultShader(): Rect2D's plus a color
+    per vertex), which TextAtlas gives its Material.
 */
 class TextGlyphs2D extends Model2D
 {
+    static #kShader = null;
+
     #textAtlas;
     #text;
-    #mesh;         // The mesh given to the base, kept to update its positions
-    #positions;    // Each glyph quad's corners without offsets (x, y, z per vertex)
-    #moved;        // Scratch for #positions plus offsets
-    #glyphCount;
+    #mesh;         // The mesh given to the base, kept to update its positions and colors
+    #positions;    // Each glyph quad's corners as laid out (x, y, z per vertex)
+    #moved;        // Scratch for #positions with the offsets and scales
+    #offsets;      // x, y per glyph, or null for none
+    #scales;       // sx, sy per glyph, or null for none
+    #colors;       // r, g, b, a per vertex, uploaded as a_color
+    #glyphCount;   // Quads with a character; line breaks aren't counted
+    #lineCount;
+    #lineAlign;    // Alignment; only its column is used. Kept through unload()
     #wantsRasterScale;  // Set by listenForRasterScale(); kept through unload()
     #onAtlasRasterized; // Given to the TextAtlas: rebuilds the quads after it draws the glyphs again
 
@@ -801,7 +918,12 @@ class TextGlyphs2D extends Model2D
         this.#mesh = null;
         this.#positions = null;
         this.#moved = null;
+        this.#offsets = null;
+        this.#scales = null;
+        this.#colors = null;
         this.#glyphCount = 0;
+        this.#lineCount = 0;
+        this.#lineAlign = Alignment.kBottomLeft;
         this.#wantsRasterScale = false;
         this.#onAtlasRasterized = () => {
             if (this.#text !== null)
@@ -840,8 +962,38 @@ class TextGlyphs2D extends Model2D
     getText() { return this.#text; }
     getTextAtlas() { return this.#textAtlas; }
 
-    // Characters in the text (each one quad)
+    // Characters in the text, line breaks left out (each one quad)
     getGlyphCount() { return this.#glyphCount; }
+
+    // Lines in the text (1 for text without line breaks); 0 before setText()
+    getLineCount() { return this.#lineCount; }
+
+    /*
+        Lines up lines shorter than the widest by align's column (Alignment:
+        left, center or right; the row doesn't matter). Rebuilds the quads if
+        the text is set. Returns false if align isn't valid.
+    */
+    setLineAlignment(align)
+    {
+        if (Alignment.isValid(align) === false)
+        {
+            console.error("TextGlyphs2D.setLineAlignment() needs an Alignment");
+                return false;
+        }
+
+        const changed = (Alignment.getColumn(align) !== Alignment.getColumn(this.#lineAlign));
+        this.#lineAlign = align;
+
+        if (changed === false)
+            return true;
+
+        if (this.#text !== null && this.isLoaded() === true)
+            return this.#buildMesh(this.#text);
+
+        return true;
+    }
+
+    getLineAlignment() { return this.#lineAlign; }
 
     /*
         true redraws the TextAtlas at the new scale when the view's scale changes,
@@ -866,8 +1018,8 @@ class TextGlyphs2D extends Model2D
     /*
         Moves each glyph by (x, y) design units from where the text puts it:
         offsets holds x, y pairs, one per glyph (getGlyphCount()), or is null to
-        put them all back. The size and alignment don't change. Returns false
-        if not loaded or offsets is too short.
+        put them all back. The values are copied. The size and alignment don't
+        change. Returns false if not loaded or offsets is too short.
     */
     setGlyphOffsets(offsets)
     {
@@ -875,7 +1027,10 @@ class TextGlyphs2D extends Model2D
             return false;
 
         if (offsets === null)
-            return this.#mesh.updateVertexData(RenderAttributes.kPosition, this.#positions);
+        {
+            this.#offsets = null;
+                return this.#uploadPositions();
+        }
 
         if (offsets.length < this.#glyphCount * 2)
         {
@@ -883,25 +1038,92 @@ class TextGlyphs2D extends Model2D
                 return false;
         }
 
-        const base = this.#positions;
-        let moved = this.#moved;
+        if (this.#offsets === null)
+            this.#offsets = new Float32Array(this.#glyphCount * 2);
 
-        for (let i = 0; i < this.#glyphCount; ++i)
+        for (let i = 0; i < this.#offsets.length; ++i)
+            this.#offsets[i] = offsets[i];
+
+        return this.#uploadPositions();
+    }
+
+    /*
+        Scales each glyph about its own center: scales holds sx, sy pairs, one
+        per glyph (1 is its normal size), or is null to put them all back. The
+        values are copied. The size and alignment don't change. Returns false
+        if not loaded or scales is too short.
+    */
+    setGlyphScales(scales)
+    {
+        if (this.isLoaded() === false || this.#mesh === null)
+            return false;
+
+        if (scales === null)
         {
-            const dx = offsets[i * 2];
-            const dy = offsets[(i * 2) + 1];
+            this.#scales = null;
+                return this.#uploadPositions();
+        }
 
-            for (let corner = 0; corner < 4; ++corner)
+        if (scales.length < this.#glyphCount * 2)
+        {
+            console.error(`TextGlyphs2D.setGlyphScales() needs ${this.#glyphCount * 2} values (sx, sy per glyph)`);
+                return false;
+        }
+
+        if (this.#scales === null)
+            this.#scales = new Float32Array(this.#glyphCount * 2);
+
+        for (let i = 0; i < this.#scales.length; ++i)
+            this.#scales[i] = scales[i];
+
+        return this.#uploadPositions();
+    }
+
+    /*
+        Tints each glyph: colors holds r, g, b, a (0 - 1), one set per glyph,
+        multiplied with setColor()'s color; null makes them all white again.
+        Returns false if not loaded or colors is too short.
+    */
+    setGlyphColors(colors)
+    {
+        if (this.isLoaded() === false || this.#mesh === null)
+            return false;
+
+        if (colors !== null && colors.length < this.#glyphCount * 4)
+        {
+            console.error(`TextGlyphs2D.setGlyphColors() needs ${this.#glyphCount * 4} values (r, g, b, a per glyph)`);
+                return false;
+        }
+
+        let out = this.#colors;
+
+        if (colors === null)
+            out.fill(1.0);
+        else
+        {
+            for (let i = 0; i < this.#glyphCount; ++i)
             {
-                const p = (i * 12) + (corner * 3);
-                moved[p] = base[p] + dx;
-                moved[p + 1] = base[p + 1] + dy;
-                moved[p + 2] = base[p + 2];
+                const c = i * 4;
+
+                for (let corner = 0; corner < 4; ++corner)
+                {
+                    const v = (i * 16) + (corner * 4);
+                    out[v] = colors[c];
+                    out[v + 1] = colors[c + 1];
+                    out[v + 2] = colors[c + 2];
+                    out[v + 3] = colors[c + 3];
+                }
             }
         }
 
-        return this.#mesh.updateVertexData(RenderAttributes.kPosition, moved);
+        return this.#mesh.updateVertexData(RenderAttributes.kColor, out);
     }
+
+    // Where glyph index's quad is as laid out (before offsets and scales), in design units from the text's bottom-left; 0 if out of range
+    getGlyphX(index) { return this.#glyphCorner(index, 0, 0); }
+    getGlyphY(index) { return this.#glyphCorner(index, 0, 1); }
+    getGlyphWidth(index) { return this.#glyphCorner(index, 2, 0) - this.#glyphCorner(index, 0, 0); }
+    getGlyphHeight(index) { return this.#glyphCorner(index, 2, 1) - this.#glyphCorner(index, 0, 1); }
 
     // Frees the mesh; the TextAtlas belongs to the caller. setText() loads it again, listening again if it was.
     unload()
@@ -915,7 +1137,30 @@ class TextGlyphs2D extends Model2D
         this.#mesh = null;
         this.#positions = null;
         this.#moved = null;
+        this.#offsets = null;
+        this.#scales = null;
+        this.#colors = null;
         this.#glyphCount = 0;
+        this.#lineCount = 0;
+    }
+
+    // Rect2D's shader plus a color per vertex (see TextGlyphs2DShaderSource); shared by every TextAtlas
+    static getDefaultShader()
+    {
+        if (TextGlyphs2D.#kShader === null)
+        {
+            let shader = new Shader();
+
+            if (shader.load(TextGlyphs2DShaderSource.VS, TextGlyphs2DShaderSource.FS) === false)
+            {
+                console.error("TextGlyphs2D couldn't build its shader");
+                    return null;
+            }
+
+            TextGlyphs2D.#kShader = shader;
+        }
+
+        return TextGlyphs2D.#kShader;
     }
 
     // *** Internal Methods ***
@@ -928,41 +1173,68 @@ class TextGlyphs2D extends Model2D
     #buildMesh(text)
     {
         const ta = this.#textAtlas;
-        const chars = Array.from(text);
-        const quadCount = Math.max(1, chars.length); // Empty text: one empty quad, so it still has a mesh and a size
+        const lines = TextGlyphs2D.#splitLines(text);
         const height = ta.getLineHeight();
+
+        // Each line's advance width, the widest, and the glyph count
+        let lineWidths = [];
+        let widest = 0.0;
+        let glyphCount = 0;
+
+        for (const line of lines)
+        {
+            let w = 0.0;
+
+            for (const char of line)
+                w += ta.getGlyph(char).advance;
+
+            lineWidths.push(w);
+            widest = Math.max(widest, w);
+            glyphCount += line.length;
+        }
+
+        const quadCount = Math.max(1, glyphCount); // Empty text: one empty quad, so it still has a mesh and a size
+        const lineShift = Alignment.getColumn(this.#lineAlign) / 2.0; // 0 left, 0.5 center, 1 right, of the space a line leaves
 
         let pos = new Float32Array(quadCount * 4 * 3);
         let uvs = new Float32Array(quadCount * 4 * 2);
         let indices = ((quadCount * 4) > 65535) ? new Uint32Array(quadCount * 6) : new Uint16Array(quadCount * 6);
-        let penX = 0.0; // Each cell's left edge: the advances so far (the cell holds the left padding)
+        let i = 0; // Glyph (quad) index
 
-        for (let i = 0; i < chars.length; ++i)
+        for (let l = 0; l < lines.length; ++l)
         {
-            const glyph = ta.getGlyph(chars[i]);
-            const r = glyph.subTexture.getUVRect();
-            const left = penX;
-            const right = penX + glyph.width;
-            const p = i * 12;
-            const t = i * 8;
-            const v = i * 4;
+            const bottom = (lines.length - 1 - l) * height; // The first line is at the top
+            const top = bottom + height;
+            let penX = (widest - lineWidths[l]) * lineShift; // Each cell's left edge: the advances so far (the cell holds the left padding)
 
-            // 3 - 2
-            // |   |
-            // 0 - 1
-            pos.set([left, 0.0, 0.0,  right, 0.0, 0.0,  right, height, 0.0,  left, height, 0.0], p);
-            uvs.set([r.getLeft(), r.getBottom(),  r.getRight(), r.getBottom(),  r.getRight(), r.getTop(),  r.getLeft(), r.getTop()], t);
-            indices.set([v, v + 1, v + 2,  v + 2, v + 3, v], i * 6);
+            for (const char of lines[l])
+            {
+                const glyph = ta.getGlyph(char);
+                const r = glyph.subTexture.getUVRect();
+                const left = penX;
+                const right = penX + glyph.width;
+                const v = i * 4;
 
-            penX += glyph.advance;
+                // 3 - 2
+                // |   |
+                // 0 - 1
+                pos.set([left, bottom, 0.0,  right, bottom, 0.0,  right, top, 0.0,  left, top, 0.0], i * 12);
+                uvs.set([r.getLeft(), r.getBottom(),  r.getRight(), r.getBottom(),  r.getRight(), r.getTop(),  r.getLeft(), r.getTop()], i * 8);
+                indices.set([v, v + 1, v + 2,  v + 2, v + 3, v], i * 6);
+
+                penX += glyph.advance;
+                ++i;
+            }
         }
 
-        if (chars.length === 0)
+        if (glyphCount === 0)
             indices.set([0, 1, 2,  2, 3, 0], 0); // All corners at (0, 0): draws nothing
 
+        let colors = new Float32Array(quadCount * 4 * 4).fill(1.0); // White: no tint of its own
         let mesh = new StaticMesh();
 
-        if (mesh.setVertexData(RenderAttributes.kPosition, pos) === false || mesh.setVertexData(RenderAttributes.kUV0, uvs) === false || mesh.setIndexData(indices) === false)
+        if (mesh.setVertexData(RenderAttributes.kPosition, pos) === false || mesh.setVertexData(RenderAttributes.kUV0, uvs) === false ||
+            mesh.setVertexData(RenderAttributes.kColor, colors) === false || mesh.setIndexData(indices) === false)
         {
             console.error("TextGlyphs2D couldn't build its mesh for: " + text);
             mesh.unload();
@@ -974,8 +1246,12 @@ class TextGlyphs2D extends Model2D
         this.#mesh = mesh;
         this.#positions = pos;
         this.#moved = new Float32Array(pos.length);
-        this.#glyphCount = chars.length;
-        this._setSize(penX + (ta.getPadding() * 2.0), height); // Keeps the anchor and alignment from setPos()
+        this.#offsets = null;
+        this.#scales = null;
+        this.#colors = colors;
+        this.#glyphCount = glyphCount;
+        this.#lineCount = lines.length;
+        this._setSize(widest + (ta.getPadding() * 2.0), height * lines.length); // Keeps the anchor and alignment from setPos()
         this._setMaterial(ta.getMaterial());
         this._setLoaded(true);
 
@@ -986,5 +1262,53 @@ class TextGlyphs2D extends Model2D
             super.listenForRasterScale(true);
 
             return true;
+    }
+
+    // Uploads the laid-out positions with the offsets and scales applied (each glyph scaled about its center, then moved)
+    #uploadPositions()
+    {
+        if (this.#offsets === null && this.#scales === null)
+            return this.#mesh.updateVertexData(RenderAttributes.kPosition, this.#positions);
+
+        const base = this.#positions;
+        const offsets = this.#offsets;
+        const scales = this.#scales;
+        let moved = this.#moved;
+
+        for (let i = 0; i < this.#glyphCount; ++i)
+        {
+            const q = i * 12;
+            const dx = (offsets !== null) ? offsets[i * 2] : 0.0;
+            const dy = (offsets !== null) ? offsets[(i * 2) + 1] : 0.0;
+            const sx = (scales !== null) ? scales[i * 2] : 1.0;
+            const sy = (scales !== null) ? scales[(i * 2) + 1] : 1.0;
+            const cx = (base[q] + base[q + 6]) * 0.5;     // Corner 0 and corner 2
+            const cy = (base[q + 1] + base[q + 7]) * 0.5;
+
+            for (let corner = 0; corner < 4; ++corner)
+            {
+                const p = q + (corner * 3);
+                moved[p] = cx + ((base[p] - cx) * sx) + dx;
+                moved[p + 1] = cy + ((base[p + 1] - cy) * sy) + dy;
+                moved[p + 2] = base[p + 2];
+            }
+        }
+
+        return this.#mesh.updateVertexData(RenderAttributes.kPosition, moved);
+    }
+
+    // text split at "\n" / "\r\n", each line an array of its characters (code points); always at least one line
+    static #splitLines(text)
+    {
+        return text.split(/\r?\n/).map((line) => Array.from(line));
+    }
+
+    // One value (axis 0 x, 1 y) of a corner (0 bottom-left, 2 top-right) of glyph index's laid-out quad; 0 if out of range
+    #glyphCorner(index, corner, axis)
+    {
+        if (this.#positions === null || Number.isInteger(index) === false || index < 0 || index >= this.#glyphCount)
+            return 0.0;
+
+        return this.#positions[(index * 12) + (corner * 3) + axis];
     }
 }

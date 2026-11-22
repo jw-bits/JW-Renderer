@@ -78,7 +78,7 @@ class Matrix3
 
         let det = m00 * t00 + m01 * t10 + m02 * t20;
 
-        if (Math.abs(det) < 0.000001)
+        if (Math.abs(det) < MathDefines.kEpsilon)
             return;
 
         let invDet = 1.0 / det;
@@ -139,7 +139,7 @@ class Matrix3
         let x = axis.x, y = axis.y, z = axis.z;
         let ls = x * x + y * y + z * z;
 
-        if (ls < 0.000001)
+        if (ls < MathDefines.kEpsilon)
             return mat;
 
         let invLen = 1.0 / Math.sqrt(ls);

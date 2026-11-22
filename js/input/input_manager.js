@@ -238,7 +238,7 @@ class InputManager
             return;
 
         // A press held longer than a tap is a drag, moving or not
-        const now = performance.now() * 0.001;
+        const now = performance.now() * MathDefines.kSecondsPerMs;
 
         if (InputManager.#isDragging === false && (now - InputManager.#pressTime) > InputManager.#tapMaxTime)
             InputManager.#isDragging = true;
@@ -289,7 +289,7 @@ class InputManager
         {
             last.x = e.clientX;
             last.y = e.clientY;
-            last.time = e.timeStamp * 0.001;
+            last.time = e.timeStamp * MathDefines.kSecondsPerMs;
                 return;
         }
 
@@ -299,7 +299,7 @@ class InputManager
             device: InputManager.#deviceOf(e.pointerType),
             x: e.clientX,
             y: e.clientY,
-            time: e.timeStamp * 0.001
+            time: e.timeStamp * MathDefines.kSecondsPerMs
         });
     }
 
@@ -438,7 +438,7 @@ class InputManager
         if (InputManager.#pointerId !== -1)
         {
             if (InputManager.#isDragging === true)
-                InputManager.#sendPointer(InputEventType.kDragEnd, performance.now() * 0.001);
+                InputManager.#sendPointer(InputEventType.kDragEnd, performance.now() * MathDefines.kSecondsPerMs);
 
             InputManager.#releasePointer(false);
         }

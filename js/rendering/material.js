@@ -38,7 +38,7 @@ class Material
     #samplers; // Per texture unit; null uses a default
 
     // Looked up once in load(), from the uniforms the shader actually uses
-    #uniforms;     // Name -> RenderMapping (location and component count)
+    #uniforms;     // Name -> { location, componentCount, value } (value: the texture unit for samplers, else null)
     #textureUnits; // The sampler uniforms with a texture to bind, for bind()
     #textureKey;   // Cached getTextureKey(); null until asked for, or after a change
 
@@ -218,7 +218,7 @@ class Material
     // *** Internal Methods ***
 
     /*
-        Caches a RenderMapping for each uniform the shader uses. Every one must be
+        Caches the location and component count of each uniform the shader uses. Every one must be
         listed in RenderUniforms; one that isn't is reported and skipped (setUniform()
         can't set it).
     */
@@ -234,14 +234,9 @@ class Material
                 continue;
             }
 
-            let m = new RenderMapping();
-            m.name = uName;
-            m.location = this.#shader.getUniform(uName);
-            m.componentCount = componentCount;
-
             // Only texture units keep a value here: the unit number. Other values come from setUniform().
             const unit = RenderUniforms.textureUnit(uName);
-            m.value = (unit !== -1) ? unit : null;
+            const m = { location: this.#shader.getUniform(uName), componentCount, value: (unit !== -1) ? unit : null };
 
             this.#uniforms.set(uName, m);
 

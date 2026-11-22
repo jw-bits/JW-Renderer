@@ -1,17 +1,72 @@
 "use strict";
 
 /*
+    SpriteSequence - A named run of frames, each a UVRect of the sprite's
+    texture, played over a duration.
+
+    A sequence is only data, so one can be shared by any number of Sprites
+    (each keeps its own place in it). Build the frames as UVRects (see
+    UVRect.pixelsToUVRect()), or let Sprite.createSequence() /
+    createSequenceInRect() do it.
+
+        name      Key for Sprite.play()
+        frames    Array of UVRects, in play order
+        duration  Seconds to play every frame once (kPingPong takes about twice this per cycle)
+        playMode  SpritePlayMode
+
+    Don't change frames while a Sprite is playing the sequence.
+*/
+class SpriteSequence
+{
+    constructor(name, frames, duration, playMode = SpritePlayMode.kLoop)
+    {
+        this.name = name;
+        this.frames = frames;
+        this.duration = duration;
+        this.playMode = playMode;
+    }
+
+    // True if the sequence can be played: a name, at least one frame and a duration above 0
+    isValid()
+    {
+        return (typeof this.name === "string" && this.name.length > 0 &&
+                Array.isArray(this.frames) && this.frames.length > 0 &&
+                Number.isFinite(this.duration) && this.duration > 0.0);
+    }
+
+    getFrameCount() { return this.frames.length; }
+    getFrame(index) { return this.frames[index] ?? null; }
+
+    // Seconds each frame is shown
+    getFrameDuration() { return this.duration / this.frames.length; }
+
+    isOneShot() { return (this.playMode === SpritePlayMode.kOnce || this.playMode === SpritePlayMode.kPingPongOnce); }
+    isPingPong() { return (this.playMode === SpritePlayMode.kPingPong || this.playMode === SpritePlayMode.kPingPongOnce); }
+}
+
+/*
     Sprite - A Model2D that draws one frame of an atlas texture at a time and
     animates through sequences of frames.
 
-    A frame is a UVRect of the texture (see sprite_util.js for the grid and
-    pixel helpers). A sequence (SpriteSequence) is a named run of frames
-    with a duration and play mode. Sequences come two ways:
+    A frame is a UVRect of the texture: 0..1 with V up and (x, y) its
+    bottom-left corner (UVRect.pixelsToUVRect() converts a rect in pixels).
+    A sequence (SpriteSequence) is a named run of frames with a duration and
+    play mode. Sequences come two ways:
         createSequence()        A start and end frame on a rows x cols grid over the whole
                                 atlas (set by load() or setGrid()); a run can span rows.
         createSequenceInRect()  A rect of the atlas holding one sequence, split into its
                                 own rows x cols grid.
     addSequence() takes a ready-made SpriteSequence, which can be shared by many Sprites.
+
+    Grids: a rect split into rows x cols equal frames, numbered row by row
+    from the top-left, as they appear in the image:
+
+        0  1  2  3
+        4  5  6  7
+
+    Frames sit edge to edge, so filtering can blend in a sliver of the next
+    frame. For pixel art use a NEAREST Sampler; otherwise leave a pixel or two
+    of padding between frames in the atlas.
 
     Playback: play() starts a sequence (optionally reversed); update(dt) advances it.
     Speed scales time (2 is double speed, 0 freezes it). The event callback hears when
@@ -26,6 +81,11 @@
         s.load(atlas, 64, 64, 4, 8);   // 64 x 64 design units; a 4 x 8 grid over the atlas
         s.createSequence("walk", 1, 0, 1, 7, 0.8);                      // Row 1, looping
         s.createSequence("die", 3, 0, 3, 5, 0.6, SpritePlayMode.kOnce);
+
+        // A 1 x 4 run inside a 256 x 64 pixel strip, measured from the image's top-left
+        const strip = UVRect.pixelsToUVRect(0, 128, 256, 64, atlas.getWidth(), atlas.getHeight());
+        s.createSequenceInRect("jump", strip, 1, 4, 0.4);
+
         s.setEventCallback((sprite, event, name) => { if (name === "die") remove(sprite); });
         s.play("walk");
 
@@ -87,11 +147,8 @@ class Sprite extends Model2D
         if (this.isLoaded() === true)
             return false; // Unload first
 
-        if (Number.isInteger(rows) === false || Number.isInteger(cols) === false || rows < 1 || cols < 1)
-        {
-            console.error("Sprite.load(): rows and cols must be whole numbers of at least 1");
-                return false;
-        }
+        if (Sprite.#isValidGrid(rows, cols, "load") === false)
+            return false;
 
         const shader = Sprite.getDefaultShader();
         const material = this._resolveMaterial(_source, shader, "Sprite");
@@ -135,11 +192,8 @@ class Sprite extends Model2D
     // The grid over the whole atlas, for createSequence() and showFrame() without a sequence
     setGrid(rows, cols)
     {
-        if (Number.isInteger(rows) === false || Number.isInteger(cols) === false || rows < 1 || cols < 1)
-        {
-            console.error("Sprite.setGrid(): rows and cols must be whole numbers of at least 1");
-                return false;
-        }
+        if (Sprite.#isValidGrid(rows, cols, "setGrid") === false)
+            return false;
 
         this.#gridRows = rows;
         this.#gridCols = cols;
@@ -158,7 +212,7 @@ class Sprite extends Model2D
     */
     createSequence(name, startRow, startCol, endRow, endCol, duration, playMode = SpritePlayMode.kLoop)
     {
-        const frames = SpriteUtil.gridRangeFrames(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, startRow, startCol, endRow, endCol);
+        const frames = Sprite.#gridRangeFrames(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, startRow, startCol, endRow, endCol);
 
         if (frames === null)
             return false;
@@ -174,7 +228,10 @@ class Sprite extends Model2D
     */
     createSequenceInRect(name, uvRect, rows, cols, duration, playMode = SpritePlayMode.kLoop, frameCount = rows * cols)
     {
-        const frames = SpriteUtil.gridFrames(uvRect, rows, cols, 0, frameCount);
+        if (Sprite.#isValidGrid(rows, cols, "createSequenceInRect") === false)
+            return false;
+
+        const frames = Sprite.#gridFrames(uvRect, rows, cols, 0, frameCount);
 
         if (frames === null)
             return false;
@@ -347,7 +404,7 @@ class Sprite extends Model2D
         const sequence = this.#sequence;
         const frameCount = sequence.frames.length;
         const frameDuration = sequence.getFrameDuration();
-        const steps = SpriteUtil.getCycleSteps(frameCount, sequence.playMode);
+        const steps = Sprite.#getCycleSteps(frameCount, sequence.playMode);
         const cycleDuration = steps * frameDuration;
         let event = -1;
 
@@ -374,7 +431,7 @@ class Sprite extends Model2D
         if (this.#isFinished === false)
         {
             const step = Math.min(Math.floor(this.#time / frameDuration), steps - 1);
-            this.#applyFrame(SpriteUtil.stepToFrame(step, frameCount, sequence.playMode));
+            this.#applyFrame(Sprite.#stepToFrame(step, frameCount, sequence.playMode));
         }
 
         if (event !== -1 && this.#eventCallback !== null)
@@ -463,6 +520,93 @@ class Sprite extends Model2D
     #showGridFrame(index)
     {
         this.#frame = index;
-        SpriteUtil.gridFrame(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, index, this.#uvRect);
+        Sprite.#gridFrame(Sprite.#kFullUVRect, this.#gridRows, this.#gridCols, index, this.#uvRect);
+    }
+
+    // *** Static Internal Helpers ***
+
+    // True if rows x cols is a grid (whole numbers of at least 1); otherwise a console.error naming method
+    static #isValidGrid(rows, cols, method)
+    {
+        if (Number.isInteger(rows) === false || Number.isInteger(cols) === false || rows < 1 || cols < 1)
+        {
+            console.error(`Sprite.${method}(): rows and cols must be whole numbers of at least 1`);
+                return false;
+        }
+
+        return true;
+    }
+
+    // One frame of a rows x cols grid over rect (see "Grids" at the top of the class), written into out (also returned)
+    static #gridFrame(rect, rows, cols, index, out = new UVRect())
+    {
+        const fw = rect.getWidth() / cols;
+        const fh = rect.getHeight() / rows;
+        const row = Math.floor(index / cols);
+        const col = index % cols;
+
+        // Row 0 is the top, and V runs up
+        return out.set(rect.getX() + (col * fw), rect.getTop() - ((row + 1) * fh), fw, fh);
+    }
+
+    /*
+        frameCount frames of a valid rows x cols grid over rect, starting at
+        firstFrame, as a new array of UVRects. Returns null (with a
+        console.error) if the frames aren't all in the grid.
+    */
+    static #gridFrames(rect, rows, cols, firstFrame, frameCount)
+    {
+        const total = rows * cols;
+
+        if (Number.isInteger(firstFrame) === false || Number.isInteger(frameCount) === false ||
+            firstFrame < 0 || frameCount < 1 || firstFrame + frameCount > total)
+        {
+            console.error(`Sprite: frames ${firstFrame} - ${firstFrame + frameCount - 1} aren't all in a ${rows} x ${cols} grid`);
+                return null;
+        }
+
+        let frames = [];
+
+        for (let i = 0; i < frameCount; ++i)
+            frames.push(Sprite.#gridFrame(rect, rows, cols, firstFrame + i));
+
+        return frames;
+    }
+
+    /*
+        The frames from (startRow, startCol) to (endRow, endCol), inclusive, of a
+        valid rows x cols grid over rect, reading row by row; the run can span
+        rows. Returns null (with a console.error) if the range isn't valid.
+    */
+    static #gridRangeFrames(rect, rows, cols, startRow, startCol, endRow, endCol)
+    {
+        const first = (startRow * cols) + startCol;
+        const last = (endRow * cols) + endCol;
+
+        if (startCol < 0 || startCol >= cols || endCol < 0 || endCol >= cols || last < first)
+        {
+            console.error(`Sprite.createSequence(): (${startRow}, ${startCol}) - (${endRow}, ${endCol}) isn't a forward run in a ${rows} x ${cols} grid`);
+                return null;
+        }
+
+        return Sprite.#gridFrames(rect, rows, cols, first, (last - first) + 1);
+    }
+
+    // Frame steps in one cycle: every frame for kOnce / kLoop; there and back (2n - 2) for ping-pong
+    static #getCycleSteps(frameCount, playMode)
+    {
+        if (playMode === SpritePlayMode.kPingPong || playMode === SpritePlayMode.kPingPongOnce)
+            return Math.max(1, (frameCount * 2) - 2);
+
+        return frameCount;
+    }
+
+    // The frame shown step steps (0 .. #getCycleSteps() - 1) into a cycle
+    static #stepToFrame(step, frameCount, playMode)
+    {
+        if (step >= frameCount)
+            return Sprite.#getCycleSteps(frameCount, playMode) - step; // Ping-pong, on the way back
+
+        return step;
     }
 }
