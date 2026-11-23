@@ -28,7 +28,7 @@
 
     Usage:
         let b = new Button();
-        b.load(gTextureManager.getWhiteTexture(), 200, 64, 12); // Design units; corners of 12 (Button.kPill for a pill)
+        b.load(200, 64, 12);                                    // Design units; corners of 12 (Button.kPill for a pill)
         b.setText(new TextAtlas(font, TextAtlas.kAscii, 28, "bold"), "Play");
         b.setIcon(playTexture, 32);                             // Optional, left of the text
         b.setAutoSize(true);                                    // Fit the content plus padding
@@ -146,12 +146,11 @@ class Button
     }
 
     /*
-        whiteTexture is a loaded white texture (TextureManager.getWhiteTexture()).
         width x height is the button in design units, outline included (until
         auto size changes it). cornerRadius rounds the corners: 0 is square,
         Button.kPill a pill. Returns false on failure.
     */
-    load(whiteTexture, width, height, cornerRadius = 0)
+    load(width, height, cornerRadius = 0)
     {
         if (this.#isLoaded === true)
             return false; // Unload first
@@ -165,10 +164,9 @@ class Button
 
         let material = new Material();
 
-        if ((whiteTexture instanceof BaseTexture) === false || whiteTexture.isLoaded() === false ||
-            material.load(Rect2D.getDefaultShader(), [whiteTexture]) === false)
+        if (material.load(Rect2D.getDefaultShader(), [TextureManager.getWhiteTexture()]) === false)
         {
-            console.error("Button.load() needs a loaded white texture, e.g. TextureManager.getWhiteTexture()");
+            console.error("Button.load() couldn't create its material (was WGLV.init() called first?)");
                 return false;
         }
 
@@ -489,7 +487,7 @@ class Button
 
     isLoaded() { return this.#isLoaded; }
 
-    // Frees the meshes and the button's own Material; the white texture, icon texture and TextAtlas belong to the caller
+    // Frees the meshes and the button's own Material; the icon texture and TextAtlas belong to the caller
     unload()
     {
         this.#outline.unload();

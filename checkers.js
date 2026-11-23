@@ -93,10 +93,7 @@ const ATLAS_URL = "./textures/checkers.json"; // The square, piece and king; its
 const FONT_FAMILY = "'Segoe UI', Arial, sans-serif";
 const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
 
-// The app's single manager instances, created in loadAssets() after WGLV.init()
-let gTextureManager = null;
-let gFontManager = null;
-let gMaterialManager = null;
+// The managers (TextureManager, FontManager, MaterialManager, ShaderManager) are static; nothing to create
 let gBatcher = null; // Everything is drawn through it, once per frame
 let gSparks = null;  // Particles2D for jumps
 
@@ -251,11 +248,12 @@ function appSetup()
 // Failed loads come back as the managers' white texture / default font, so this always finishes
 async function loadAssets()
 {
-    gTextureManager = new TextureManager();
-    gFontManager = new FontManager(FONT_FAMILY);
-    gMaterialManager = new MaterialManager();
+    FontManager.setDefaultFamily(FONT_FAMILY);
     gBatcher = new MaterialBatcher();
-    gUIFont = gFontManager.getDefault();
+    gUIFont = FontManager.getDefault();
+
+    // Build the shaders now, so none compiles mid-frame the first time it's drawn
+    ShaderManager.preload([Rect2DShaderSource, Rect2DInstancedShaderSource, TextGlyphs2DShaderSource, Particles2DShaderSource]);
 
     const files = {
         ring: "./textures/circle.png",
@@ -274,9 +272,9 @@ async function loadAssets()
 
     const names = Object.keys(files);
     const [textures, atlas, titleFont] = await Promise.all([
-        Promise.all(names.map((name) => gTextureManager.load(files[name]))),
-        gTextureManager.loadAtlas(ATLAS_URL),
-        gFontManager.load(TITLE_FONT_URL),
+        Promise.all(names.map((name) => TextureManager.load(files[name]))),
+        TextureManager.loadAtlas(ATLAS_URL),
+        FontManager.load(TITLE_FONT_URL),
         AudioManager.loadSFX(SFX_CLICK, "./audio/click.wav"),
         AudioManager.loadSFX(SFX_JUMP_LAND, "./audio/jumpland.wav")
     ]);
@@ -291,7 +289,7 @@ async function loadAssets()
         if (gTextures[name] === null)
         {
             console.error(`No "${atlasTextures[name]}" in ${ATLAS_URL}; using the white texture`);
-            gTextures[name] = gTextureManager.getWhiteTexture();
+            gTextures[name] = TextureManager.getWhiteTexture();
         }
     }
 
@@ -352,7 +350,7 @@ function setupTitleAnimation()
     if (texture.loadPixels(2, 2, new Uint8Array([...darkPx, ...lightPx, ...lightPx, ...darkPx])) === false)
         console.error("Couldn't build the title board texture; the title background won't show it");
     else
-        gTitleBoard = gMaterialManager.load(Rect2D.getDefaultShader(), [texture], [sampler]);
+        gTitleBoard = MaterialManager.load(Rect2D.getDefaultShader(), [texture], [sampler]);
 
     gTitleCheckers = [makeTitleChecker(Colors.kRed), makeTitleChecker(Colors.kBlack)];
 }
@@ -541,7 +539,7 @@ function randomEasing(exclude)
 */
 function materialFor(texture)
 {
-    return gMaterialManager.load(Rect2D.getDefaultShader(), [texture]) ?? texture;
+    return MaterialManager.load(Rect2D.getDefaultShader(), [texture]) ?? texture;
 }
 
 function appOnAssetsLoaded()

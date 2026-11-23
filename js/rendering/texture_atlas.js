@@ -28,12 +28,11 @@
 
     Usage:
         let atlas = new TextureAtlas();
-        atlas.load("./textures/checkers.json", () => {
+        if (await atlas.load("./textures/checkers.json"))
             rect.load(atlas.getSubTexture("checker_king"), 64, 64);
-        });
 
         // Or through TextureManager, which loads each atlas once:
-        const atlas = await textures.loadAtlas("./textures/checkers.json");
+        const atlas = await TextureManager.loadAtlas("./textures/checkers.json");
 
         // Or from a canvas drawn at runtime (TextAtlas builds its glyphs this way):
         atlas.loadCanvas(canvas, { "A": { width: 20, height: 40, uvs: { u0: 0, v0: 0, u1: 0.1, v1: 1 } } }, "glyphs");
@@ -47,6 +46,7 @@ class TextureAtlas
     #atlasUrl;
     #subTextures; // Name -> SubTexture, filled once the image has loaded
     #isLoading;
+    #loadPromise; // While the JSON and image load (and after), resolving to true or false
 
     constructor(_makeMipmaps = true)
     {
@@ -54,15 +54,18 @@ class TextureAtlas
         this.#atlasUrl = null;
         this.#subTextures = new Map();
         this.#isLoading = false;
+        this.#loadPromise = null;
     }
 
     /*
         Loads the JSON at atlasUrl, then its image (see the top of this file).
-        onLoadFailCB is called if the JSON or image can't be loaded or the JSON
-        isn't valid (the atlas is unloaded first). Returns false if it can't start (already loaded or
-        loading, or no url).
+        Resolves to true once the SubTextures are ready, false if the JSON or
+        image can't be loaded or the JSON isn't valid (the atlas is unloaded, so
+        it can load again). Asking again for the same atlas while it loads
+        shares the load; any other request while it's loaded or loading fails
+        (unload() first).
     */
-    load(atlasUrl, onLoadSuccessCB = null, onLoadFailCB = null)
+    async load(atlasUrl)
     {
         if (typeof atlasUrl !== "string" || atlasUrl.length === 0)
         {
@@ -71,62 +74,30 @@ class TextureAtlas
         }
 
         if (this.isLoaded() === true || this.#isLoading === true)
-            return false; // Already loaded or loading... unload first
+        {
+            if (atlasUrl === this.#atlasUrl)
+                return await this.waitForLoad(); // Same atlas: share the load
+
+            console.error(`TextureAtlas is already used for ${this.#atlasUrl}; unload it first, or create a new TextureAtlas for ${atlasUrl}`);
+                return false;
+        }
 
         this.#atlasUrl = atlasUrl;
         this.#isLoading = true;
+        this.#loadPromise = this.#loadFiles(atlasUrl);
+            return await this.#loadPromise;
+    }
 
-        const fail = (message) => {
-            console.error(`TextureAtlas: ${message} (${atlasUrl})`);
-            this.unload();
+    // Resolves to true once loaded, or false if it failed or was never loaded
+    async waitForLoad()
+    {
+        if (this.isLoaded() === true)
+            return true;
 
-            if (onLoadFailCB !== null)
-                onLoadFailCB();
-        };
+        if (this.#loadPromise === null)
+            return false;
 
-        fetch(atlasUrl)
-            .then((response) => {
-                if (response.ok === false)
-                    throw new Error(`HTTP ${response.status}`);
-
-                return response.json();
-            })
-            .then((json) => {
-                const entries = TextureAtlas.#parse(json);
-
-                if (entries === null)
-                {
-                    fail("the JSON isn't a valid atlas");
-                        return;
-                }
-
-                const imageUrls = TextureAtlas.#imageUrlsFor(atlasUrl, json);
-                const onImageLoaded = () => {
-                    this.#isLoading = false;
-                    this.#createSubTextures(entries, json);
-
-                    if (onLoadSuccessCB !== null)
-                        onLoadSuccessCB();
-                };
-
-                // Tries each url in turn; the atlas fails once none load
-                const tryImage = (i) => {
-                    if (i >= imageUrls.length)
-                    {
-                        fail(`couldn't load its image (tried ${imageUrls.join(", ") || "nothing: no texture_name or texture_filepath"})`);
-                            return;
-                    }
-
-                    // A failed Texture.load() unloads the texture, so it can load again
-                    if (this.#texture.load(imageUrls[i], onImageLoaded, () => tryImage(i + 1)) === false)
-                        tryImage(i + 1);
-                };
-
-                tryImage(0);
-            })
-            .catch((error) => fail(`couldn't load the JSON: ${error.message}`));
-
-        return true; // Loading...
+        return await this.#loadPromise;
     }
 
     /*
@@ -203,9 +174,61 @@ class TextureAtlas
         this.#subTextures.clear();
         this.#atlasUrl = null;
         this.#isLoading = false;
+        this.#loadPromise = null;
     }
 
     // *** Internal Methods ***
+
+    // The JSON, then the first of its image urls that loads; true once the SubTextures are made
+    async #loadFiles(atlasUrl)
+    {
+        try
+        {
+            const response = await fetch(atlasUrl);
+
+            if (response.ok === false)
+                throw new Error(`HTTP ${response.status}`);
+
+            const json = await response.json();
+            const entries = TextureAtlas.#parse(json);
+
+            if (entries === null)
+                return this.#fail(atlasUrl, "the JSON isn't a valid atlas");
+
+            const imageUrls = TextureAtlas.#imageUrlsFor(atlasUrl, json);
+
+            // Tries each url in turn; a failed Texture.load() unloads the texture, so it can load the next
+            for (const url of imageUrls)
+            {
+                if (await this.#texture.load(url) === true)
+                {
+                    if (this.#atlasUrl !== atlasUrl)
+                        return false; // Unloaded while it was loading
+
+                    this.#isLoading = false;
+                    this.#createSubTextures(entries, json);
+                        return true;
+                }
+            }
+
+            return this.#fail(atlasUrl, `couldn't load its image (tried ${imageUrls.join(", ") || "nothing: no texture_name or texture_filepath"})`);
+        }
+        catch (error)
+        {
+            return this.#fail(atlasUrl, `couldn't load the JSON: ${error.message}`);
+        }
+    }
+
+    // Reports why atlasUrl failed and unloads (if it's still this atlas's load); returns false
+    #fail(atlasUrl, message)
+    {
+        console.error(`TextureAtlas: ${message} (${atlasUrl})`);
+
+        if (this.#atlasUrl === atlasUrl)
+            this.unload();
+
+        return false;
+    }
 
     #createSubTextures(entries, json)
     {

@@ -5,14 +5,14 @@
     always fitted around the text plus padding. Changing the text, padding or
     position refits the panel, so it never needs sizing by hand.
 
-    The panel is the Rect2D drawn with panelTexture, tinted by the panel
-    color; give it a white texture (TextureManager.getWhiteTexture()) for a
-    solid color. The text is white glyphs from the TextAtlas, tinted by the
+    The panel is a Rect2D tinted by the panel color: a solid color by default
+    (the white texture), or drawn with a panel texture given to the
+    constructor. The text is white glyphs from the TextAtlas, tinted by the
     text color.
 
     Usage:
         const atlas = new TextAtlas(font, TextAtlas.kAscii, 16);
-        let label = new Label(atlas, gTextureManager.getWhiteTexture());
+        let label = new Label(atlas);                // Or new Label(atlas, panelTexture)
         label.setPanelColor(new Vector4(0, 0, 0, 0.75));
         label.setPadding(8);
         label.setPos(10, 1070, Alignment.kTopLeft); // The panel's top-left corner sits on (10, 1070)
@@ -27,8 +27,8 @@
     panel's padding, its lines lined up by setLineAlignment() (left by
     default).
 
-    A Label doesn't scale or rotate. The TextAtlas and panel texture belong
-    to the caller; unload() the Label before them.
+    A Label doesn't scale or rotate. The TextAtlas and any panel texture
+    belong to the caller; unload() the Label before them.
 */
 class Label
 {
@@ -38,8 +38,8 @@ class Label
     #align;      // Which part of the panel sits on the anchor
     #padding;    // Vector2, design units between the text and the panel's edges
 
-    // _textAtlas draws the text; _panelTexture (a loaded BaseTexture, usually white) draws the panel
-    constructor(_textAtlas, _panelTexture)
+    // _textAtlas draws the text; _panelTexture (a loaded BaseTexture) draws the panel, or null for a solid color
+    constructor(_textAtlas, _panelTexture = null)
     {
         this.#anchor = new Vector2();
         this.#align = Alignment.kBottomLeft;
@@ -48,8 +48,10 @@ class Label
         this.#text = new TextGlyphs2D(_textAtlas);
         this.#panel = new Rect2D();
 
-        if (this.#panel.load(_panelTexture, 1, 1) === false) // 1 x 1 until the text is set
-            console.error("Label needs a loaded panel texture, e.g. TextureManager.getWhiteTexture()");
+        const panelTexture = _panelTexture ?? TextureManager.getWhiteTexture();
+
+        if (this.#panel.load(panelTexture, 1, 1) === false) // 1 x 1 until the text is set
+            console.error("Label needs a loaded panel texture (or null for a solid color)");
     }
 
     // Returns false if the text couldn't be set (see TextGlyphs2D.setText()); the panel is refitted

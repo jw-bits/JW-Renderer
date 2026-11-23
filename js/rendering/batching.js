@@ -248,10 +248,7 @@ class MaterialBatcher
 
         this.#instMesh.unload();
 
-        if (this.#instShader !== null)
-            this.#instShader.unload();
-
-        this.#instShader = null;
+        this.#instShader = null; // ShaderManager's, shared; left loaded
         this.#instData = null;
         this.#instCapacity = 0;
         this.#litShaders = [null, null]; // LightSet's; shared, so left loaded
@@ -423,9 +420,9 @@ class MaterialBatcher
     #setupInstancing()
     {
         const gl = WGLV.context;
-        let shader = new Shader();
+        const shader = ShaderManager.get(Rect2DInstancedShaderSource); // Shared by every batcher
 
-        if (shader.load(Rect2DInstancedShaderSource.VS, Rect2DInstancedShaderSource.FS) === false)
+        if (shader === null)
             return false;
 
         this.#instResLocation = shader.getUniform("u_res");
@@ -443,10 +440,7 @@ class MaterialBatcher
         ];
 
         if (this.#instMesh.load(new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), MaterialBatcher.#kFloatsPerInstance, attribs) === false)
-        {
-            shader.unload();
-                return false;
-        }
+            return false; // The shader is ShaderManager's; left loaded
 
         this.#instShader = shader;
         this.#reserve(MaterialBatcher.#kStartCapacity);

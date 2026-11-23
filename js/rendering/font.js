@@ -16,7 +16,7 @@
         if (await f.load("./fonts/MyFont-Regular.ttf"))
             console.log(f.getFamily()); // e.g. "My Font"
 
-    Usually created through the app's FontManager, which keeps one Font per
+    Usually created through FontManager, which keeps one Font per
     source and hands back its default font when a load fails.
 */
 class Font

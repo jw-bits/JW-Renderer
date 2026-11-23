@@ -206,11 +206,6 @@ class LightSet
 {
     static kMaxLights = 4; // The lit shaders' u_lightPos0 - 3 / u_lightColor0 - 3
 
-    static #kShader = null;                   // LitRect2DShaderSource
-    static #kNormalMapShader = null;          // LitNormalMapRect2DShaderSource
-    static #kInstancedShader = null;          // LitRect2DInstancedShaderSource, for MaterialBatcher's lit layers
-    static #kInstancedNormalMapShader = null; // LitNormalMapRect2DInstancedShaderSource
-
     static #kLocations = new WeakMap(); // Shader -> its lighting uniform locations, looked up once
 
     // Scratch for apply()
@@ -277,7 +272,15 @@ class LightSet
     */
     apply(extraShaders = null)
     {
-        const shaders = [LightSet.#kShader, LightSet.#kNormalMapShader, LightSet.#kInstancedShader, LightSet.#kInstancedNormalMapShader];
+        // Only the lit shaders built so far; one built later gets the lights from the next apply()
+        let shaders = [];
+
+        for (const source of [LitRect2DShaderSource, LitNormalMapRect2DShaderSource,
+                              LitRect2DInstancedShaderSource, LitNormalMapRect2DInstancedShaderSource])
+        {
+            if (ShaderManager.has(source) === true)
+                shaders.push(ShaderManager.get(source));
+        }
 
         if (Array.isArray(extraShaders) === true)
             shaders.push(...extraShaders);
@@ -290,39 +293,14 @@ class LightSet
     }
 
     // The lit shader with one texture (null if it can't be built)
-    static getShader()
-    {
-        if (LightSet.#kShader === null)
-            LightSet.#kShader = LightSet.#build(LitRect2DShaderSource, "LightSet.getShader()");
-
-        return LightSet.#kShader;
-    }
+    static getShader() { return ShaderManager.get(LitRect2DShaderSource); }
 
     // The lit shader with a texture (unit 0) and a normal map (unit 1) (null if it can't be built)
-    static getNormalMapShader()
-    {
-        if (LightSet.#kNormalMapShader === null)
-            LightSet.#kNormalMapShader = LightSet.#build(LitNormalMapRect2DShaderSource, "LightSet.getNormalMapShader()");
-
-        return LightSet.#kNormalMapShader;
-    }
+    static getNormalMapShader() { return ShaderManager.get(LitNormalMapRect2DShaderSource); }
 
     // MaterialBatcher's lit instanced shaders, one texture or with a normal map (null if it can't be built)
-    static getInstancedShader()
-    {
-        if (LightSet.#kInstancedShader === null)
-            LightSet.#kInstancedShader = LightSet.#build(LitRect2DInstancedShaderSource, "LightSet.getInstancedShader()");
-
-        return LightSet.#kInstancedShader;
-    }
-
-    static getInstancedNormalMapShader()
-    {
-        if (LightSet.#kInstancedNormalMapShader === null)
-            LightSet.#kInstancedNormalMapShader = LightSet.#build(LitNormalMapRect2DInstancedShaderSource, "LightSet.getInstancedNormalMapShader()");
-
-        return LightSet.#kInstancedNormalMapShader;
-    }
+    static getInstancedShader() { return ShaderManager.get(LitRect2DInstancedShaderSource); }
+    static getInstancedNormalMapShader() { return ShaderManager.get(LitNormalMapRect2DInstancedShaderSource); }
 
     // *** Internal Methods ***
 
@@ -384,18 +362,5 @@ class LightSet
         }
 
         return loc;
-    }
-
-    static #build(source, methodName)
-    {
-        let shader = new Shader();
-
-        if (shader.load(source.VS, source.FS) === false)
-        {
-            console.error(`${methodName}: the lit shader couldn't be built`);
-                return null;
-        }
-
-        return shader;
     }
 }

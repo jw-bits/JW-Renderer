@@ -149,9 +149,7 @@ const TEXT_SCROLL = "Stellar work, keep it up!";
 
 // *** Globals ***
 
-let gTextureManager = null;
-let gFontManager = null;
-let gBatcher = null;
+let gBatcher = null; // The managers (TextureManager, FontManager, ShaderManager) are static; nothing to create
 
 // The scene, built in buildScene()
 let gScene = null;
@@ -262,20 +260,23 @@ function appSetup()
 // Failed loads come back as the manager's white texture, so this always finishes
 async function loadAssets()
 {
-    gTextureManager = new TextureManager();
-    gFontManager = new FontManager("'Segoe UI', Arial, sans-serif");
+    FontManager.setDefaultFamily("'Segoe UI', Arial, sans-serif");
     gBatcher = new MaterialBatcher();
     gBatcher.setLayerLit(Layers.kLit, true);
+
+    // Build every shader the test draws with now, so none compiles mid-frame (e.g. when page 2 first shows)
+    ShaderManager.preload([Rect2DShaderSource, Rect2DInstancedShaderSource, SpriteShaderSource, TextGlyphs2DShaderSource,
+                           Particles2DShaderSource, LitRect2DInstancedShaderSource, LitNormalMapRect2DInstancedShaderSource]);
     buildHud(); // System font, so it's ready now and shows "Loading..." while the textures load
 
     const [rectTex, circleTex, ninePatchTex, particleTex, brickTex, brickNormalTex, checkTex] = await Promise.all([
-        gTextureManager.load("./textures/test_up.png"),
-        gTextureManager.load("./textures/circle.png"),
-        gTextureManager.load("./textures/np_text.png"),
-        gTextureManager.load("./textures/ps_texture.webp"),
-        gTextureManager.load("./textures/brickAlbedo.png"),
-        gTextureManager.load("./textures/brickNormals.png"),
-        gTextureManager.load("./textures/ux_check.png")
+        TextureManager.load("./textures/test_up.png"),
+        TextureManager.load("./textures/circle.png"),
+        TextureManager.load("./textures/np_text.png"),
+        TextureManager.load("./textures/ps_texture.webp"),
+        TextureManager.load("./textures/brickAlbedo.png"),
+        TextureManager.load("./textures/brickNormals.png"),
+        TextureManager.load("./textures/ux_check.png")
     ]);
 
     gScene = { textures: { rect: rectTex, circle: circleTex, ninePatch: ninePatchTex, particle: particleTex,
@@ -292,7 +293,7 @@ async function loadAssets()
 function buildScene()
 {
     const t = gScene.textures;
-    const font = gFontManager.getDefault();
+    const font = FontManager.getDefault();
     let items = [];
 
     // *** Models ***
@@ -450,13 +451,11 @@ function buildScene()
 
     // *** Toggles: the filled style above, the outlined one with ON / OFF text below ***
 
-    const white = gTextureManager.getWhiteTexture();
-
     let filled = new Toggle();
-    filled.load(white, TOGGLE_SIZE.x, TOGGLE_SIZE.y);
+    filled.load(TOGGLE_SIZE.x, TOGGLE_SIZE.y);
 
     let outlined = new Toggle();
-    outlined.load(white, TOGGLE_SIZE.x, TOGGLE_SIZE.y);
+    outlined.load(TOGGLE_SIZE.x, TOGGLE_SIZE.y);
     outlined.setTrackColors(Vector4.kBlack, Vector4.kWhite);
     outlined.setKnobColors(Vector4.kWhite, Vector4.kBlack);
     outlined.setOutline(5, Vector4.kBlack, Vector4.kBlack);
@@ -496,7 +495,7 @@ function buildScene()
 
     // Square: a green outline around an empty box, with ux_check (a white tick) tinted green
     let textureCheck = new CheckBox();
-    textureCheck.load(white, CHECKBOX_SIZE, 0, t.check);
+    textureCheck.load(CHECKBOX_SIZE, 0, t.check);
     textureCheck.setOutlineWidth(CHECKBOX_OUTLINE);
     textureCheck.setOutlineColor(Colors.kCheckGreen);
     textureCheck.setBoxColor(Colors.kBackground);
@@ -505,7 +504,7 @@ function buildScene()
 
     // Rounded: a light outline around an empty box, with the solid check in green
     let shapeCheck = new CheckBox();
-    shapeCheck.load(white, CHECKBOX_SIZE, CHECKBOX_SIZE * 0.2);
+    shapeCheck.load(CHECKBOX_SIZE, CHECKBOX_SIZE * 0.2);
     shapeCheck.setOutlineWidth(CHECKBOX_OUTLINE);
     shapeCheck.setOutlineColor(Colors.kText);
     shapeCheck.setBoxColor(Colors.kBackground);
@@ -544,14 +543,14 @@ function buildScene()
     let clicks = 0;
 
     let countButton = new Button();
-    countButton.load(white, 100, 50, 12);
+    countButton.load(100, 50, 12);
     countButton.setText(buttonAtlas, "Clicked 0");
     countButton.setAutoSize(true);
     countButton.setPressShrink(true);
     countButton.setOnClick((b) => { ++clicks; b.setText(buttonAtlas, `Clicked ${clicks}`); });
 
     let iconButton = new Button();
-    iconButton.load(white, 100, 50, Button.kPill);
+    iconButton.load(100, 50, Button.kPill);
     iconButton.setIcon(t.check, BUTTON_ICON_SIZE);
     iconButton.setText(buttonAtlas, "Accept");
     iconButton.setBackgroundColors(Colors.kCheckGreen, Colors.kButtonGreenHover, Colors.kButtonGreenPressed);
@@ -561,7 +560,7 @@ function buildScene()
 
     let disabledButton = new Button();
     disabledButton.setEnabled(false); // Before load(), so it starts in the disabled colors
-    disabledButton.load(white, 100, 50, 12);
+    disabledButton.load(100, 50, 12);
     disabledButton.setText(buttonAtlas, "Disabled");
     disabledButton.setAutoSize(true);
 
@@ -705,7 +704,7 @@ function makeSpriteStrip()
     if (texture.loadCanvas(c) === false)
     {
         console.error("Couldn't build the sprite strip; using the white texture");
-            return gTextureManager.getWhiteTexture();
+            return TextureManager.getWhiteTexture();
     }
 
     return texture;
@@ -952,7 +951,7 @@ function formatCount(n) { return n.toLocaleString("en-US"); }
 // The metrics window: a Label (text on a panel that fits itself to the text), pinned to the view's top-left corner
 function buildHud()
 {
-    const font = gFontManager.loadFromSystem(HUD_FONT);
+    const font = FontManager.loadFromSystem(HUD_FONT);
     const atlas = new TextAtlas(font, TextAtlas.kAscii, HUD_FONT_SIZE);
 
     if (atlas.isLoaded() === false)
@@ -961,7 +960,7 @@ function buildHud()
             return;
     }
 
-    gHud = new Label(atlas, gTextureManager.getWhiteTexture());
+    gHud = new Label(atlas);
     gHud.setPanelColor(Colors.kHudPanel);
     gHud.setTextColor(Colors.kHudText);
     gHud.setPadding(HUD_PADDING);

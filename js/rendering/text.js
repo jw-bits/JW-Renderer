@@ -114,7 +114,7 @@ class TextCanvas
     TextGlyphs2D.listenForRasterScale()).
 
     Usage:
-        const font = await gFontManager.load("./fonts/MyFont-Regular.ttf");
+        const font = await FontManager.load("./fonts/MyFont-Regular.ttf");
         let digits = new TextAtlas(font, TextAtlas.kDigits + ":", 40, "bold"); // Or kAlphabet, kAscii
 
         let time = new TextGlyphs2D(digits);
@@ -147,7 +147,7 @@ class TextAtlas
     #listeners;  // Functions called after rasterize() redraws the glyphs
 
     /*
-        _font is a loaded Font, usually from the app's FontManager. _glyphs is a
+        _font is a loaded Font, usually from FontManager. _glyphs is a
         string of the characters to draw (repeats are fine). Check isLoaded()
         afterwards; it's false (with a console.error) if the glyphs couldn't
         be built.

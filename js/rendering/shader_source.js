@@ -1,6 +1,13 @@
 "use strict";
 
+/*
+    Shader sources: each is { name, VS, FS } (plus any attribute locations it
+    needs). name is unique in this file; ShaderManager keys each built shader
+    by it, so a new source needs a name no other source uses.
+*/
+
 const Rect2DShaderSource = {
+    name: "Rect2D",
     VS: `#version 300 es
         layout(location = 5) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
@@ -70,6 +77,7 @@ const Rect2DShaderSource = {
     then with u_color. Alpha is the texture's times u_color's.
 */
 const LightingSharedSource = {
+    name: "LightingShared", // Code shared by the lit shaders, not a shader of its own
     // Vertex shader: Rect2D's, plus v_pos, the pixel's position in design units
     VS: `#version 300 es
         layout(location = 5) in vec3 a_pos;
@@ -154,6 +162,7 @@ const LightingSharedSource = {
 
 // Lit with one texture (u_tex0); every pixel faces the viewer
 const LitRect2DShaderSource = {
+    name: "LitRect2D",
     VS: LightingSharedSource.VS,
     FS: `#version 300 es
         precision highp float;
@@ -180,6 +189,7 @@ const LitRect2DShaderSource = {
     The normals turn with the model's rotation and flip with a negative scale.
 */
 const LitNormalMapRect2DShaderSource = {
+    name: "LitNormalMapRect2D",
     VS: LightingSharedSource.VS,
     FS: `#version 300 es
         precision highp float;
@@ -216,6 +226,7 @@ const LitNormalMapRect2DShaderSource = {
     multiplied with u_color, so each glyph can have its own tint.
 */
 const TextGlyphs2DShaderSource = {
+    name: "TextGlyphs2D",
     VS: `#version 300 es
         layout(location = 5) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
@@ -274,6 +285,7 @@ const TextGlyphs2DShaderSource = {
     (u, v) its bottom-left corner and V up (see UVRect).
 */
 const SpriteShaderSource = {
+    name: "Sprite",
     VS: `#version 300 es
         layout(location = 5) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
@@ -326,6 +338,7 @@ const SpriteShaderSource = {
     Locations 8 - 11 are past the ones RenderAttributes uses (0 - 7).
 */
 const Rect2DInstancedShaderSource = {
+    name: "Rect2DInstanced",
     kRectLocation: 8,
     kScaleRotLocation: 9,
     kColorLocation: 10,
@@ -385,6 +398,7 @@ const Rect2DInstancedShaderSource = {
     from a LightSet (lighting.js).
 */
 const LitRect2DInstancedShaderSource = {
+    name: "LitRect2DInstanced",
     // Rect2DInstancedShaderSource's vertex shader, plus v_pos (the pixel's position in design units) and the instance's scale and rotation
     VS: `#version 300 es
         layout(location = 5) in vec2 a_pos;
@@ -440,6 +454,7 @@ const LitRect2DInstancedShaderSource = {
 
 // Lit instanced Rect2D with a normal map in u_tex1, like LitNormalMapRect2DShaderSource; each instance's normals turn with its rotation
 const LitNormalMapRect2DInstancedShaderSource = {
+    name: "LitNormalMapRect2DInstanced",
     VS: LitRect2DInstancedShaderSource.VS,
     FS: `#version 300 es
         precision highp float;
@@ -497,6 +512,7 @@ const LitNormalMapRect2DInstancedShaderSource = {
         a_iColor  (r, g, b, a)
 */
 const Particles2DShaderSource = {
+    name: "Particles2D",
     kMotionLocation: 8,
     kLifeLocation: 9,
     kColorLocation: 10,

@@ -307,8 +307,6 @@ class Model2D
 */
 class Rect2D extends Model2D
 {
-    static #kShader = null; // Default shader, used when loading from a Texture
-
     #uvRect; // (x, y) is the UV offset, (width, height) the UV tile
 
     constructor()
@@ -420,17 +418,7 @@ class Rect2D extends Model2D
     */
     static getDefaultShader()
     {
-        if (Rect2D.#kShader === null)
-        {
-            let shader = new Shader();
-
-            if (shader.load(Rect2DShaderSource.VS, Rect2DShaderSource.FS) === false)
-                return null;
-
-            Rect2D.#kShader = shader;
-        }
-
-        return Rect2D.#kShader;
+        return ShaderManager.get(Rect2DShaderSource);
     }
 
     // *** Internal Methods ***
@@ -670,7 +658,7 @@ class NinePatch2D extends Model2D
     listens for raster scale changes to rasterize again.
 
     Usage:
-        const font = await gFontManager.load("./fonts/MyFont-Regular.ttf"); // The app's FontManager
+        const font = await FontManager.load("./fonts/MyFont-Regular.ttf");
         let t = new Text2D(font, 32, "bold");
         t.setColor(new Vector4(1, 1, 0, 1));
         t.setPos(400, 300, Alignment.kMiddleCenter);
@@ -679,7 +667,7 @@ class NinePatch2D extends Model2D
         t.render();
 
     The Font is the only way to choose what Text2D draws with; use
-    fontManager.loadFromSystem("Arial") for a font the browser already has.
+    FontManager.loadFromSystem("Arial") for a font the browser already has.
     The Font must be loaded before setText() is called; otherwise setText()
     returns false and nothing changes. Call unload() when done with it, since
     it's registered with WGLV for scale changes while loaded.
@@ -700,7 +688,7 @@ class Text2D extends Model2D
     #isShadowOn;
     #shadowOffset; // Vector2, design units
 
-    // _font is a Font, usually from the app's FontManager
+    // _font is a Font, usually from FontManager
     constructor(_font, _fontSize = 32, _fontWeight = "normal")
     {
         super();
@@ -977,8 +965,6 @@ class Text2D extends Model2D
 */
 class TextGlyphs2D extends Model2D
 {
-    static #kShader = null;
-
     #textAtlas;
     #text;
     #mesh;         // The mesh given to the base, kept to update its positions and colors
@@ -1232,20 +1218,7 @@ class TextGlyphs2D extends Model2D
     // Rect2D's shader plus a color per vertex (see TextGlyphs2DShaderSource); shared by every TextAtlas
     static getDefaultShader()
     {
-        if (TextGlyphs2D.#kShader === null)
-        {
-            let shader = new Shader();
-
-            if (shader.load(TextGlyphs2DShaderSource.VS, TextGlyphs2DShaderSource.FS) === false)
-            {
-                console.error("TextGlyphs2D couldn't build its shader");
-                    return null;
-            }
-
-            TextGlyphs2D.#kShader = shader;
-        }
-
-        return TextGlyphs2D.#kShader;
+        return ShaderManager.get(TextGlyphs2DShaderSource);
     }
 
     // *** Internal Methods ***

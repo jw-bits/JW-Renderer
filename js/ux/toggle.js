@@ -14,7 +14,7 @@
 
     Usage:
         let t = new Toggle();
-        t.load(gTextureManager.getWhiteTexture(), 120, 56); // Design units, outline included
+        t.load(120, 56); // Design units, outline included
         t.setPos(400, 300, Alignment.kMiddleCenter);
         t.setOnChange((toggle, isOn) => sound.setMuted(isOn === false));
 
@@ -113,11 +113,10 @@ class Toggle
     }
 
     /*
-        whiteTexture is a loaded white texture (TextureManager.getWhiteTexture());
         width x height is the whole toggle in design units, outline included,
         wider than it is tall. Starts off. Returns false on failure.
     */
-    load(whiteTexture, width, height)
+    load(width, height)
     {
         if (this.#isLoaded === true)
             return false; // Unload first
@@ -130,10 +129,9 @@ class Toggle
 
         let material = new Material();
 
-        if ((whiteTexture instanceof BaseTexture) === false || whiteTexture.isLoaded() === false ||
-            material.load(Rect2D.getDefaultShader(), [whiteTexture]) === false)
+        if (material.load(Rect2D.getDefaultShader(), [TextureManager.getWhiteTexture()]) === false)
         {
-            console.error("Toggle.load() needs a loaded white texture, e.g. TextureManager.getWhiteTexture()");
+            console.error("Toggle.load() couldn't create its material (was WGLV.init() called first?)");
                 return false;
         }
 
@@ -381,7 +379,7 @@ class Toggle
 
     isLoaded() { return this.#isLoaded; }
 
-    // Frees the meshes and the toggle's own Material; the white texture and TextAtlas belong to the caller
+    // Frees the meshes and the toggle's own Material; the TextAtlas belongs to the caller
     unload()
     {
         this.#outline.unload();

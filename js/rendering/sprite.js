@@ -101,7 +101,6 @@ class SpriteSequence
 */
 class Sprite extends Model2D
 {
-    static #kShader = null;               // Default shader, also needed by Materials given to load()
     static #kUVScratch = new Vector4();   // For uploading u_vec1
 
     #uvRect;         // The frame drawn now, within the texture (or SubTexture)
@@ -477,24 +476,11 @@ class Sprite extends Model2D
 
     /*
         The shader Sprite draws with (null if it can't be built). Build shared
-        Materials for Sprites with it, e.g. gMaterialManager.load(Sprite.getDefaultShader(), [atlas]).
+        Materials for Sprites with it, e.g. MaterialManager.load(Sprite.getDefaultShader(), [atlas]).
     */
     static getDefaultShader()
     {
-        if (Sprite.#kShader === null)
-        {
-            let shader = new Shader();
-
-            if (shader.load(SpriteShaderSource.VS, SpriteShaderSource.FS) === false)
-            {
-                console.error("Sprite couldn't build its shader");
-                    return null;
-            }
-
-            Sprite.#kShader = shader;
-        }
-
-        return Sprite.#kShader;
+        return ShaderManager.get(SpriteShaderSource);
     }
 
     // *** Internal Methods ***

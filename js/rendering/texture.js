@@ -72,6 +72,7 @@ class Texture extends BaseTexture
     #texId;
     #url;
     #isLoaded;
+    #loadPromise; // While an image loads (and after), resolving to true or false
 
     // Options
     #flipY;
@@ -89,43 +90,49 @@ class Texture extends BaseTexture
         this.#hasMipmaps = _makeMipmaps;
         this.#url = null;
         this.#isLoaded = false;
+        this.#loadPromise = null;
         this.#texId = 0;
     }
 
-    // Loads an image. onLoadFailCB is called if the image can't be loaded (the texture is unloaded first).
-    load(imageUrl, onLoadSuccessCB = null, onLoadFailCB = null)
+    /*
+        Loads an image. Resolves to true once it's uploaded, false on failure (the
+        texture is unloaded, so it can load again). Asking again for the same image
+        while it loads shares the load; any other request while it's loaded or
+        loading fails (unload() first). The checkerboard placeholder draws meanwhile.
+    */
+    async load(imageUrl)
     {
-        if (imageUrl == null)
-            return false; // Nothing to load
+        if (typeof imageUrl !== "string" || imageUrl.length === 0)
+        {
+            console.error("Texture.load() needs an image url");
+                return false;
+        }
 
         if (this.#texId !== 0)
-            return false; // Already loaded or loading... free first
+        {
+            if (imageUrl === this.#url)
+                return await this.waitForLoad(); // Same image: share the load
+
+            console.error(`Texture is already used for ${this.#url ?? "pixels or a canvas"}; unload it first, or create a new Texture for ${imageUrl}`);
+                return false;
+        }
 
         this.#initTexture();
         this.#url = imageUrl;
+        this.#loadPromise = this.#loadImage(imageUrl);
+            return await this.#loadPromise;
+    }
 
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.decoding = "async";
+    // Resolves to true once loaded, or false if it failed or was never loaded
+    async waitForLoad()
+    {
+        if (this.#isLoaded === true)
+            return true;
 
-        img.onload = () => {
-            this.#upload(img, img.naturalWidth, img.naturalHeight);
-            this.#isLoaded = true;
+        if (this.#loadPromise === null)
+            return false;
 
-            if (onLoadSuccessCB !== null)
-                onLoadSuccessCB();
-        };
-
-        img.onerror = () => {
-            console.error("Can't load texture: " + this.#url);
-            this.unload();
-
-            if (onLoadFailCB !== null)
-                onLoadFailCB();
-        };
-
-        img.src = imageUrl; // Load it
-            return true; // Loading...
+        return await this.#loadPromise;
     }
 
     // Loads raw RGBA pixels (a Uint8Array of width * height * 4). Ready right away.
@@ -203,9 +210,43 @@ class Texture extends BaseTexture
         this.#url = null;
         this._setSize(0, 0);
         this.#isLoaded = false;
+        this.#loadPromise = null;
     }
 
     // *** Internal Methods ***
+
+    // Loads and uploads an image; resolves to true, or false (unloading) if it can't be loaded
+    #loadImage(url)
+    {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.decoding = "async";
+
+            img.onload = () => {
+                if (this.#url !== url)
+                {
+                    resolve(false); // Unloaded (or reloaded) while it was loading
+                        return;
+                }
+
+                this.#upload(img, img.naturalWidth, img.naturalHeight);
+                this.#isLoaded = true;
+                resolve(true);
+            };
+
+            img.onerror = () => {
+                console.error("Can't load texture: " + url);
+
+                if (this.#url === url)
+                    this.unload();
+
+                resolve(false);
+            };
+
+            img.src = url; // Load it
+        });
+    }
 
     // source is an image, canvas, or anything else texImage2D accepts
     #upload(source, width, height)

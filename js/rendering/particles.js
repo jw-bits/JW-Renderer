@@ -34,7 +34,6 @@
 */
 class Particles2D
 {
-    static #kShader = null;
     static #kFloatsPerParticle = 11; // Motion (4), start time + life + size (3), color (4)
     static #kRebaseTime = 600.0;     // Seconds; the clock restarts after this once nothing's alive
 
@@ -317,19 +316,6 @@ class Particles2D
 
     static #getShader()
     {
-        if (Particles2D.#kShader === null)
-        {
-            let shader = new Shader();
-
-            if (shader.load(Particles2DShaderSource.VS, Particles2DShaderSource.FS) === false)
-            {
-                console.error("Particles2D couldn't build its shader");
-                    return null;
-            }
-
-            Particles2D.#kShader = shader;
-        }
-
-        return Particles2D.#kShader;
+        return ShaderManager.get(Particles2DShaderSource);
     }
 }

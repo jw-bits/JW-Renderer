@@ -16,8 +16,8 @@
 
     Usage:
         let box = new CheckBox();
-        box.load(gTextureManager.getWhiteTexture(), 48, 10);              // 48 x 48 design units, corners of 10
-        box.load(gTextureManager.getWhiteTexture(), 48, 0, tickTexture);  // Or square, with a texture check
+        box.load(48, 10);                 // 48 x 48 design units, corners of 10
+        box.load(48, 0, tickTexture);     // Or square, with a texture check
         box.setPos(400, 300, Alignment.kMiddleCenter);
         box.setOnChange((checkBox, isChecked) => settings.music = isChecked);
 
@@ -95,13 +95,12 @@ class CheckBox
     }
 
     /*
-        whiteTexture is a loaded white texture (TextureManager.getWhiteTexture()).
         size is the box's width and height in design units, outline included.
         cornerRadius rounds the corners (0 is square; clamped to half the size).
         checkTexture (a loaded Texture or SubTexture) draws the check; null makes
         it a solid rounded rect. Starts unchecked. Returns false on failure.
     */
-    load(whiteTexture, size, cornerRadius = 0, checkTexture = null)
+    load(size, cornerRadius = 0, checkTexture = null)
     {
         if (this.#isLoaded === true)
             return false; // Unload first
@@ -120,10 +119,9 @@ class CheckBox
 
         let material = new Material();
 
-        if ((whiteTexture instanceof BaseTexture) === false || whiteTexture.isLoaded() === false ||
-            material.load(Rect2D.getDefaultShader(), [whiteTexture]) === false)
+        if (material.load(Rect2D.getDefaultShader(), [TextureManager.getWhiteTexture()]) === false)
         {
-            console.error("CheckBox.load() needs a loaded white texture, e.g. TextureManager.getWhiteTexture()");
+            console.error("CheckBox.load() couldn't create its material (was WGLV.init() called first?)");
                 return false;
         }
 
@@ -304,7 +302,7 @@ class CheckBox
 
     isLoaded() { return this.#isLoaded; }
 
-    // Frees the meshes and the CheckBox's own Material; the white texture and check texture belong to the caller
+    // Frees the meshes and the CheckBox's own Material; the check texture belongs to the caller
     unload()
     {
         this.#outline.unload();
