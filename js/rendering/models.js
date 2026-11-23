@@ -449,11 +449,13 @@ class Rect2D extends Model2D
 class RoundedRect2D extends Model2D
 {
     #radius;
+    #segments;
 
     constructor()
     {
         super();
         this.#radius = 0;
+        this.#segments = 8;
     }
 
     /*
@@ -492,10 +494,49 @@ class RoundedRect2D extends Model2D
             return false;
 
         mesh.bindAttribs();
+        this.#segments = _segments;
         this._setSize(w, h);
         this._setMaterial(material);
         this._setMesh(mesh);
         this._setLoaded(true);
+            return true;
+    }
+
+    /*
+        Changes the size in design units, keeping the anchor and alignment from setPos()
+        (a centered rect stays centered). radius is clamped to half the shortest side
+        (the current one by default; Infinity makes a pill). Rebuilds the mesh. Returns
+        false if not loaded or the size isn't above 0.
+    */
+    setSize(width, height, radius = this.#radius)
+    {
+        if (this.isLoaded() === false)
+        {
+            console.error("RoundedRect2D.setSize(): load it first");
+                return false;
+        }
+
+        if (Number.isFinite(width) === false || Number.isFinite(height) === false || width <= 0 || height <= 0 ||
+            Number.isNaN(radius) === true || radius < 0)
+        {
+            console.error("RoundedRect2D.setSize() needs a width and height above 0 and a radius of 0 or more");
+                return false;
+        }
+
+        const r = Math.min(radius, width / 2.0, height / 2.0);
+
+        if (width === this.getWidth() && height === this.getHeight() && r === this.#radius)
+            return true;
+
+        let mesh = Shapes.makeRoundedRect(0, 0, 0, width, height, r, this.#segments);
+
+        if (mesh == null)
+            return false;
+
+        mesh.bindAttribs();
+        this.#radius = r;
+        this._setMesh(mesh); // Frees the old one
+        this._setSize(width, height);
             return true;
     }
 

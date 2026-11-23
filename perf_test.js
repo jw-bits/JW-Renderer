@@ -3,7 +3,8 @@
 /*
     Performance Test - One of every Model2D type (Rect2D, RoundedRect2D,
     NinePatch2D, Sprite, Text2D, TextGlyphs2D), a Particles2D, every text
-    effect (Wave, Fade, Ease, Scroll) and two lit Rect2Ds, with a small
+    effect (Wave, Fade, Ease, Scroll), two lit Rect2Ds, two Toggles, two
+    CheckBoxes and three Buttons (tap them; see InputManager), with a small
     metrics window.
 
     Pages: the view is a 3 x 3 grid of slots. The metrics window always has
@@ -100,6 +101,17 @@ const SUN_COLOR = new Vector3(0.55, 0.65, 1.0);
 const SUN_INTENSITY = 0.35;
 const AMBIENT_COLOR = new Vector3(0.18, 0.18, 0.18);
 
+const TOGGLE_SIZE = new Vector2(160, 70); // Each Toggle, design units
+const TOGGLE_GAP = 50;                    // The two Toggles sit this far above and below their slot's center
+
+const CHECKBOX_SIZE = 90;                 // Each CheckBox, design units
+const CHECKBOX_OUTLINE = 6;               // Their outline's thickness
+
+const BUTTON_FONT_SIZE = 26;
+const BUTTON_ICON_SIZE = 30;
+const BUTTON_GAP = 88;                    // The three Buttons sit this far apart, top to bottom
+const CHECKBOX_GAP = 80;                  // The two CheckBoxes sit this far left and right of their slot's center
+
 const Layers = {
     kLit: 0,       // The lit brick Rect2Ds; the batcher lights this layer
     kShapes: 1,    // Rect2D, RoundedRect2D, NinePatch2D, Sprite
@@ -120,6 +132,9 @@ const Colors = {
     kHudPanel: new Vector4(0.0, 0.0, 0.0, 0.75),
     kHudText: new Vector4(0.91, 0.91, 0.91, 1.0),
     kLabel: new Vector4(0.68, 0.71, 0.78, 1.0),
+    kCheckGreen: new Vector4(0.42, 0.78, 0.26, 1.0),
+    kButtonGreenHover: new Vector4(0.52, 0.86, 0.36, 1.0),
+    kButtonGreenPressed: new Vector4(0.32, 0.62, 0.18, 1.0),
     kParticles: [new Vector4(1.0, 0.55, 0.20, 1.0), new Vector4(1.0, 0.85, 0.35, 1.0),
                  new Vector4(0.45, 0.75, 1.0, 1.0), new Vector4(0.95, 0.40, 0.70, 1.0)]
 };
@@ -203,6 +218,10 @@ window.onload = () => {
     WGLV.setBarColor(Colors.kBars);
     WGLV.setClearColor(Colors.kBackground);
     WGLV.resizeToWindow();
+
+    if (InputManager.init() === false)
+        console.error("InputManager couldn't start; the Toggles won't respond to taps");
+
     appSetup();
 };
 
@@ -249,17 +268,18 @@ async function loadAssets()
     gBatcher.setLayerLit(Layers.kLit, true);
     buildHud(); // System font, so it's ready now and shows "Loading..." while the textures load
 
-    const [rectTex, circleTex, ninePatchTex, particleTex, brickTex, brickNormalTex] = await Promise.all([
+    const [rectTex, circleTex, ninePatchTex, particleTex, brickTex, brickNormalTex, checkTex] = await Promise.all([
         gTextureManager.load("./textures/test_up.png"),
         gTextureManager.load("./textures/circle.png"),
         gTextureManager.load("./textures/np_text.png"),
         gTextureManager.load("./textures/ps_texture.webp"),
         gTextureManager.load("./textures/brickAlbedo.png"),
-        gTextureManager.load("./textures/brickNormals.png")
+        gTextureManager.load("./textures/brickNormals.png"),
+        gTextureManager.load("./textures/ux_check.png")
     ]);
 
     gScene = { textures: { rect: rectTex, circle: circleTex, ninePatch: ninePatchTex, particle: particleTex,
-                           brick: brickTex, brickNormals: brickNormalTex } };
+                           brick: brickTex, brickNormals: brickNormalTex, check: checkTex } };
 }
 
 /*
@@ -428,6 +448,148 @@ function buildScene()
     litRect.load(t.brick, LIT_SIZE.x, LIT_SIZE.y);
     items.push(makeLitItem("Lit Rect2D - texture only, point + directional", litRect, lights, t.circle, false));
 
+    // *** Toggles: the filled style above, the outlined one with ON / OFF text below ***
+
+    const white = gTextureManager.getWhiteTexture();
+
+    let filled = new Toggle();
+    filled.load(white, TOGGLE_SIZE.x, TOGGLE_SIZE.y);
+
+    let outlined = new Toggle();
+    outlined.load(white, TOGGLE_SIZE.x, TOGGLE_SIZE.y);
+    outlined.setTrackColors(Vector4.kBlack, Vector4.kWhite);
+    outlined.setKnobColors(Vector4.kWhite, Vector4.kBlack);
+    outlined.setOutline(5, Vector4.kBlack, Vector4.kBlack);
+    outlined.setText(new TextAtlas(font, "ONF", 26, "bold"), "ON", "OFF");
+    outlined.setTextColors(Vector4.kWhite, Vector4.kBlack);
+    outlined.setOn(true, true);
+
+    let toggleItem = {
+        label: "Toggle - tap to flip, filled and outlined",
+        place: (x, y) => {
+            filled.setPos(x, y + TOGGLE_GAP, Alignment.kMiddleCenter);
+            outlined.setPos(x, y - TOGGLE_GAP, Alignment.kMiddleCenter);
+        },
+        update: (dt) => {
+            // Taps only count while its page is shown
+            const isShown = (toggleItem.page === gPages.current);
+
+            for (const t of [filled, outlined])
+            {
+                if (t.isEnabled() !== isShown)
+                    t.setEnabled(isShown);
+
+                t.update(dt);
+            }
+        },
+        submit: () => {
+            filled.submit(gBatcher, Layers.kShapes, Layers.kText);
+            outlined.submit(gBatcher, Layers.kShapes, Layers.kText);
+        }
+    };
+
+    items.push(toggleItem);
+
+    // *** CheckBoxes, styled like common check marks so they stand out on the dark background ***
+
+    // The outline is drawn behind the whole box, so an "empty" box is filled with the background color
+
+    // Square: a green outline around an empty box, with ux_check (a white tick) tinted green
+    let textureCheck = new CheckBox();
+    textureCheck.load(white, CHECKBOX_SIZE, 0, t.check);
+    textureCheck.setOutlineWidth(CHECKBOX_OUTLINE);
+    textureCheck.setOutlineColor(Colors.kCheckGreen);
+    textureCheck.setBoxColor(Colors.kBackground);
+    textureCheck.setCheckColor(Colors.kCheckGreen);
+    textureCheck.setChecked(true);
+
+    // Rounded: a light outline around an empty box, with the solid check in green
+    let shapeCheck = new CheckBox();
+    shapeCheck.load(white, CHECKBOX_SIZE, CHECKBOX_SIZE * 0.2);
+    shapeCheck.setOutlineWidth(CHECKBOX_OUTLINE);
+    shapeCheck.setOutlineColor(Colors.kText);
+    shapeCheck.setBoxColor(Colors.kBackground);
+    shapeCheck.setCheckColor(Colors.kCheckGreen);
+    shapeCheck.setChecked(true);
+
+    let checkItem = {
+        label: "CheckBox - tap: texture check, shape check",
+        place: (x, y) => {
+            textureCheck.setPos(x - CHECKBOX_GAP, y, Alignment.kMiddleCenter);
+            shapeCheck.setPos(x + CHECKBOX_GAP, y, Alignment.kMiddleCenter);
+        },
+        update: (dt) => {
+            // Taps only count while its page is shown
+            const isShown = (checkItem.page === gPages.current);
+
+            for (const c of [textureCheck, shapeCheck])
+            {
+                if (c.isEnabled() !== isShown)
+                    c.setEnabled(isShown);
+
+                c.update(dt);
+            }
+        },
+        submit: () => {
+            textureCheck.submit(gBatcher, Layers.kShapes, Layers.kText);
+            shapeCheck.submit(gBatcher, Layers.kShapes, Layers.kText);
+        }
+    };
+
+    items.push(checkItem);
+
+    // *** Buttons: auto-sized, with press shrink; one counts its clicks, one has an icon, one is disabled ***
+
+    const buttonAtlas = new TextAtlas(font, TextAtlas.kAscii, BUTTON_FONT_SIZE, "bold");
+    let clicks = 0;
+
+    let countButton = new Button();
+    countButton.load(white, 100, 50, 12);
+    countButton.setText(buttonAtlas, "Clicked 0");
+    countButton.setAutoSize(true);
+    countButton.setPressShrink(true);
+    countButton.setOnClick((b) => { ++clicks; b.setText(buttonAtlas, `Clicked ${clicks}`); });
+
+    let iconButton = new Button();
+    iconButton.load(white, 100, 50, Button.kPill);
+    iconButton.setIcon(t.check, BUTTON_ICON_SIZE);
+    iconButton.setText(buttonAtlas, "Accept");
+    iconButton.setBackgroundColors(Colors.kCheckGreen, Colors.kButtonGreenHover, Colors.kButtonGreenPressed);
+    iconButton.setOutline(3, Colors.kText, Colors.kText, Colors.kText);
+    iconButton.setAutoSize(true);
+    iconButton.setPressShrink(true);
+
+    let disabledButton = new Button();
+    disabledButton.setEnabled(false); // Before load(), so it starts in the disabled colors
+    disabledButton.load(white, 100, 50, 12);
+    disabledButton.setText(buttonAtlas, "Disabled");
+    disabledButton.setAutoSize(true);
+
+    const buttons = [countButton, iconButton, disabledButton];
+
+    let buttonItem = {
+        label: "Button - hover, press, click, auto size",
+        place: (x, y) => {
+            countButton.setPos(x, y + BUTTON_GAP, Alignment.kMiddleCenter);
+            iconButton.setPos(x, y, Alignment.kMiddleCenter);
+            disabledButton.setPos(x, y - BUTTON_GAP, Alignment.kMiddleCenter);
+        },
+        update: (dt) => {
+            // Only while its page is shown, so clicks elsewhere don't reach them (and they don't grey out meanwhile)
+            if (buttonItem.page !== gPages.current)
+                return;
+
+            for (const b of buttons)
+                b.update(dt);
+        },
+        submit: () => {
+            for (const b of buttons)
+                b.submit(gBatcher, Layers.kShapes, Layers.kText);
+        }
+    };
+
+    items.push(buttonItem);
+
     // *** Pages and labels ***
 
     const labelAtlas = new TextAtlas(font, items.map((item) => item.label).join(""), LABEL_FONT_SIZE);
@@ -555,6 +717,8 @@ function appMain(ts)
 {
     const dt = Math.min(MAX_DT, Math.max(0.0, (ts - gPrevTS) / 1000.0));
     gPrevTS = ts;
+
+    InputManager.update(); // This frame's taps, before anything reads them (the Toggles)
 
     if (gIsReady === true)
     {
