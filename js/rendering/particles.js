@@ -34,7 +34,7 @@
 */
 class Particles2D
 {
-    static #kFloatsPerParticle = 11; // Motion (4), start time + life + size (3), color (4)
+    static #kFloatsPerParticle = 12; // Motion (4), start time + life + size + unused (4), color (4)
     static #kRebaseTime = 600.0;     // Seconds; the clock restarts after this once nothing's alive
 
     // Scratch values for uploading uniforms in render()
@@ -120,9 +120,9 @@ class Particles2D
 
         // Unit quad centered on the particle, shared by every instance, plus the interleaved per-particle values
         const attribs = [
-            [Particles2DShaderSource.kMotionLocation, 4, 0],
-            [Particles2DShaderSource.kLifeLocation, 3, 4],
-            [Particles2DShaderSource.kColorLocation, 4, 7]
+            [InstancedAttributes.kVector0, 0], // Motion
+            [InstancedAttributes.kVector1, 4], // Life
+            [InstancedAttributes.kColor, 8]
         ];
 
         if (this.#mesh.load(new Float32Array([-0.5, -0.5,  0.5, -0.5,  0.5, 0.5,  -0.5, 0.5]), stride, attribs) === false)
@@ -206,6 +206,7 @@ class Particles2D
         d[o++] = this.#time;
         d[o++] = life;
         d[o++] = size;
+        d[o++] = 0.0; // Unused
         d[o++] = color.x;
         d[o++] = color.y;
         d[o++] = color.z;

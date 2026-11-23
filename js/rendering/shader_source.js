@@ -1,15 +1,16 @@
 "use strict";
 
 /*
-    Shader sources: each is { name, VS, FS } (plus any attribute locations it
-    needs). name is unique in this file; ShaderManager keys each built shader
-    by it, so a new source needs a name no other source uses.
+    Shader sources: each is { name, VS, FS }. name is unique in this file;
+    ShaderManager keys each built shader by it, so a new source needs a name
+    no other source uses. Attribute locations come from RenderAttributes and
+    InstancedAttributes (render_defines.js).
 */
 
 const Rect2DShaderSource = {
     name: "Rect2D",
     VS: `#version 300 es
-        layout(location = 5) in vec3 a_pos;
+        layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
         
         uniform vec2 u_res;
@@ -30,8 +31,8 @@ const Rect2DShaderSource = {
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
 
-            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
-                             ssPos.x * -sa + ssPos.y * ca);
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
 
             vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
             vec2 cs = (zTo1 * 2.0) - 1.0;
@@ -78,9 +79,13 @@ const Rect2DShaderSource = {
 */
 const LightingSharedSource = {
     name: "LightingShared", // Code shared by the lit shaders, not a shader of its own
-    // Vertex shader: Rect2D's, plus v_pos, the pixel's position in design units
+    /*
+        Vertex shader: Rect2D's, plus v_pos, the pixel's position in design units,
+        and v_rotFlip = (cos, sin, sign(scaleX), sign(scaleY)) of the model, the same
+        for the whole rect, so a normal map turns its normals without per-pixel sin / cos
+    */
     VS: `#version 300 es
-        layout(location = 5) in vec3 a_pos;
+        layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
 
         uniform vec2 u_res;
@@ -94,6 +99,7 @@ const LightingSharedSource = {
 
         out vec2 v_uv0;
         out vec2 v_pos;
+        flat out vec4 v_rotFlip;
 
         void main() {
             vec2 ssPos = (a_pos.xy - u_vec0.zw) * u_scale.xy;
@@ -101,8 +107,8 @@ const LightingSharedSource = {
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
 
-            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
-                             ssPos.x * -sa + ssPos.y * ca);
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
 
             v_pos = rPos + u_vec0.zw + u_vec0.xy;
 
@@ -110,6 +116,7 @@ const LightingSharedSource = {
             gl_Position = vec4(cs, 0.0, 1.0);
 
             v_uv0 = u_uvOffset + (a_uv0 * u_uvTile);
+            v_rotFlip = vec4(ca, sa, sign(u_scale.xy));
         }
     `,
 
@@ -125,20 +132,19 @@ const LightingSharedSource = {
         uniform vec4 u_lightColor2;
         uniform vec4 u_lightColor3;
 
-        // One light's diffuse at surface point p with unit normal n
+        // One light's diffuse at surface point p with unit normal n; LightSet only uploads lights with intensity > 0
         vec3 lightOne(vec4 lightPos, vec4 lightColor, vec3 p, vec3 n) {
-            if (lightColor.a <= 0.0)
-                return vec3(0.0);
-
             vec3 l = lightPos.xyz;
             float falloff = 1.0;
 
             if (lightPos.w > 0.0) {
+                // One inversesqrt gives both the distance and the unit direction (no sqrt or divide)
                 vec3 toLight = lightPos.xyz - p;
-                float dist = length(toLight);
-                float f = clamp(1.0 - (dist / lightPos.w), 0.0, 1.0);
+                float d2 = max(dot(toLight, toLight), 0.00000001);
+                float invDist = inversesqrt(d2);
+                float f = clamp(1.0 - ((d2 * invDist) / lightPos.w), 0.0, 1.0);
 
-                l = toLight / max(dist, 0.0001);
+                l = toLight * invDist;
                 falloff = f * f;
             }
 
@@ -197,10 +203,10 @@ const LitNormalMapRect2DShaderSource = {
         uniform sampler2D u_tex0;
         uniform sampler2D u_tex1;
         uniform vec4 u_color;
-        uniform vec3 u_scale;
 
         in vec2 v_uv0;
         in vec2 v_pos;
+        flat in vec4 v_rotFlip; // (cos, sin, signX, signY)
         out vec4 fragColor;
         ${LightingSharedSource.FS}
         void main() {
@@ -208,11 +214,8 @@ const LitNormalMapRect2DShaderSource = {
             vec3 n = (texture(u_tex1, v_uv0).xyz * 2.0) - 1.0;
 
             // Into the view: mirror with the scale, then the vertex shader's rotation
-            n.xy *= sign(u_scale.xy);
-
-            float sa = sin(u_scale.z);
-            float ca = cos(u_scale.z);
-            n.xy = vec2(n.x * ca + n.y * sa, n.x * -sa + n.y * ca);
+            n.xy *= v_rotFlip.zw;
+            n.xy = vec2(n.x * v_rotFlip.x - n.y * v_rotFlip.y, n.x * v_rotFlip.y + n.y * v_rotFlip.x);
 
             vec3 light = lightAll(vec3(v_pos, 0.0), normalize(n));
             fragColor = vec4(c.rgb * light, c.a) * u_color;
@@ -228,7 +231,7 @@ const LitNormalMapRect2DShaderSource = {
 const TextGlyphs2DShaderSource = {
     name: "TextGlyphs2D",
     VS: `#version 300 es
-        layout(location = 5) in vec3 a_pos;
+        layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
         layout(location = 7) in vec4 a_color;
 
@@ -250,8 +253,8 @@ const TextGlyphs2DShaderSource = {
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
 
-            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
-                             ssPos.x * -sa + ssPos.y * ca);
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
 
             vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
             vec2 cs = (zTo1 * 2.0) - 1.0;
@@ -287,7 +290,7 @@ const TextGlyphs2DShaderSource = {
 const SpriteShaderSource = {
     name: "Sprite",
     VS: `#version 300 es
-        layout(location = 5) in vec3 a_pos;
+        layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
 
         uniform vec2 u_res;
@@ -307,8 +310,8 @@ const SpriteShaderSource = {
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
 
-            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
-                             ssPos.x * -sa + ssPos.y * ca);
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
 
             vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
             vec2 cs = (zTo1 * 2.0) - 1.0;
@@ -329,27 +332,20 @@ const SpriteShaderSource = {
 
     The mesh is a unit quad (0,0) - (1,1); its position is mapped into the
     instance's UV rect, so a quad can draw part of its texture (a Sprite's frame).
-    Per instance:
-        a_iRect     (x, y, width / 2, height / 2)  Like u_vec0; (x, y) is the bottom-left corner
-        a_iScaleRot (scaleX, scaleY, rotZ)         Like u_scale
-        a_iColor    (r, g, b, a)                   Like u_color
-        a_iUVRect   (u, v, width, height)          Like SpriteShaderSource's u_vec1, or Rect2D's u_uvOffset / u_uvTile; (0, 0, 1, 1) for the whole texture
-
-    Locations 8 - 11 are past the ones RenderAttributes uses (0 - 7).
+    Per instance (InstancedAttributes):
+        a_instRect     (x, y, width / 2, height / 2)  Like u_vec0; (x, y) is the bottom-left corner
+        a_instScaleRot (scaleX, scaleY, rotZ)         Like u_scale
+        a_instColor    (r, g, b, a)                   Like u_color
+        a_instVec0     (u, v, width, height)          The UV rect: like SpriteShaderSource's u_vec1, or Rect2D's u_uvOffset / u_uvTile; (0, 0, 1, 1) for the whole texture
 */
 const Rect2DInstancedShaderSource = {
     name: "Rect2DInstanced",
-    kRectLocation: 8,
-    kScaleRotLocation: 9,
-    kColorLocation: 10,
-    kUVRectLocation: 11,
-
     VS: `#version 300 es
-        layout(location = 5) in vec2 a_pos;
-        layout(location = 8) in vec4 a_iRect;
-        layout(location = 9) in vec3 a_iScaleRot;
-        layout(location = 10) in vec4 a_iColor;
-        layout(location = 11) in vec4 a_iUVRect;
+        layout(location = 0) in vec2 a_pos;
+        layout(location = 8) in vec4 a_instRect;
+        layout(location = 9) in vec3 a_instScaleRot;
+        layout(location = 10) in vec4 a_instColor;
+        layout(location = 11) in vec4 a_instVec0; // UV rect
 
         uniform vec2 u_res;
 
@@ -357,22 +353,22 @@ const Rect2DInstancedShaderSource = {
         out vec4 v_color;
 
         void main() {
-            vec2 halfSize = a_iRect.zw;
-            vec2 ssPos = ((a_pos * halfSize * 2.0) - halfSize) * a_iScaleRot.xy;
+            vec2 halfSize = a_instRect.zw;
+            vec2 ssPos = ((a_pos * halfSize * 2.0) - halfSize) * a_instScaleRot.xy;
 
-            float sa = sin(a_iScaleRot.z);
-            float ca = cos(a_iScaleRot.z);
+            float sa = sin(a_instScaleRot.z);
+            float ca = cos(a_instScaleRot.z);
 
-            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
-                             ssPos.x * -sa + ssPos.y * ca);
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
 
-            vec2 zTo1 = (rPos + halfSize + a_iRect.xy) / u_res;
+            vec2 zTo1 = (rPos + halfSize + a_instRect.xy) / u_res;
             vec2 cs = (zTo1 * 2.0) - 1.0;
 
             gl_Position = vec4(cs, 0.0, 1.0);
 
-            v_uv0 = a_iUVRect.xy + (a_pos * a_iUVRect.zw);
-            v_color = a_iColor;
+            v_uv0 = a_instVec0.xy + (a_pos * a_instVec0.zw);
+            v_color = a_instColor;
         }
     `,
     FS: `#version 300 es
@@ -399,39 +395,39 @@ const Rect2DInstancedShaderSource = {
 */
 const LitRect2DInstancedShaderSource = {
     name: "LitRect2DInstanced",
-    // Rect2DInstancedShaderSource's vertex shader, plus v_pos (the pixel's position in design units) and the instance's scale and rotation
+    // Rect2DInstancedShaderSource's vertex shader, plus v_pos (the pixel's position in design units) and v_rotFlip, as in LightingSharedSource.VS
     VS: `#version 300 es
-        layout(location = 5) in vec2 a_pos;
-        layout(location = 8) in vec4 a_iRect;
-        layout(location = 9) in vec3 a_iScaleRot;
-        layout(location = 10) in vec4 a_iColor;
-        layout(location = 11) in vec4 a_iUVRect;
+        layout(location = 0) in vec2 a_pos;
+        layout(location = 8) in vec4 a_instRect;
+        layout(location = 9) in vec3 a_instScaleRot;
+        layout(location = 10) in vec4 a_instColor;
+        layout(location = 11) in vec4 a_instVec0; // UV rect
 
         uniform vec2 u_res;
 
         out vec2 v_uv0;
         out vec4 v_color;
         out vec2 v_pos;
-        flat out vec3 v_scaleRot;
+        flat out vec4 v_rotFlip;
 
         void main() {
-            vec2 halfSize = a_iRect.zw;
-            vec2 ssPos = ((a_pos * halfSize * 2.0) - halfSize) * a_iScaleRot.xy;
+            vec2 halfSize = a_instRect.zw;
+            vec2 ssPos = ((a_pos * halfSize * 2.0) - halfSize) * a_instScaleRot.xy;
 
-            float sa = sin(a_iScaleRot.z);
-            float ca = cos(a_iScaleRot.z);
+            float sa = sin(a_instScaleRot.z);
+            float ca = cos(a_instScaleRot.z);
 
-            vec2 rPos = vec2(ssPos.x * ca + ssPos.y * sa,
-                             ssPos.x * -sa + ssPos.y * ca);
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
 
-            v_pos = rPos + halfSize + a_iRect.xy;
+            v_pos = rPos + halfSize + a_instRect.xy;
 
             vec2 cs = ((v_pos / u_res) * 2.0) - 1.0;
             gl_Position = vec4(cs, 0.0, 1.0);
 
-            v_uv0 = a_iUVRect.xy + (a_pos * a_iUVRect.zw);
-            v_color = a_iColor;
-            v_scaleRot = a_iScaleRot;
+            v_uv0 = a_instVec0.xy + (a_pos * a_instVec0.zw);
+            v_color = a_instColor;
+            v_rotFlip = vec4(ca, sa, sign(a_instScaleRot.xy));
         }
     `,
     FS: `#version 300 es
@@ -465,7 +461,7 @@ const LitNormalMapRect2DInstancedShaderSource = {
         in vec2 v_uv0;
         in vec4 v_color;
         in vec2 v_pos;
-        flat in vec3 v_scaleRot;
+        flat in vec4 v_rotFlip; // (cos, sin, signX, signY)
         out vec4 fragColor;
         ${LightingSharedSource.FS}
         void main() {
@@ -473,11 +469,8 @@ const LitNormalMapRect2DInstancedShaderSource = {
             vec3 n = (texture(u_tex1, v_uv0).xyz * 2.0) - 1.0;
 
             // Into the view: mirror with the scale, then the vertex shader's rotation
-            n.xy *= sign(v_scaleRot.xy);
-
-            float sa = sin(v_scaleRot.z);
-            float ca = cos(v_scaleRot.z);
-            n.xy = vec2(n.x * ca + n.y * sa, n.x * -sa + n.y * ca);
+            n.xy *= v_rotFlip.zw;
+            n.xy = vec2(n.x * v_rotFlip.x - n.y * v_rotFlip.y, n.x * v_rotFlip.y + n.y * v_rotFlip.x);
 
             vec3 light = lightAll(vec3(v_pos, 0.0), normalize(n));
             fragColor = vec4(c.rgb * light, c.a) * v_color;
@@ -506,22 +499,18 @@ const LitNormalMapRect2DInstancedShaderSource = {
     its life. (1, 1, 0, 1) is one frame: the whole part.
 
     The mesh is a unit quad (-0.5, -0.5) - (0.5, 0.5), centered on the particle.
-    Per instance:
-        a_iMotion (startX, startY, velX, velY)  Design units, design units per second
-        a_iLife   (startTime, life, size)       Seconds, seconds, design units
-        a_iColor  (r, g, b, a)
+    Per instance (InstancedAttributes):
+        a_instColor (r, g, b, a)
+        a_instVec0  (startX, startY, velX, velY)  Motion: design units, design units per second
+        a_instVec1  (startTime, life, size, 0)    Life: seconds, seconds, design units; w unused
 */
 const Particles2DShaderSource = {
     name: "Particles2D",
-    kMotionLocation: 8,
-    kLifeLocation: 9,
-    kColorLocation: 10,
-
     VS: `#version 300 es
-        layout(location = 5) in vec2 a_pos;
-        layout(location = 8) in vec4 a_iMotion;
-        layout(location = 9) in vec3 a_iLife;
-        layout(location = 10) in vec4 a_iColor;
+        layout(location = 0) in vec2 a_pos;
+        layout(location = 10) in vec4 a_instColor;
+        layout(location = 11) in vec4 a_instVec0; // Motion
+        layout(location = 12) in vec4 a_instVec1; // Life
 
         uniform vec2 u_res;
         uniform vec4 u_vec0; // (gravityX, gravityY, endScale, time)
@@ -533,8 +522,8 @@ const Particles2DShaderSource = {
         out vec4 v_color;
 
         void main() {
-            float age = u_vec0.w - a_iLife.x;
-            float life = a_iLife.y;
+            float age = u_vec0.w - a_instVec1.x;
+            float life = a_instVec1.y;
 
             if (age < 0.0 || age >= life) {
                 gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); // Off-screen; all 4 corners collapse
@@ -544,8 +533,8 @@ const Particles2DShaderSource = {
             }
 
             float t = age / life;
-            vec2 center = a_iMotion.xy + (a_iMotion.zw * age) + (0.5 * u_vec0.xy * age * age);
-            float size = a_iLife.z * mix(1.0, u_vec0.z, t);
+            vec2 center = a_instVec0.xy + (a_instVec0.zw * age) + (0.5 * u_vec0.xy * age * age);
+            float size = a_instVec1.z * mix(1.0, u_vec0.z, t);
             vec2 p = center + (a_pos * size);
 
             gl_Position = vec4(((p / u_res) * 2.0) - 1.0, 0.0, 1.0);
@@ -558,7 +547,7 @@ const Particles2DShaderSource = {
             vec2 cell = vec2(frame - (row * cols), rows - 1.0 - row);
 
             v_uv0 = u_uvOffset + (((a_pos + 0.5 + cell) / vec2(cols, rows)) * u_uvTile);
-            v_color = vec4(a_iColor.rgb, a_iColor.a * (1.0 - t));
+            v_color = vec4(a_instColor.rgb, a_instColor.a * (1.0 - t));
         }
     `,
     FS: `#version 300 es

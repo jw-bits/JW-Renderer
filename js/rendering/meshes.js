@@ -127,9 +127,9 @@ class StaticMesh
         this.#count = 0;
     }
 
-    setVertexData(materialAttribName, data)
+    setVertexData(attribName, data)
     {
-        if (RenderAttributes.allAttribs.has(materialAttribName) === false)
+        if (RenderAttributes.allAttribs.has(attribName) === false)
             return false;
 
         if (data == null)
@@ -143,7 +143,7 @@ class StaticMesh
                 return false;
         }
 
-        const c = data.length / RenderAttributes.componentCount(materialAttribName);
+        const c = data.length / RenderAttributes.componentCount(attribName);
 
         if (this.#count !== 0 && this.#count !== c)
         {
@@ -152,8 +152,8 @@ class StaticMesh
         }
 
         this.#count = c;
-        this.#vertexBuffers.get(materialAttribName)?.unload(); // Replacing one
-        this.#vertexBuffers.set(materialAttribName, vb);
+        this.#vertexBuffers.get(attribName)?.unload(); // Replacing one
+        this.#vertexBuffers.set(attribName, vb);
             return true;
     }
 
@@ -162,11 +162,11 @@ class StaticMesh
         frame. data must be a Float32Array with as many vertices as before; the
         VAO keeps pointing at the same buffer, so bindAttribs() isn't needed again.
     */
-    updateVertexData(materialAttribName, data)
+    updateVertexData(attribName, data)
     {
-        const vb = this.#vertexBuffers.get(materialAttribName);
+        const vb = this.#vertexBuffers.get(attribName);
 
-        if (vb === undefined || data == null || (data.length / RenderAttributes.componentCount(materialAttribName)) !== this.#count)
+        if (vb === undefined || data == null || (data.length / RenderAttributes.componentCount(attribName)) !== this.#count)
             return false;
 
         return vb.update(data);
@@ -219,12 +219,12 @@ class StaticMesh
     {
         WGLV.context.bindVertexArray(this.#vao);
 
-        for (const [materialAttribName, vb] of this.#vertexBuffers)
+        for (const [attribName, vb] of this.#vertexBuffers)
         {
             WGLV.context.bindBuffer(WGLV.context.ARRAY_BUFFER, vb.getBufferId());
 
-            const numberOfComponents = RenderAttributes.componentCount(materialAttribName);
-            const shaderLocation = RenderAttributes.getLocation(materialAttribName);
+            const numberOfComponents = RenderAttributes.componentCount(attribName);
+            const shaderLocation = RenderAttributes.getLocation(attribName);
 
             if (shaderLocation !== -1)
             {
@@ -262,11 +262,13 @@ class StaticMesh
 
     The quad's 4 corners (x, y pairs, counter-clockwise from the bottom-left)
     go to RenderAttributes' position location. Each instance attribute is
-    [location, componentCount, offset in floats] within floatsPerInstance floats.
+    [InstancedAttributes name, offset in floats] within floatsPerInstance
+    floats; its location and component count come from InstancedAttributes.
 
     Usage:
         let mesh = new InstancedQuadMesh();
-        mesh.load(new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), 8, [[8, 4, 0], [9, 4, 4]]);
+        mesh.load(new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), 8,
+                  [[InstancedAttributes.kRect, 0], [InstancedAttributes.kColor, 4]]);
         mesh.setInstanceData(new Float32Array(capacity * 8)); // Allocates (and fills) the buffer
         mesh.updateInstanceData(data, 0, count * 8);          // Changes part of it
         shader.bind(); ...uniforms...
@@ -298,6 +300,17 @@ class InstancedQuadMesh
                 return false;
         }
 
+        for (const [name, offset] of attribs)
+        {
+            const size = InstancedAttributes.componentCount(name);
+
+            if (size === 0 || offset + size > floatsPerInstance)
+            {
+                console.error(`InstancedQuadMesh.load(): ${name} at float ${offset} isn't an InstancedAttributes name that fits in ${floatsPerInstance} floats`);
+                    return false;
+            }
+        }
+
         const gl = WGLV.context;
 
         this.#quadBuffer = gl.createBuffer();
@@ -322,8 +335,11 @@ class InstancedQuadMesh
         const strideBytes = floatsPerInstance * bytes;
         gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
 
-        for (const [location, size, offset] of attribs)
+        for (const [name, offset] of attribs)
         {
+            const location = InstancedAttributes.getLocation(name);
+            const size = InstancedAttributes.componentCount(name);
+
             gl.vertexAttribPointer(location, size, gl.FLOAT, false, strideBytes, offset * bytes);
             gl.enableVertexAttribArray(location);
             gl.vertexAttribDivisor(location, 1);

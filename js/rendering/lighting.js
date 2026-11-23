@@ -199,7 +199,7 @@ class DirectionalLight extends BaseLight
     passed in that declares the same uniforms (see LightingSharedSource).
 
     The ambient color is used as is (its intensity is always 1). The enabled
-    lights are uploaded into the first slots, and u_ambient's w is how many
+    lights with an intensity above 0 are uploaded into the first slots, and u_ambient's w is how many
     there are, so the shaders skip the empty slots.
 */
 class LightSet
@@ -266,8 +266,8 @@ class LightSet
 
     /*
         Uploads the ambient and the lights to the lit shaders built so far, and
-        to the Shaders in extraShaders (an array, or null). Enabled lights fill
-        the first slots and their count goes in u_ambient's w; the rest upload
+        to the Shaders in extraShaders (an array, or null). Enabled lights with
+        intensity > 0 fill the first slots and their count goes in u_ambient's w; the rest upload
         as off. Leaves the last shader bound.
     */
     apply(extraShaders = null)
@@ -314,12 +314,12 @@ class LightSet
 
         shader.bind();
 
-        // Enabled lights, packed into the first slots
+        // Enabled lights with intensity > 0, packed into the first slots; the rest would add nothing
         let count = 0;
 
         for (const light of this.#lights)
         {
-            if (light.isEnabled() === false)
+            if (light.isEnabled() === false || light.getIntensity() <= 0.0)
                 continue;
 
             const c = light.getColor();

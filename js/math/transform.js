@@ -2,8 +2,9 @@
     Transform2D - A 2D position, scale and rotation (radians).
 
     Rotation matches the 2D shaders: y runs up and a positive angle turns
-    clockwise. A Model2D rotates and scales about its center, but its
-    transform's position is its anchor (see Model2D.setPos()).
+    counter-clockwise (right-hand rule about +Z, toward the viewer). A
+    Model2D rotates and scales about its center, but its transform's
+    position is its anchor (see Model2D.setPos()).
 
     Multiplying: a * b puts b in a's space, so b is a child placed relative to
     its parent a. The result is b as seen from wherever a sits:
@@ -96,8 +97,8 @@ class Transform2D
         const s = Math.sin(this.#rotation);
         const c = Math.cos(this.#rotation);
 
-        out.set(this.#position.x + (sx * c) + (sy * s),
-                this.#position.y - (sx * s) + (sy * c));
+        out.set(this.#position.x + (sx * c) - (sy * s),
+                this.#position.y + (sx * s) + (sy * c));
             return out;
     }
 
@@ -121,8 +122,8 @@ class Transform2D
         const s = Math.sin(ar);
         const c = Math.cos(ar);
 
-        return out.set(ax + (bx * c) + (by * s),
-                       ay - (bx * s) + (by * c),
+        return out.set(ax + (bx * c) - (by * s),
+                       ay + (bx * s) + (by * c),
                        asx * bsx,
                        asy * bsy,
                        ar + br);

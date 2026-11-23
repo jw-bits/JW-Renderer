@@ -26,11 +26,11 @@ class Vector2
 
 	normalize()
     {
-        let ls = this.lengthSquared();
+        const ls = this.lengthSquared();
 
         if (ls > MathDefines.kEpsilon)
         {
-            let oneOverLen = 1.0 / Math.sqrt(ls);
+            const oneOverLen = 1.0 / Math.sqrt(ls);
         
             this.x *= oneOverLen;
             this.y *= oneOverLen;

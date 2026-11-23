@@ -47,7 +47,7 @@ class Matrix4
     // Sets all elements to zero
 	zero()
     {
-        for (let i = 0; i < 16; ++i)
+        for (const i = 0; i < 16; ++i)
             this.m[i] = 0.0;
     } 
 
@@ -77,12 +77,12 @@ class Matrix4
     }	
 
     static multiply(a, b) {
-        let out = new Matrix4();
-        let ae = a.m, be = b.m, te = out.m;
-        let a00 = ae[0], a01 = ae[1], a02 = ae[2], a03 = ae[3];
-        let a10 = ae[4], a11 = ae[5], a12 = ae[6], a13 = ae[7];
-        let a20 = ae[8], a21 = ae[9], a22 = ae[10], a23 = ae[11];
-        let a30 = ae[12], a31 = ae[13], a32 = ae[14], a33 = ae[15];
+        const out = new Matrix4();
+        const ae = a.m, be = b.m, te = out.m;
+        const a00 = ae[0], a01 = ae[1], a02 = ae[2], a03 = ae[3];
+        const a10 = ae[4], a11 = ae[5], a12 = ae[6], a13 = ae[7];
+        const a20 = ae[8], a21 = ae[9], a22 = ae[10], a23 = ae[11];
+        const a30 = ae[12], a31 = ae[13], a32 = ae[14], a33 = ae[15];
 
         let b0 = be[0], b1 = be[1], b2 = be[2], b3 = be[3];
         te[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
@@ -111,37 +111,37 @@ class Matrix4
     }
 
     static fromTranslation(x, y, z) {
-        let mat = new Matrix4();
+        const mat = new Matrix4();
         mat.m[12] = x; mat.m[13] = y; mat.m[14] = z;
         return mat;
     }
 
     static fromRotationY(rad) {
-        let mat = new Matrix4();
-        let s = Math.sin(rad), c = Math.cos(rad);
+        const mat = new Matrix4();
+        const s = Math.sin(rad), c = Math.cos(rad);
         mat.m[0] = c; mat.m[2] = -s;
         mat.m[8] = s; mat.m[10] = c;
         return mat;
     }
 
     static fromRotationX(rad) {
-        let mat = new Matrix4();
-        let s = Math.sin(rad), c = Math.cos(rad);
+        const mat = new Matrix4();
+        const s = Math.sin(rad), c = Math.cos(rad);
         mat.m[5] = c; mat.m[6] = s;
         mat.m[9] = -s; mat.m[10] = c;
         return mat;
     }
 
     static fromRotationZ(rad) {
-        let mat = new Matrix4();
-        let s = Math.sin(rad), c = Math.cos(rad);
+        const mat = new Matrix4();
+        const s = Math.sin(rad), c = Math.cos(rad);
         mat.m[0] = c; mat.m[1] = s;
         mat.m[4] = -s; mat.m[5] = c;
         return mat;
     }
 
     static fromScaling(x, y, z) {
-        let mat = new Matrix4();
+        const mat = new Matrix4();
         mat.m[0] = x; mat.m[5] = y; mat.m[10] = z;
         return mat;
     }
@@ -158,7 +158,7 @@ class Matrix4
     */
     static orthographicMatrix(wid, hgt, zNear, zFar)
     {
-        let mat = new Matrix4();
+        const mat = new Matrix4();
 
         mat.set(2.0 / wid, 0.0, 0.0, 0.0,
                 0.0, 2.0 / hgt, 0.0, 0.0,
@@ -170,9 +170,9 @@ class Matrix4
 
     static perspectiveMatrix(fovy, aspect, zNear, zFar)
     {
-        let mat = new Matrix4();
-        let f = 1.0 / Math.tan(fovy / 2.0);
-        let nf = 1.0 / (zNear - zFar);
+        const mat = new Matrix4();
+        const f = 1.0 / Math.tan(fovy / 2.0);
+        const nf = 1.0 / (zNear - zFar);
 
         mat.set(
             f / aspect, 0.0, 0.0, 0.0,
@@ -185,24 +185,24 @@ class Matrix4
     }
 
     static multiplyVector4(mat, vec) {
-        let m = mat.m;
-        let x = vec.x, y = vec.y, z = vec.z, w = vec.w;
+        const m = mat.m;
+        const x = vec.x, y = vec.y, z = vec.z, w = vec.w;
 
-        let outX = m[0] * x + m[4] * y + m[8] * z + m[12] * w;
-        let outY = m[1] * x + m[5] * y + m[9] * z + m[13] * w;
-        let outZ = m[2] * x + m[6] * y + m[10] * z + m[14] * w;
-        let outW = m[3] * x + m[7] * y + m[11] * z + m[15] * w;
+        const outX = m[0] * x + m[4] * y + m[8] * z + m[12] * w;
+        const outY = m[1] * x + m[5] * y + m[9] * z + m[13] * w;
+        const outZ = m[2] * x + m[6] * y + m[10] * z + m[14] * w;
+        const outW = m[3] * x + m[7] * y + m[11] * z + m[15] * w;
 
         return new Vector4(outX, outY, outZ, outW);
     }
 
     static multiplyVector3(mat, vec) {
-        let m = mat.m;
-        let x = vec.x, y = vec.y, z = vec.z;
+        const m = mat.m;
+        const x = vec.x, y = vec.y, z = vec.z;
 
-        let outX = m[0] * x + m[4] * y + m[8] * z + m[12];
-        let outY = m[1] * x + m[5] * y + m[9] * z + m[13];
-        let outZ = m[2] * x + m[6] * y + m[10] * z + m[14];
+        const outX = m[0] * x + m[4] * y + m[8] * z + m[12];
+        const outY = m[1] * x + m[5] * y + m[9] * z + m[13];
+        const outZ = m[2] * x + m[6] * y + m[10] * z + m[14];
 
         return new Vector3(outX, outY, outZ);
     }

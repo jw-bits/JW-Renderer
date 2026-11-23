@@ -23,8 +23,8 @@ class MathUtil
 
     static randomFloat(minF, maxF)
     {
-        let r = Math.random();
-        let f = (r * (maxF - minF)) + minF;
+        const r = Math.random();
+        const f = (r * (maxF - minF)) + minF;
             return f;
     }
 
@@ -524,7 +524,7 @@ class Oscillator
     */
     init(_a, _b, _duration)
     {
-        let interpolator = new Interpolator();
+        const interpolator = new Interpolator();
 
         if (interpolator.init(_a, _b, _duration) === false)
             return false;
@@ -536,7 +536,7 @@ class Oscillator
     // Like init(), along an easing curve such as Easing.kQuadraticInOut
     initEasing(_a, _b, _duration, _easingType)
     {
-        let easing = new Easing();
+        const easing = new Easing();
 
         if (easing.init(_a, _b, _duration, _easingType) === false)
             return false;

@@ -43,42 +43,86 @@ class RenderAttributes
     // 3-component
     static kPosition = "a_pos";
     static kNormal = "a_norm";
-    
+
     // 4-component
+    static kTangent = "a_tangent"; // (X, Y, Z, W): W is the bitangent's handedness, +1 or -1
     static kColor = "a_color";
 
-    static allAttribs = new Map();
+    static allAttribs = new Map(); // Name -> { count, location }; locations must match the shaders' layout(location = N)
 
-    static getLocation(name) {
-        switch(name) {
-            case RenderAttributes.kUV0: return 1;
-            case RenderAttributes.kUV1: return 2;
-            case RenderAttributes.kUV2: return 3;
-            case RenderAttributes.kUV3: return 4;
-            case RenderAttributes.kPosition: return 5;
-            case RenderAttributes.kNormal: return 6;
-            case RenderAttributes.kColor: return 7;
-            
-            default: return -1;
-        }
+    // -1 for a name that isn't listed
+    static getLocation(name)
+    {
+        const a = RenderAttributes.allAttribs.get(name);
+            return (a !== undefined) ? a.location : -1;
     }
 
+    // 0 for a name that isn't listed
     static componentCount(name)
     {
-        if (this.allAttribs.has(name))
-            return this.allAttribs.get(name);
-        else
-            return 0;
+        const a = RenderAttributes.allAttribs.get(name);
+            return (a !== undefined) ? a.count : 0;
     }
 
     static {
-        this.allAttribs.set(RenderAttributes.kUV0, 2);
-        this.allAttribs.set(RenderAttributes.kUV1, 2);
-        this.allAttribs.set(RenderAttributes.kUV2, 2);
-        this.allAttribs.set(RenderAttributes.kUV3, 2);
-        this.allAttribs.set(RenderAttributes.kPosition, 3);
-        this.allAttribs.set(RenderAttributes.kNormal, 3);
-        this.allAttribs.set(RenderAttributes.kColor, 4);
+        const all = RenderAttributes.allAttribs;
+
+        all.set(RenderAttributes.kPosition, { count: 3, location: 0 }); // Always present; some drivers are slow when location 0 isn't an enabled array
+        all.set(RenderAttributes.kUV0,      { count: 2, location: 1 });
+        all.set(RenderAttributes.kUV1,      { count: 2, location: 2 });
+        all.set(RenderAttributes.kUV2,      { count: 2, location: 3 });
+        all.set(RenderAttributes.kUV3,      { count: 2, location: 4 });
+        all.set(RenderAttributes.kNormal,   { count: 3, location: 5 });
+        all.set(RenderAttributes.kTangent,  { count: 4, location: 6 });
+        all.set(RenderAttributes.kColor,    { count: 4, location: 7 });
+    }
+}
+
+/*
+    Every per-instance attribute an instanced shader may use (see
+    InstancedQuadMesh). Locations 8 - 14 are past RenderAttributes' (0 - 7),
+    so a mesh's position (location 0) can be drawn alongside them.
+    Shaders without a named meaning for a value pack it into a_instVec0 - a_instVec3.
+*/
+class InstancedAttributes
+{
+    // 3-component
+    static kScaleRot = "a_instScaleRot"; // (scaleX, scaleY, rotation around Z as radians)
+
+    // 4-component
+    static kRect = "a_instRect";         // (x, y, width / 2, height / 2); (x, y) is the bottom-left corner
+    static kColor = "a_instColor";       // (R, G, B, A) as floats
+    static kVector0 = "a_instVec0";      // (X, Y, Z, W) as floats
+    static kVector1 = "a_instVec1";      // (X, Y, Z, W) as floats
+    static kVector2 = "a_instVec2";      // (X, Y, Z, W) as floats
+    static kVector3 = "a_instVec3";      // (X, Y, Z, W) as floats
+
+    static allAttribs = new Map(); // Name -> { count, location }; locations must match the shaders' layout(location = N)
+
+    // -1 for a name that isn't listed
+    static getLocation(name)
+    {
+        const a = InstancedAttributes.allAttribs.get(name);
+            return (a !== undefined) ? a.location : -1;
+    }
+
+    // 0 for a name that isn't listed
+    static componentCount(name)
+    {
+        const a = InstancedAttributes.allAttribs.get(name);
+            return (a !== undefined) ? a.count : 0;
+    }
+
+    static {
+        const all = InstancedAttributes.allAttribs;
+
+        all.set(InstancedAttributes.kRect,     { count: 4, location: 8 });
+        all.set(InstancedAttributes.kScaleRot, { count: 3, location: 9 });
+        all.set(InstancedAttributes.kColor,    { count: 4, location: 10 });
+        all.set(InstancedAttributes.kVector0,  { count: 4, location: 11 });
+        all.set(InstancedAttributes.kVector1,  { count: 4, location: 12 });
+        all.set(InstancedAttributes.kVector2,  { count: 4, location: 13 });
+        all.set(InstancedAttributes.kVector3,  { count: 4, location: 14 });
     }
 }
 

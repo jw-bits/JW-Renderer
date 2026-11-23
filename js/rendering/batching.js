@@ -433,10 +433,10 @@ class MaterialBatcher
 
         // Unit quad (0,0) - (1,1), shared by every instance, plus the interleaved per-instance values
         const attribs = [
-            [Rect2DInstancedShaderSource.kRectLocation, 4, 0],
-            [Rect2DInstancedShaderSource.kScaleRotLocation, 3, 4],
-            [Rect2DInstancedShaderSource.kColorLocation, 4, 7],
-            [Rect2DInstancedShaderSource.kUVRectLocation, 4, 11]
+            [InstancedAttributes.kRect, 0],
+            [InstancedAttributes.kScaleRot, 4],
+            [InstancedAttributes.kColor, 7],
+            [InstancedAttributes.kVector0, 11] // UV rect
         ];
 
         if (this.#instMesh.load(new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), MaterialBatcher.#kFloatsPerInstance, attribs) === false)

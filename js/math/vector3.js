@@ -22,7 +22,7 @@ class Vector3
     
 	cross(vec)
     {
-        let v = new Vector3((this.y * vec.z) - (vec.y * this.z), 
+        const v = new Vector3((this.y * vec.z) - (vec.y * this.z), 
                             (this.z * vec.x) - (vec.z * this.x),
                             (this.x * vec.y) - (vec.x * this.y));
         
@@ -52,11 +52,11 @@ class Vector3
 
 	normalize()
     {
-        let ls = this.lengthSquared();
+        const ls = this.lengthSquared();
 
         if (ls > MathDefines.kEpsilon)
         {
-            let oneOverLen = 1.0 / Math.sqrt(ls);
+            const oneOverLen = 1.0 / Math.sqrt(ls);
         
             this.x *= oneOverLen;
             this.y *= oneOverLen;
