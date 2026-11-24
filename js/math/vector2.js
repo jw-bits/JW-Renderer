@@ -64,14 +64,14 @@ class Vector2
     static kZero = Object.freeze(new Vector2());
     static kOne = Object.freeze(new Vector2(1.0, 1.0));
 
+    // *** Static Methods: new, changeable copies of the constants ***
+
+    static zero() { return new Vector2(); }
+    static one() { return new Vector2(1.0, 1.0); }
+
     static
     {
         for (const name of ["kZero", "kOne"])
             Object.defineProperty(Vector2, name, { writable: false, configurable: false });
     }
-
-    // *** Static Methods: new, changeable copies of the constants ***
-
-    static zero() { return new Vector2(); }
-    static one() { return new Vector2(1.0, 1.0); }
 }

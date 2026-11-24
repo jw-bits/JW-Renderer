@@ -72,7 +72,7 @@ class SpriteSequence
     Speed scales time (2 is double speed, 0 freezes it). The event callback hears when
     a one-shot sequence completes or a looping one starts another cycle.
 
-    Drawing: render() uses Sprite's own shader. Sprites also batch: MaterialBatcher
+    Drawing: render() uses Sprite's own shader. Sprites also batch: Batcher
     draws them with its instanced shader, grouped by texture, so Sprites and Rect2Ds
     drawing the same atlas share one draw call. submit() captures the current frame.
 
@@ -96,15 +96,15 @@ class SpriteSequence
 
     Sprites load from a Texture (the Sprite makes its own Material) or a Material
     built on Sprite.getDefaultShader(), e.g. one shared from MaterialManager.
-    With a SubTexture of a TextureAtlas, frames (and the grid) are within it,
+    With an AtlasSubTexture of a TextureAtlas, frames (and the grid) are within it,
     as if it were the whole texture.
 */
 class Sprite extends Model2D
 {
     static #kUVScratch = new Vector4();   // For uploading u_vec1
 
-    #uvRect;         // The frame drawn now, within the texture (or SubTexture)
-    #atlasUVRect;    // #uvRect mapped into the atlas, when the texture is a SubTexture (see getUVRect())
+    #uvRect;         // The frame drawn now, within the texture (or AtlasSubTexture)
+    #atlasUVRect;    // #uvRect mapped into the atlas, when the texture is an AtlasSubTexture (see getUVRect())
 
     #gridRows;       // Grid over the whole atlas, for createSequence() and showFrame() without a sequence
     #gridCols;
@@ -135,9 +135,9 @@ class Sprite extends Model2D
 
     /*
         _source is one of:
-            A loaded Texture (or a SubTexture of a TextureAtlas)
+            A loaded Texture (or an AtlasSubTexture of a TextureAtlas)
             A loaded Material built on Sprite.getDefaultShader()
-        rows x cols is the grid over the whole texture or SubTexture (1 x 1: all of it
+        rows x cols is the grid over the whole texture or AtlasSubTexture (1 x 1: all of it
         is one frame). _width / _height are the size in design units; by default one grid
         frame's size in texture pixels. Shows grid frame 0. Returns false on failure.
     */
@@ -442,14 +442,14 @@ class Sprite extends Model2D
     // Always true once loaded: load() only accepts Materials on Sprite's shader
     canInstance() { return this.isLoaded(); }
 
-    // The frame drawn now, as part of the bound texture: mapped into the atlas for a SubTexture
+    // The frame drawn now, as part of the bound texture: mapped into the atlas for an AtlasSubTexture
     getUVRect()
     {
         const sub = this._getSubTexture();
             return (sub !== null) ? sub.mapUVRect(this.#uvRect, this.#atlasUVRect) : this.#uvRect;
     }
 
-    // Uploads the frame's UV rect (the captured one from MaterialBatcher, or this sprite's own), then draws
+    // Uploads the frame's UV rect (the captured one from Batcher, or this sprite's own), then draws
     draw(transform, color, uvRect = null)
     {
         if (this.isLoaded() === false)

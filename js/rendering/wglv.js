@@ -4,7 +4,7 @@
     WGLV (WebGL View) - The WebGL2 context and fitting the view to the
     device: the app's fixed design resolution, letter-boxing it into the
     canvas at the device's physical resolution, clearing, and converting
-    input positions. Cameras and clipping are ClipSpace's (camera.js).
+    input positions. Cameras and clipping are ClipSpace's (render_utils.js).
 
     Everything is drawn in design units: (0, 0) is the bottom-left of the
     design area and (getWidth(), getHeight()) is the top-right, whatever the
@@ -74,6 +74,7 @@ class WGLV
 
     static #barColor = new Vector4(0, 0, 0, 1);
     static #clearColor = new Vector4(0, 0, 0, 1);
+    static #kViewRect = { x: 0, y: 0, w: 0, h: 0 }; // Scratch: beginFrame()'s scissor, in canvas pixels
 
     static #kListenerNames = ["onRasterScaleChanged", "onContextLost", "onContextRestored"];
 
@@ -116,6 +117,7 @@ class WGLV
 
         c.addEventListener("webglcontextlost", (e) => WGLV.#onContextLost(e));
         c.addEventListener("webglcontextrestored", () => WGLV.#onContextRestored());
+        RenderState.applyDefaults();
             return true;
     }
 
@@ -235,15 +237,20 @@ class WGLV
 
         WGLV.restoreView();
 
-        gl.disable(gl.SCISSOR_TEST);
+        RenderState.setScissor(null);
         gl.clearColor(WGLV.#barColor.x, WGLV.#barColor.y, WGLV.#barColor.z, WGLV.#barColor.w);
         gl.clear(bits);
 
-        gl.enable(gl.SCISSOR_TEST);
-        gl.scissor(WGLV.#viewX, WGLV.#viewY, WGLV.#viewW, WGLV.#viewH);
+        let view = WGLV.#kViewRect;
+        view.x = WGLV.#viewX;
+        view.y = WGLV.#viewY;
+        view.w = WGLV.#viewW;
+        view.h = WGLV.#viewH;
+
+        RenderState.setScissor(view);
         gl.clearColor(WGLV.#clearColor.x, WGLV.#clearColor.y, WGLV.#clearColor.z, WGLV.#clearColor.w);
         gl.clear(bits);
-        gl.disable(gl.SCISSOR_TEST); // The viewport already clips drawing to the view
+        RenderState.setScissor(null); // The viewport already clips drawing to the view
     }
 
     // A point in page (client) pixels, e.g. from a mouse event, in design units with +Y up.
@@ -275,7 +282,7 @@ class WGLV
     static #onContextRestored()
     {
         WGLV.#isContextLost = false;
-        RenderState.invalidate();
+        RenderState.applyDefaults(); // A new context starts with GL's defaults, not ours
         WGLV.resizeToWindow(); // A new context: the viewport again
         WGLV.#notify("onContextRestored");
     }

@@ -152,7 +152,7 @@ class StaticMesh
 /*
     InstancedQuadMesh - One quad drawn many times in a single call, with
     per-instance values read from an interleaved float buffer. Used by
-    MaterialBatcher (Rect2Ds, Sprites) and Particles2D.
+    Batcher (Rect2Ds, Sprites) and Particles2D.
 
     The quad's 4 corners (x, y pairs, counter-clockwise from the bottom-left)
     go to RenderAttributes' position location. Each instance attribute is

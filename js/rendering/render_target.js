@@ -4,11 +4,12 @@
     Render targets: drawing into a texture instead of the screen, for post
     effects (post_effects.js), cached UI, transitions, minimaps and the like.
 
-        RenderTexture      A texture a RenderTarget draws into; a BaseTexture, so a Rect2D can draw it
-        RenderTarget       A framebuffer with a RenderTexture, sized in pixels or to the view
+        RenderTarget       A framebuffer with a RenderTexture (textures.js), sized in pixels or to the view
         RenderTargets      The stack of targets being drawn into (static)
         RenderTargetPool   Temporary targets, lent out and taken back each frame (static)
-        CachedLayer        Something drawn once into a target, then shown as one textured rect
+
+    CachedLayer (batching.js) is built on them: something drawn once into a
+    target, then shown as one textured rect.
 
     Usage:
         let minimap = new RenderTarget();
@@ -47,88 +48,6 @@
     back (onContextRestored, see WGLV.addListeners()); their contents are
     lost, so getVersion() goes up.
 */
-
-/*
-    RenderTexture - The color texture of a RenderTarget. RenderTarget makes it
-    and sizes it; draw it like any other texture (Rect2D, Material). Rows run
-    up, like the other textures (flipped on load), so it draws the right way up.
-    No mipmaps.
-*/
-class RenderTexture extends BaseTexture
-{
-    #texId;
-    #isFloat;
-
-    constructor()
-    {
-        super();
-
-        this.#texId = null;
-        this.#isFloat = false;
-    }
-
-    /*
-        For RenderTarget: makes the GL texture (or gives it a new size), RGBA8, or
-        RGBA16F with isFloat. The pixels are undefined until drawn.
-    */
-    allocate(width, height, isFloat)
-    {
-        const gl = WGLV.context;
-
-        if (this.#texId === null)
-            this.#texId = gl.createTexture();
-
-        gl.bindTexture(gl.TEXTURE_2D, this.#texId);
-
-        if (isFloat === true)
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
-        else
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-
-        // Only used when no sampler is bound; a Material always binds one
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-
-        this.#isFloat = (isFloat === true);
-        this._setSize(width, height);
-    }
-
-    // The GL texture, for attaching to a framebuffer; null if not allocated
-    getGLTexture() { return this.#texId; }
-
-    isFloat() { return this.#isFloat; }
-    isLoaded() { return (this.#texId !== null); }
-
-    bind()
-    {
-        if (this.#texId === null)
-        {
-            console.error("RenderTexture.bind(): it has no GL texture; load its RenderTarget first");
-                return;
-        }
-
-        WGLV.context.bindTexture(WGLV.context.TEXTURE_2D, this.#texId);
-    }
-
-    unload()
-    {
-        if (this.#texId === null)
-            return;
-
-        WGLV.context.deleteTexture(this.#texId);
-        this.#texId = null;
-        this._setSize(0, 0);
-    }
-
-    // For RenderTarget after a lost context: the old GL texture is gone, so forget it without deleting it
-    forget()
-    {
-        this.#texId = null;
-    }
-}
 
 /*
     RenderTarget - A framebuffer drawing into a RenderTexture.
@@ -345,14 +264,17 @@ class RenderTarget
         const gl = WGLV.context;
         const stencil = (this.#hasStencil === true) ? [gl.DEPTH_STENCIL_ATTACHMENT] : [];
 
-        gl.disable(gl.SCISSOR_TEST); // Blits are scissored too
-
         if (this.#msaaFbo !== null)
         {
+            const scissor = RenderState.getScissor();
+            RenderState.setScissor(null); // Blits are scissored too
+
             gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.#msaaFbo);
             gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.#fbo);
             gl.blitFramebuffer(0, 0, this.#width, this.#height, 0, 0, this.#width, this.#height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
             gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, [gl.COLOR_ATTACHMENT0, ...stencil]);
+
+            RenderState.setScissor(scissor);
         }
         else if (stencil.length > 0)
         {
@@ -385,13 +307,15 @@ class RenderTarget
         if (this.resize(w, h) === false)
             return false;
 
-        gl.disable(gl.SCISSOR_TEST);
+        const scissor = RenderState.getScissor();
+        RenderState.setScissor(null); // Blits are scissored too
+
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.#fbo);
         gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
 
         RenderTargets.bindCurrent();
-        ClipSpace.refresh(); // The scissor test, as it was
+        RenderState.setScissor(scissor);
             return true;
     }
 
@@ -708,7 +632,7 @@ class RenderTargets
                 bits |= gl.STENCIL_BUFFER_BIT;
             }
 
-            gl.disable(gl.SCISSOR_TEST);
+            RenderState.setScissor(null); // All of it; resetState() below sets it for the target
             gl.clearColor(clearColor.x, clearColor.y, clearColor.z, clearColor.w);
             gl.clear(bits);
         }
@@ -858,143 +782,5 @@ class RenderTargetPool
             e.target.unload();
 
         RenderTargetPool.#entries = [];
-    }
-}
-
-/*
-    CachedLayer - Something that changes rarely (a panel of UI, a static
-    background) drawn once into its own target, then shown each frame as a
-    single textured rect: one draw call however much it holds.
-
-        let panel = new CachedLayer();
-        panel.load(100, 600, 500, 300);              // Design units: what it covers on the screen
-
-        // Each frame
-        panel.update(() => {                         // Draws only when needed (see below)
-            uiBatcher.submit(...);
-            uiBatcher.render();
-        });
-        panel.submit(batcher, Layers.kUI);           // Or panel.render()
-
-        panel.markDirty();                           // After changing what it shows
-
-    It's drawn again when marked dirty, when the view scale changes (so it
-    stays sharp: its pixel size is its design size times the view scale) and
-    after its contents are lost (a lost context). The draw function draws in
-    screen design units; only what falls inside the layer's rect is kept.
-*/
-class CachedLayer
-{
-    #target;
-    #rect;        // Rect2D showing the target's texture
-    #area;        // Vector4: x, y, width, height in design units
-    #isDirty;
-    #drawnScale;  // The view scale it was last drawn at
-    #drawnVersion;
-
-    constructor()
-    {
-        this.#target = new RenderTarget();
-        this.#rect = new Rect2D();
-        this.#area = new Vector4();
-        this.#isDirty = true;
-        this.#drawnScale = 0.0;
-        this.#drawnVersion = -1;
-    }
-
-    /*
-        Covers the design rect (x, y, width, height). options: { format, samples } as for
-        RenderTarget (samples smooths shapes' edges). Returns false on failure.
-    */
-    load(x, y, width, height, options = null)
-    {
-        if (Number.isFinite(x) === false || Number.isFinite(y) === false || Number.isFinite(width) === false ||
-            Number.isFinite(height) === false || width <= 0.0 || height <= 0.0)
-        {
-            console.error("CachedLayer.load() needs a position and a size above 0");
-                return false;
-        }
-
-        const size = CachedLayer.#pixelSize(width, height);
-
-        if (this.#target.loadFixed(size.width, size.height, options) === false)
-            return false;
-
-        this.#target.setDesignRect(x, y, width, height);
-        this.#area.set(x, y, width, height);
-
-        const material = MaterialManager.load(Rect2D.getDefaultShader(), [this.#target.getTexture()], null, BlendMode.kPremultiplied);
-
-        if (material === null || this.#rect.load(material, width, height) === false)
-        {
-            console.error("CachedLayer.load() couldn't make the rect that shows it");
-            this.#target.unload();
-                return false;
-        }
-
-        this.#rect.setPos(x, y);
-        this.#isDirty = true;
-            return true;
-    }
-
-    // Draws it again on the next update()
-    markDirty() { this.#isDirty = true; }
-
-    // True if the next update() will draw
-    needsRedraw()
-    {
-        return (this.#isDirty === true || this.#drawnScale !== WGLV.getViewScale() || this.#drawnVersion !== this.#target.getVersion());
-    }
-
-    // Calls drawFn (which draws in screen design units) into the layer if it needs drawing. Returns true if it drew.
-    update(drawFn)
-    {
-        if (this.#target.isLoaded() === false || this.needsRedraw() === false)
-            return false;
-
-        // Sharp at the view's scale
-        const scale = WGLV.getViewScale();
-
-        if (scale !== this.#drawnScale)
-        {
-            const size = CachedLayer.#pixelSize(this.#area.z, this.#area.w);
-            this.#target.resize(size.width, size.height);
-        }
-
-        if (RenderTargets.push(this.#target) === false)
-            return false;
-
-        drawFn();
-        RenderTargets.pop();
-
-        this.#isDirty = false;
-        this.#drawnScale = scale;
-        this.#drawnVersion = this.#target.getVersion();
-            return true;
-    }
-
-    // Queues the layer on a batcher layer (one instanced quad)
-    submit(batcher, layer) { return batcher.submit(this.#rect, layer); }
-
-    render() { this.#rect.render(); }
-
-    // The Rect2D showing it (e.g. to tint or fade it with setColor()); don't load it again
-    getRect2D() { return this.#rect; }
-    getTarget() { return this.#target; }
-
-    unload()
-    {
-        this.#rect.unload();
-        this.#target.unload();
-        this.#isDirty = true;
-        this.#drawnScale = 0.0;
-    }
-
-    // *** Internal Methods ***
-
-    static #pixelSize(width, height)
-    {
-        const scale = WGLV.getViewScale();
-            return { width: Math.max(1, Math.ceil(width * scale)), height: Math.max(1, Math.ceil(height * scale)) };
     }
 }

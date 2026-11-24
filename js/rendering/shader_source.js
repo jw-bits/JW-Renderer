@@ -341,7 +341,7 @@ const SpriteShaderSource = {
 
 /*
     Instanced Rect2D: draws many Rect2Ds that share a material in one draw call
-    (see MaterialBatcher), and Sprites too. Same math as Rect2DShaderSource /
+    (see Batcher), and Sprites too. Same math as Rect2DShaderSource /
     SpriteShaderSource, but the per-rect values come from instance attributes
     instead of uniforms.
 
@@ -401,7 +401,7 @@ const Rect2DInstancedShaderSource = {
 
 /*
     Lit instanced Rect2D: Rect2DInstancedShaderSource lit like
-    LitRect2DShaderSource, for MaterialBatcher's lit layers. Same instance
+    LitRect2DShaderSource, for Batcher's lit layers. Same instance
     attributes and locations, so it draws with the same mesh. The lights come
     from a LightSet (lighting.js).
 */
@@ -502,7 +502,7 @@ const LitNormalMapRect2DInstancedShaderSource = {
 
     Uniforms: u_vec0 = (gravityX, gravityY, endScale, time), time in seconds.
     u_uvOffset / u_uvTile are the part of the texture drawn on each particle:
-    (0, 0) / (1, 1) for all of it, or a SubTexture's UV rect (see TextureAtlas).
+    (0, 0) / (1, 1) for all of it, or an AtlasSubTexture's UV rect (see TextureAtlas).
 
     Frames: u_vec1 = (cols, rows, firstFrame, frameCount) splits that part into
     a cols x rows grid, numbered row by row from the top-left like Sprite's.

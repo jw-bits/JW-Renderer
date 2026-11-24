@@ -21,9 +21,18 @@
     of the model sits on it (bottom-left by default). The model keeps its
     alignment when its size changes, e.g. centered text stays centered.
 
-    Transform: the anchor, scale and rotation are a Transform2D (getTransform()),
-    changed through setPos(), setScale() and setRotation(). The model scales
-    and rotates about its center.
+    Transform: a Model2D is an Entity (entity.js). Its local transform's
+    position is the anchor, changed through setPos() (or setPosition(), which
+    keeps the alignment), setScale(), setRotation() and setTransform(). The
+    model scales and rotates about its center.
+
+    Parents: as a child, the model's center is placed by its parents' world
+    transform, and their scale and rotation add to its own.
+    getDrawTransform() is what it's drawn with: render() and Batcher use it.
+    getPos(), getX() and getY() stay local (the bottom-left corner relative to
+    the parent); getWorldPos() is the corner it's drawn at. A model's own
+    children are placed relative to its anchor, so center it
+    (Alignment.kMiddleCenter) for children to circle its middle.
 
     Raster scale: a model that draws into a texture at screen resolution can
     call listenForRasterScale(true) and override onRasterScaleChanged(newScale)
@@ -32,27 +41,27 @@
 
     UV rect: the part of the texture a model draws (getUVRect()); the whole
     texture unless a subclass says otherwise (Sprite draws one atlas frame,
-    Rect2D can tile and offset it). With a SubTexture (see TextureAtlas) in
-    texture unit 0, it's that SubTexture's part of the atlas, and a Sprite's
+    Rect2D can tile and offset it). With an AtlasSubTexture (see TextureAtlas) in
+    texture unit 0, it's that AtlasSubTexture's part of the atlas, and a Sprite's
     frames are within it.
 
-    Instancing: canInstance() says whether MaterialBatcher may draw the model
+    Instancing: canInstance() says whether Batcher may draw the model
     with its instanced shader: a plain quad filling width x height, drawing a
     UV rect of texture unit 0, tinted by its color. It's false unless a
     subclass overrides it; Rect2D (on its default shader), Text2D and Sprite do.
 */
-class Model2D
+class Model2D extends Entity
 {
     // Scratch values for uploading uniforms in render()
     static #kRect = new Vector4();
     static #kScaleRot = new Vector3();
     static #kUVOffset = new Vector2();
     static #kUVTile = new Vector2();
-    static #kDrawTransform = new Transform2D(); // render(): the transform at the bottom-left corner
+    static #kDrawTransform = new Transform2D(); // render() and getWorldPos(): the transform at the bottom-left corner
+    static #kCenter = new Vector2();            // getDrawTransform()
 
-    #transform;   // Position is the anchor (where setPos() put it), plus scale and rotation
-    #align;       // Which part of the model sits on the anchor
-    #position;    // The bottom-left corner, from the anchor, alignment and size
+    #align;       // Which part of the model sits on the anchor (the local transform's position)
+    #position;    // The bottom-left corner, local: from the anchor, alignment and size
     #material;
     #width;
     #height;
@@ -62,9 +71,10 @@ class Model2D
     #isListening;   // For raster scale changes
     #viewListeners; // Given to WGLV.addListeners() while listening
 
-    constructor()
+    constructor(_name = "")
     {
-        this.#transform = new Transform2D();
+        super(_name);
+
         this.#align = Alignment.kBottomLeft;
         this.#position = new Vector2();
         this.#material = null;
@@ -77,51 +87,61 @@ class Model2D
         this.#viewListeners = { onRasterScaleChanged: (newScale) => this.onRasterScaleChanged(newScale) };
     }
 
-    // (x, y) is the anchor point; align says which part of the model sits on it
+    // (x, y) is the anchor point, relative to the parent; align says which part of the model sits on it
     setPos(x, y, align = Alignment.kBottomLeft)
     {
-        this.#transform.setPosition(x, y);
         this.#align = align;
-        this.#updatePosition();
-    }
-
-    // Radians, about the model's center
-    setRotation(rotZ) { this.#transform.setRotation(rotZ); }
-
-    // About the model's center
-    setScale(sx, sy = sx) { this.#transform.setScale(sx, sy); }
-
-    // The transform's position is the anchor; the alignment is kept
-    setTransform(transform)
-    {
-        this.#transform.copy(transform);
-        this.#updatePosition();
+        this.setPosition(x, y);
     }
 
     setColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
 
-    // The bottom-left corner, whatever the alignment
+    // The bottom-left corner, whatever the alignment; local (relative to the parent)
     getPos() { return this.#position; }
     getX() { return this.#position.x; }
     getY() { return this.#position.y; }
 
-    // As given to setPos()
-    getAnchor() { return this.#transform.getPosition(); }
+    // The bottom-left corner it's drawn at, in the world, written into out and returned
+    getWorldPos(out = new Vector2())
+    {
+        const t = this.getDrawTransform(Model2D.#kDrawTransform);
+        out.set(t.getX(), t.getY());
+            return out;
+    }
+
+    // As given to setPos(); read-only
+    getAnchor() { return this.getPosition(); }
     getAlignment() { return this.#align; }
 
-    // The anchor, scale and rotation. Read-only; change it with setPos(), setScale(), setRotation() or setTransform().
-    getTransform() { return this.#transform; }
+    /*
+        What it's drawn with, written into out (a Transform2D) and returned: the world
+        scale and rotation, and the bottom-left corner to draw at (see draw()), so
+        the center lands where the parents put it.
+    */
+    getDrawTransform(out)
+    {
+        const parent = this.getParent();
+
+        if (parent === null)
+            return out.copy(this.getTransform()).setPosition(this.#position.x, this.#position.y);
+
+        const hw = this.#width / 2.0;
+        const hh = this.#height / 2.0;
+        let c = Model2D.#kCenter;
+
+        c.set(this.#position.x + hw, this.#position.y + hh);
+        parent.localToWorld(c, c);
+
+        return out.copy(this.getWorldTransform()).setPosition(c.x - hw, c.y - hh);
+    }
 
     getWidth() { return this.#width; }
     getHeight() { return this.#height; }
-    getScaleX() { return this.#transform.getScaleX(); }
-    getScaleY() { return this.#transform.getScaleY(); }
-    getRotation() { return this.#transform.getRotation(); }
     getColor() { return this.#color; }
     getMaterial() { return this.#material; }
     isLoaded() { return this.#isLoaded; }
 
-    // True if MaterialBatcher may draw this with its instanced shader (see the top of this file). Subclasses opt in.
+    // True if Batcher may draw this with its instanced shader (see the top of this file). Subclasses opt in.
     canInstance() { return false; }
 
     // The part of the texture drawn, as a UVRect. Shared and read-only for models that draw all of it; don't change it.
@@ -154,8 +174,7 @@ class Model2D
                 return;
         }
 
-        const t = Model2D.#kDrawTransform.copy(this.#transform);
-        t.setPosition(this.#position.x, this.#position.y);
+        const t = this.getDrawTransform(Model2D.#kDrawTransform);
 
         this.#material.bind();
         this.draw(t, this.#color);
@@ -163,7 +182,7 @@ class Model2D
 
     /*
         Draws with the given values instead of this model's own, without binding
-        the material: it must already be bound. Used by MaterialBatcher, which
+        the material: it must already be bound. Used by Batcher, which
         binds a material once for many models and replays the values captured
         when each was submitted.
 
@@ -236,11 +255,16 @@ class Model2D
 
     _setLoaded(isLoaded) { this.#isLoaded = isLoaded; }
 
-    // Texture unit 0 if it's a SubTexture (see TextureAtlas), else null
+    // *** Entity ***
+
+    // The anchor, or the parent, changed: the corner follows, keeping the alignment
+    _onTransformChanged() { this.#updatePosition(); }
+
+    // Texture unit 0 if it's an AtlasSubTexture (see TextureAtlas), else null
     _getSubTexture()
     {
         const t = this.#material?.getTexture(0) ?? null;
-            return (t instanceof SubTexture) ? t : null;
+            return (t instanceof AtlasSubTexture) ? t : null;
     }
 
     /*
@@ -284,13 +308,15 @@ class Model2D
 
     // *** Internal Methods ***
 
-    // The part of texture unit 0 to draw: a SubTexture's UV rect, or the whole texture. Read-only.
+    // The part of texture unit 0 to draw: an AtlasSubTexture's UV rect, or the whole texture. Read-only.
     #getTextureUVRect() { return this.#material?.getTexture(0)?.getUVRect() ?? UVRect.kFull; }
 
     #updatePosition()
     {
-        this.#position.set(this.#transform.getX() + Alignment.offsetX(this.#align, this.#width),
-                           this.#transform.getY() + Alignment.offsetY(this.#align, this.#height));
+        const anchor = this.getPosition();
+
+        this.#position.set(anchor.x + Alignment.offsetX(this.#align, this.#width),
+                           anchor.y + Alignment.offsetY(this.#align, this.#height));
     }
 }
 
@@ -301,9 +327,9 @@ class Model2D
     3 times up; setUVOffset(x, y) shifts it, in texture widths / heights (animate
     it to scroll). The texture's Sampler must wrap with REPEAT (or
     MIRRORED_REPEAT) for anything outside 0..1; the default sampler clamps. Both
-    are part of getUVRect(), so tiled Rect2Ds still batch (see MaterialBatcher).
+    are part of getUVRect(), so tiled Rect2Ds still batch (see Batcher).
 
-    A SubTexture (see TextureAtlas) can't tile or offset: REPEAT would wrap the
+    An AtlasSubTexture (see TextureAtlas) can't tile or offset: REPEAT would wrap the
     whole atlas. It's drawn once, and setting a tile or offset logs an error.
 */
 class Rect2D extends Model2D
@@ -335,7 +361,7 @@ class Rect2D extends Model2D
     getUVOffsetX() { return this.#uvRect.getX(); }
     getUVOffsetY() { return this.#uvRect.getY(); }
 
-    // The offset and tile, for draw() and MaterialBatcher; a SubTexture's UV rect instead (no tiling)
+    // The offset and tile, for draw() and Batcher; an AtlasSubTexture's UV rect instead (no tiling)
     getUVRect() { return this._getSubTexture()?.getUVRect() ?? this.#uvRect; }
 
     // _source is a Texture or a loaded Material. _width / _height default to its texture's size.
@@ -414,7 +440,7 @@ class Rect2D extends Model2D
 
     /*
         The shader Rect2D uses when loading from a Texture (null if it can't be built).
-        Build shared Materials with it too: MaterialBatcher only draws a Rect2D in a
+        Build shared Materials with it too: Batcher only draws a Rect2D in a
         single instanced call when its Material uses this shader.
     */
     static getDefaultShader()
@@ -424,13 +450,13 @@ class Rect2D extends Model2D
 
     // *** Internal Methods ***
 
-    // Reports a tile or offset set on a SubTexture, which can't use them (see the top of Rect2D)
+    // Reports a tile or offset set on an AtlasSubTexture, which can't use them (see the top of Rect2D)
     #checkSubTextureUVs(methodName)
     {
         const r = this.#uvRect;
 
         if (this._getSubTexture() !== null && (r.getX() !== 0.0 || r.getY() !== 0.0 || r.getWidth() !== 1.0 || r.getHeight() !== 1.0))
-            console.error(`Rect2D.${methodName}(): a SubTexture can't be tiled or offset; it's drawn once`);
+            console.error(`Rect2D.${methodName}(): an AtlasSubTexture can't be tiled or offset; it's drawn once`);
     }
 }
 
@@ -681,7 +707,7 @@ class Text2D extends Model2D
     #fontWeight;
 
     #texture;  // Owned: updated in place each time the text is rasterized
-    #material; // Owned: this texture with Rect2D's default shader (so MaterialBatcher can instance it)
+    #material; // Owned: this texture with Rect2D's default shader (so Batcher can instance it)
 
     // Drawn into the texture
     #textColor;    // Vector4
@@ -916,7 +942,7 @@ class Text2D extends Model2D
     TextGlyphs2D - Text built from a TextAtlas's glyphs: one quad per
     character, in one mesh, drawn in one call. setText() only rebuilds that
     mesh, so it's cheap to change every frame (a timer, a score). Every
-    TextGlyphs2D on the same TextAtlas shares its Material, so MaterialBatcher
+    TextGlyphs2D on the same TextAtlas shares its Material, so Batcher
     draws them one after another with a single bind.
 
     Like Text2D: sizes and positions are in design units, the glyphs are
@@ -1199,7 +1225,7 @@ class TextGlyphs2D extends Model2D
     /*
         One quad per character, each its glyph's whole cell, placed side by side
         by advance width from the left padding. Its UVs are the glyph's
-        SubTexture rect in the atlas, so it draws with the atlas Texture as is.
+        AtlasSubTexture rect in the atlas, so it draws with the atlas Texture as is.
     */
     #buildMesh(text)
     {

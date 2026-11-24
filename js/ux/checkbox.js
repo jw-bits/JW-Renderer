@@ -97,7 +97,7 @@ class CheckBox
     /*
         size is the box's width and height in design units, outline included.
         cornerRadius rounds the corners (0 is square; clamped to half the size).
-        checkTexture (a loaded Texture or SubTexture) draws the check; null makes
+        checkTexture (a loaded Texture or AtlasSubTexture) draws the check; null makes
         it a solid rounded rect. Starts unchecked. Returns false on failure.
     */
     load(size, cornerRadius = 0, checkTexture = null)
@@ -269,7 +269,7 @@ class CheckBox
     }
 
     /*
-        Queues it on a MaterialBatcher: the outline and box on layer, and the
+        Queues it on a Batcher: the outline and box on layer, and the
         check (while checked) on checkLayer, one above by default, so it's
         always drawn over the box. Returns false if not loaded.
     */

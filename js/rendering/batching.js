@@ -1,7 +1,7 @@
 "use strict";
 
 /*
-    MaterialBatcher - Collects Model2Ds (Rect2D, Text2D, ...) during a frame,
+    Batcher - Collects Model2Ds (Rect2D, Text2D, ...) during a frame,
     then draws them all in one go, layer by layer, grouped by Material.
 
     Layers run 0 - 7: 0 is drawn first (farthest back), 7 last (top-most).
@@ -18,7 +18,7 @@
     a certain way (e.g. board 0, pieces 2, UI 5).
 
     Usage:
-        let batcher = new MaterialBatcher(); // After WGLV.init()
+        let batcher = new Batcher(); // After WGLV.init()
 
         // Each frame
         batcher.submit(boardRect, 0);
@@ -29,8 +29,9 @@
         batcher.submit(label, 5);  // A Text2D
         batcher.render();          // Draws everything and empties the batcher
 
-    submit() captures the model's transform (position, scale, rotation), color and UV rect
-    (a Sprite's frame) at that moment, so one model can be drawn many times per
+    submit() captures the model's transform (position, scale, rotation, with its
+    parents' applied: see Model2D.getDrawTransform()), color and UV rect (a
+    Sprite's frame) at that moment, so one model can be drawn many times per
     frame (like a board square).
     Its size, mesh and Material are read when it's drawn, so don't unload or
     reload a model between submit() and render().
@@ -66,12 +67,15 @@
     with nothing on any of a range's layers skips its chain.
 
         batcher.setLayerPost(Layers.kWorld, Layers.kEffects, bloomChain);
-        batcher.setLayerPost(MaterialBatcher.kMinLayer, MaterialBatcher.kMaxLayer, crtChain); // Everything
+        batcher.setLayerPost(Batcher.kMinLayer, Batcher.kMaxLayer, crtChain); // Everything
 
     Blend modes: each Material's (see BlendMode); models with different
     modes never share an instanced draw.
+
+    CachedLayer (below) draws a batch once into a RenderTarget and shows it
+    each frame as one textured rect.
 */
-class MaterialBatcher
+class Batcher
 {
     static kMinLayer = 0;
     static kMaxLayer = 7;
@@ -116,7 +120,7 @@ class MaterialBatcher
         this.#postBegins = [];
         this.#postEnds = [];
 
-        for (let i = 0; i < MaterialBatcher.kLayerCount; ++i)
+        for (let i = 0; i < Batcher.kLayerCount; ++i)
         {
             this.#layers.push([]);
             this.#groups.push(new Map());
@@ -140,7 +144,7 @@ class MaterialBatcher
         this.#drawCalls = 0;
 
         if (this.#setupInstancing() === false)
-            console.error("MaterialBatcher couldn't set up instanced drawing; Rect2Ds will be drawn one at a time");
+            console.error("Batcher couldn't set up instanced drawing; Rect2Ds will be drawn one at a time");
     }
 
     /*
@@ -149,15 +153,15 @@ class MaterialBatcher
     */
     submit(model, layer = 0)
     {
-        if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
+        if (Number.isInteger(layer) === false || layer < Batcher.kMinLayer || layer > Batcher.kMaxLayer)
         {
-            console.error(`MaterialBatcher.submit(): layer must be ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}`);
+            console.error(`Batcher.submit(): layer must be ${Batcher.kMinLayer} - ${Batcher.kMaxLayer}`);
                 return false;
         }
 
         if ((model instanceof Model2D) === false)
         {
-            console.error("MaterialBatcher.submit() needs a Model2D (Rect2D, Text2D, ...)");
+            console.error("Batcher.submit() needs a Model2D (Rect2D, Text2D, ...)");
                 return false;
         }
 
@@ -182,8 +186,7 @@ class MaterialBatcher
         e.group = group;
         e.instanced = instanced;
         e.uvRect.copy(model.getUVRect());
-        e.transform.copy(model.getTransform());
-        e.transform.setPosition(model.getX(), model.getY()); // Drawn from the bottom-left corner, not the anchor (see Model2D.draw())
+        model.getDrawTransform(e.transform); // In the world, from the bottom-left corner, not the anchor (see Model2D.draw())
 
         const c = model.getColor();
         e.color.set(c.x, c.y, c.z, c.w);
@@ -199,15 +202,15 @@ class MaterialBatcher
     */
     submitDrawable(drawable, layer = 0)
     {
-        if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
+        if (Number.isInteger(layer) === false || layer < Batcher.kMinLayer || layer > Batcher.kMaxLayer)
         {
-            console.error(`MaterialBatcher.submitDrawable(): layer must be ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}`);
+            console.error(`Batcher.submitDrawable(): layer must be ${Batcher.kMinLayer} - ${Batcher.kMaxLayer}`);
                 return false;
         }
 
         if (typeof drawable?.render !== "function")
         {
-            console.error("MaterialBatcher.submitDrawable() needs an object with a render() method");
+            console.error("Batcher.submitDrawable() needs an object with a render() method");
                 return false;
         }
 
@@ -222,9 +225,9 @@ class MaterialBatcher
     */
     setLayerLit(layer, lit)
     {
-        if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
+        if (Number.isInteger(layer) === false || layer < Batcher.kMinLayer || layer > Batcher.kMaxLayer)
         {
-            console.error(`MaterialBatcher.setLayerLit(): layer must be ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}`);
+            console.error(`Batcher.setLayerLit(): layer must be ${Batcher.kMinLayer} - ${Batcher.kMaxLayer}`);
                 return false;
         }
 
@@ -239,7 +242,7 @@ class MaterialBatcher
     {
         if (camera !== null && (camera instanceof Camera2D) === false)
         {
-            console.error("MaterialBatcher.setCamera() needs a Camera2D or null");
+            console.error("Batcher.setCamera() needs a Camera2D or null");
                 return false;
         }
 
@@ -256,9 +259,9 @@ class MaterialBatcher
     */
     setLayerFollowsCamera(layer, follows)
     {
-        if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
+        if (Number.isInteger(layer) === false || layer < Batcher.kMinLayer || layer > Batcher.kMaxLayer)
         {
-            console.error(`MaterialBatcher.setLayerFollowsCamera(): layer must be ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}`);
+            console.error(`Batcher.setLayerFollowsCamera(): layer must be ${Batcher.kMinLayer} - ${Batcher.kMaxLayer}`);
                 return false;
         }
 
@@ -275,17 +278,17 @@ class MaterialBatcher
     */
     setLayerPost(first, last, chain)
     {
-        const isLayer = (l) => (Number.isInteger(l) === true && l >= MaterialBatcher.kMinLayer && l <= MaterialBatcher.kMaxLayer);
+        const isLayer = (l) => (Number.isInteger(l) === true && l >= Batcher.kMinLayer && l <= Batcher.kMaxLayer);
 
         if (isLayer(first) === false || isLayer(last) === false || first > last)
         {
-            console.error(`MaterialBatcher.setLayerPost(): first and last must be layers ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}, first <= last`);
+            console.error(`Batcher.setLayerPost(): first and last must be layers ${Batcher.kMinLayer} - ${Batcher.kMaxLayer}, first <= last`);
                 return false;
         }
 
         if ((chain instanceof PostChain) === false || chain.isLoaded() === false)
         {
-            console.error("MaterialBatcher.setLayerPost() needs a loaded PostChain");
+            console.error("Batcher.setLayerPost() needs a loaded PostChain");
                 return false;
         }
 
@@ -296,13 +299,13 @@ class MaterialBatcher
 
             if (r.chain === chain)
             {
-                console.error("MaterialBatcher.setLayerPost(): that chain already has a range; clearLayerPost() it first");
+                console.error("Batcher.setLayerPost(): that chain already has a range; clearLayerPost() it first");
                     return false;
             }
 
             if (isApart === false && (isNested === false || (first === r.first && last === r.last)))
             {
-                console.error(`MaterialBatcher.setLayerPost(): ${first} - ${last} overlaps ${r.first} - ${r.last}; ranges can only nest`);
+                console.error(`Batcher.setLayerPost(): ${first} - ${last} overlaps ${r.first} - ${r.last}; ranges can only nest`);
                     return false;
             }
         }
@@ -329,7 +332,7 @@ class MaterialBatcher
 
         const before = ClipSpace.getCamera(); // Put back afterwards
 
-        for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
+        for (let l = 0; l < Batcher.kLayerCount; ++l)
         {
             for (const r of this.#postBegins[l])
                 r.isRunning = (this.#hasAnything(r.first, r.last) === true && r.chain.begin() === true);
@@ -362,7 +365,7 @@ class MaterialBatcher
     // Drops everything submitted without drawing it
     clear()
     {
-        for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
+        for (let l = 0; l < Batcher.kLayerCount; ++l)
         {
             this.#layers[l].length = 0;
             this.#groups[l].clear();
@@ -399,7 +402,7 @@ class MaterialBatcher
     // Per layer, the ranges to begin (outermost, the longest, first) and end (innermost first)
     #sortPostRanges()
     {
-        for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
+        for (let l = 0; l < Batcher.kLayerCount; ++l)
         {
             this.#postBegins[l] = this.#postRanges.filter((r) => r.first === l).sort((a, b) => (b.last - b.first) - (a.last - a.first));
             this.#postEnds[l] = this.#postRanges.filter((r) => r.last === l).sort((a, b) => (a.last - a.first) - (b.last - b.first));
@@ -477,7 +480,7 @@ class MaterialBatcher
     #drawInstanced(list, start, end, lit)
     {
         const count = end - start;
-        const stride = MaterialBatcher.#kFloatsPerInstance;
+        const stride = Batcher.#kFloatsPerInstance;
 
         this.#reserve(count);
 
@@ -534,12 +537,12 @@ class MaterialBatcher
         if (count <= this.#instCapacity)
             return;
 
-        let capacity = Math.max(this.#instCapacity, MaterialBatcher.#kStartCapacity);
+        let capacity = Math.max(this.#instCapacity, Batcher.#kStartCapacity);
 
         while (capacity < count)
             capacity *= 2;
 
-        this.#instData = new Float32Array(capacity * MaterialBatcher.#kFloatsPerInstance);
+        this.#instData = new Float32Array(capacity * Batcher.#kFloatsPerInstance);
         this.#instCapacity = capacity;
         this.#instMesh.setInstanceData(this.#instData);
     }
@@ -556,7 +559,7 @@ class MaterialBatcher
 
             if (shader === null)
             {
-                console.error("MaterialBatcher: a lit shader couldn't be built; lit layers will draw unlit");
+                console.error("Batcher: a lit shader couldn't be built; lit layers will draw unlit");
                 this.#litShaders[i] = false;
             }
             else
@@ -593,11 +596,149 @@ class MaterialBatcher
             [InstancedAttributes.kVector0, 11] // UV rect
         ];
 
-        if (this.#instMesh.load(new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), MaterialBatcher.#kFloatsPerInstance, attribs) === false)
+        if (this.#instMesh.load(new Float32Array([0, 0,  1, 0,  1, 1,  0, 1]), Batcher.#kFloatsPerInstance, attribs) === false)
             return false; // The shader is ShaderManager's; left loaded
 
         this.#instShader = shader;
-        this.#reserve(MaterialBatcher.#kStartCapacity);
+        this.#reserve(Batcher.#kStartCapacity);
             return true;
+    }
+}
+
+/*
+    CachedLayer - Something that changes rarely (a panel of UI, a static
+    background) drawn once into its own target, then shown each frame as a
+    single textured rect: one draw call however much it holds.
+
+        let panel = new CachedLayer();
+        panel.load(100, 600, 500, 300);              // Design units: what it covers on the screen
+
+        // Each frame
+        panel.update(() => {                         // Draws only when needed (see below)
+            uiBatcher.submit(...);
+            uiBatcher.render();
+        });
+        panel.submit(batcher, Layers.kUI);           // Or panel.render()
+
+        panel.markDirty();                           // After changing what it shows
+
+    It's drawn again when marked dirty, when the view scale changes (so it
+    stays sharp: its pixel size is its design size times the view scale) and
+    after its contents are lost (a lost context). The draw function draws in
+    screen design units; only what falls inside the layer's rect is kept.
+*/
+class CachedLayer
+{
+    #target;
+    #rect;        // Rect2D showing the target's texture
+    #area;        // Vector4: x, y, width, height in design units
+    #isDirty;
+    #drawnScale;  // The view scale it was last drawn at
+    #drawnVersion;
+
+    constructor()
+    {
+        this.#target = new RenderTarget();
+        this.#rect = new Rect2D();
+        this.#area = new Vector4();
+        this.#isDirty = true;
+        this.#drawnScale = 0.0;
+        this.#drawnVersion = -1;
+    }
+
+    /*
+        Covers the design rect (x, y, width, height). options: { format, samples } as for
+        RenderTarget (samples smooths shapes' edges). Returns false on failure.
+    */
+    load(x, y, width, height, options = null)
+    {
+        if (Number.isFinite(x) === false || Number.isFinite(y) === false || Number.isFinite(width) === false ||
+            Number.isFinite(height) === false || width <= 0.0 || height <= 0.0)
+        {
+            console.error("CachedLayer.load() needs a position and a size above 0");
+                return false;
+        }
+
+        const size = CachedLayer.#pixelSize(width, height);
+
+        if (this.#target.loadFixed(size.width, size.height, options) === false)
+            return false;
+
+        this.#target.setDesignRect(x, y, width, height);
+        this.#area.set(x, y, width, height);
+
+        const material = MaterialManager.load(Rect2D.getDefaultShader(), [this.#target.getTexture()], null, BlendMode.kPremultiplied);
+
+        if (material === null || this.#rect.load(material, width, height) === false)
+        {
+            console.error("CachedLayer.load() couldn't make the rect that shows it");
+            this.#target.unload();
+                return false;
+        }
+
+        this.#rect.setPos(x, y);
+        this.#isDirty = true;
+            return true;
+    }
+
+    // Draws it again on the next update()
+    markDirty() { this.#isDirty = true; }
+
+    // True if the next update() will draw
+    needsRedraw()
+    {
+        return (this.#isDirty === true || this.#drawnScale !== WGLV.getViewScale() || this.#drawnVersion !== this.#target.getVersion());
+    }
+
+    // Calls drawFn (which draws in screen design units) into the layer if it needs drawing. Returns true if it drew.
+    update(drawFn)
+    {
+        if (this.#target.isLoaded() === false || this.needsRedraw() === false)
+            return false;
+
+        // Sharp at the view's scale
+        const scale = WGLV.getViewScale();
+
+        if (scale !== this.#drawnScale)
+        {
+            const size = CachedLayer.#pixelSize(this.#area.z, this.#area.w);
+            this.#target.resize(size.width, size.height);
+        }
+
+        if (RenderTargets.push(this.#target) === false)
+            return false;
+
+        drawFn();
+        RenderTargets.pop();
+
+        this.#isDirty = false;
+        this.#drawnScale = scale;
+        this.#drawnVersion = this.#target.getVersion();
+            return true;
+    }
+
+    // Queues the layer on a batcher layer (one instanced quad)
+    submit(batcher, layer) { return batcher.submit(this.#rect, layer); }
+
+    render() { this.#rect.render(); }
+
+    // The Rect2D showing it (e.g. to tint or fade it with setColor()); don't load it again
+    getRect2D() { return this.#rect; }
+    getTarget() { return this.#target; }
+
+    unload()
+    {
+        this.#rect.unload();
+        this.#target.unload();
+        this.#isDirty = true;
+        this.#drawnScale = 0.0;
+    }
+
+    // *** Internal Methods ***
+
+    static #pixelSize(width, height)
+    {
+        const scale = WGLV.getViewScale();
+            return { width: Math.max(1, Math.ceil(width * scale)), height: Math.max(1, Math.ceil(height * scale)) };
     }
 }

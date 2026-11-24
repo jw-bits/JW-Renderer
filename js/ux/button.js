@@ -244,7 +244,7 @@ class Button
     getText() { return this.#text?.getText() ?? null; }
 
     /*
-        An icon: texture (a loaded Texture or SubTexture) drawn width x height design
+        An icon: texture (a loaded Texture or AtlasSubTexture) drawn width x height design
         units, left of the text, tinted by the content color (keep that white for the
         icon's own colors); null removes it. Returns false on failure.
     */
@@ -445,7 +445,7 @@ class Button
     }
 
     /*
-        Queues it on a MaterialBatcher: the outline and background on layer, the
+        Queues it on a Batcher: the outline and background on layer, the
         icon and text on contentLayer, one above by default. Returns false if not
         loaded.
     */

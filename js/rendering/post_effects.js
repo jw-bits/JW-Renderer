@@ -842,7 +842,7 @@ class ScreenEffect extends PostEffect
     without changing its size doesn't remake the target. setOpacity() fades
     the result.
 
-    MaterialBatcher.setLayerPost() runs a chain around a range of layers.
+    Batcher.setLayerPost() runs a chain around a range of layers.
 */
 class PostChain
 {
@@ -933,7 +933,7 @@ class PostChain
     /*
         What begin() clears the target to when it's given no color: transparent (the
         default), or e.g. the background color, so effects like the vignette and
-        scanlines cover the background too (MaterialBatcher.setLayerPost() uses it).
+        scanlines cover the background too (Batcher.setLayerPost() uses it).
     */
     setClearColor(color) { this.#clearColor.set(color.x, color.y, color.z, color.w); }
     getClearColor() { return this.#clearColor; }

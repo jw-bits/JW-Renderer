@@ -7,7 +7,7 @@
 
         AnimAction     Per channel: start, target, duration and easing (each a Transform2D, see math/transform.js)
         AnimSequence   AnimActions, one after another
-        AnimPlayer     Plays an AnimAction or AnimSequence on one Model2D
+        AnimPlayer     Plays an AnimAction or AnimSequence on one Entity (a Model2D ...)
 */
 
 // The parts of a transform an AnimAction can animate, as bit flags (combine with |)

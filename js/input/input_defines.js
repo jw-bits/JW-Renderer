@@ -59,15 +59,57 @@ class KeyCode
     static kAltLeft = "AltLeft";
     static kAltRight = "AltRight";
 
-    static kW = "KeyW";
+    // Letters
     static kA = "KeyA";
-    static kS = "KeyS";
+    static kB = "KeyB";
+    static kC = "KeyC";
     static kD = "KeyD";
-    static kQ = "KeyQ";
     static kE = "KeyE";
-    static kR = "KeyR";
-    static kP = "KeyP";
+    static kF = "KeyF";
+    static kG = "KeyG";
+    static kH = "KeyH";
+    static kI = "KeyI";
+    static kJ = "KeyJ";
+    static kK = "KeyK";
+    static kL = "KeyL";
+    static kM = "KeyM";
+    static kN = "KeyN";
     static kO = "KeyO";
+    static kP = "KeyP";
+    static kQ = "KeyQ";
+    static kR = "KeyR";
+    static kS = "KeyS";
+    static kT = "KeyT";
+    static kU = "KeyU";
+    static kV = "KeyV";
+    static kW = "KeyW";
+    static kX = "KeyX";
+    static kY = "KeyY";
+    static kZ = "KeyZ";
+
+    // Number row (above the letters, not the numpad)
+    static k0 = "Digit0";
+    static k1 = "Digit1";
+    static k2 = "Digit2";
+    static k3 = "Digit3";
+    static k4 = "Digit4";
+    static k5 = "Digit5";
+    static k6 = "Digit6";
+    static k7 = "Digit7";
+    static k8 = "Digit8";
+    static k9 = "Digit9";
+
+    // Numpad digits (kNumpadEnter is with the other keys above)
+    static kNumpad0 = "Numpad0";
+    static kNumpad1 = "Numpad1";
+    static kNumpad2 = "Numpad2";
+    static kNumpad3 = "Numpad3";
+    static kNumpad4 = "Numpad4";
+    static kNumpad5 = "Numpad5";
+    static kNumpad6 = "Numpad6";
+    static kNumpad7 = "Numpad7";
+    static kNumpad8 = "Numpad8";
+    static kNumpad9 = "Numpad9";
 }
 
 /*

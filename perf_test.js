@@ -7,7 +7,8 @@
     CheckBoxes, three Buttons (tap them; see InputManager), a Camera2D
     view of a small world, and render targets: a minimap of that world, a
     CachedLayer, and bloom, blur and screen (CRT) effects each on their own
-    slot, with a small metrics window.
+    slot, an Entity hierarchy (a sun, planets and moons, each carried by its
+    parent), with a small metrics window.
 
     Render targets (render_target.js, post_effects.js): pages change with a
     ScreenTransition (a wipe, circle, dissolve, fade or wipe up, in turn)
@@ -31,15 +32,17 @@
     stops, so they never count towards the metrics or the overdraw.
 
     Metrics, per frame (the HUD refreshes a few times a second):
-        FPS         Frames per second, averaged over the last half second
-        Vertices    Vertex shader runs: each draw call's index (or vertex) count times its instances
-        Materials   Different Materials bound
-        Rectangles  Quads drawn: each instance of an instanced draw (Rect2D, Text2D, Sprite through
-                    the batcher, and every particle), plus Rect2D / Sprite / Text2D drawn on their own
-                    and each glyph of a TextGlyphs2D. RoundedRect2D and NinePatch2D aren't quads.
-        Overdraw    Pixels drawn 2 or more times, and the share of the view that is
-        Draw calls  GL draw calls (post effect passes included)
-        Targets     RenderTargets loaded and their GPU memory, and how many are RenderTargetPool's
+        FPS            Frames per second, averaged over the last half second
+        Vertices       Vertex shader runs: each draw call's index (or vertex) count times its instances
+        Materials      Different Materials bound
+        Rectangles     Quads drawn: each instance of an instanced draw (Rect2D, Text2D, Sprite through
+                       the batcher, and every particle), plus Rect2D / Sprite / Text2D drawn on their own
+                       and each glyph of a TextGlyphs2D. RoundedRect2D and NinePatch2D aren't quads.
+        Overdraw       Pixels drawn 2 or more times, and the share of the view that is
+        Draw calls     GL draw calls (post effect passes included)
+        State changes  GL state calls RenderState sent (blend mode and scissor); the ones it
+                       skipped because nothing changed aren't counted
+        Targets        RenderTargets loaded and their GPU memory, and how many are RenderTargetPool's
 
     The counts come from wrapping, from here, the GL
     context's draw calls, Material.prototype.bind and Model2D.prototype.draw.
@@ -90,7 +93,7 @@ const HUD_FONT = "Consolas, 'Courier New', monospace"; // Monospaced, so the lab
 const HUD_FONT_SIZE = 16.5;
 const HUD_MARGIN = 10.5;         // From the view's top-left corner
 const HUD_PADDING = 7.5;         // Around the text, inside the panel
-const HUD_LABELS = ["Page", "FPS", "Vertices", "Materials", "Rectangles", "Overdraw", "Draw calls", "Targets", "Keys"];
+const HUD_LABELS = ["Page", "FPS", "Vertices", "Materials", "Rectangles", "Overdraw", "Draw calls", "State changes", "Targets", "Keys"];
 const OVERDRAW_SAMPLE_MS = 500;  // How often overdraw is measured
 const MAX_DT = 0.1;              // Seconds; longer frames (e.g. a hidden tab) are clamped
 
@@ -148,6 +151,13 @@ const CACHE_COLS = 20;                    // The cached layer's grid of rects
 const CACHE_ROWS = 14;
 const CACHE_CELL = new Vector2(26, 18);   // Design units per rect, with a 2 unit gap all round
 const CACHE_REDRAW_SECONDS = 2.0;         // New colors, so it's drawn again, this often
+const HIERARCHY_SUN_SIZE = 36;
+const HIERARCHY_PLANETS = [{ radius: 50, size: 34, speed: 1.1 },   // Each planet: its orbit, size and radians per second
+                           { radius: 86, size: 40, speed: -0.7 },
+                           { radius: 120, size: 30, speed: 0.45 }];
+const HIERARCHY_MOON_SIZE = 16;
+const HIERARCHY_MOON_SPEED = 3.0;         // Times its planet's
+const HIERARCHY_MOON_PULSE = 0.2;         // Each moon's scale swings this far either side of 1
 const TRANSITION_SECONDS = 0.7;
 const TRANSITION_SOFTNESS = 0.15;
 const TRANSITION_TYPES = [ScreenTransition.kWipeLeft, ScreenTransition.kCircle, ScreenTransition.kDissolve,
@@ -221,9 +231,10 @@ let gStats = {
     vertices: 0,
     rects: 0,
     drawCalls: 0,
+    stateStart: 0,          // RenderState.getChangeCount() when counting began
 
     // The last finished frame
-    last: { vertices: 0, rects: 0, drawCalls: 0, materials: 0 },
+    last: { vertices: 0, rects: 0, drawCalls: 0, materials: 0, stateChanges: 0 },
 
     // FPS over a window of frames
     fpsFrames: 0,
@@ -293,11 +304,7 @@ window.addEventListener("keydown", (e) => {
 
 function appSetup()
 {
-    const gl = WGLV.context;
-
-    gl.disable(gl.DEPTH_TEST); // Blending is each Material's (see BlendMode)
-
-    installHooks();
+    installHooks(); // Depth test and the rest of the fixed state are RenderState.applyDefaults()'s, from WGLV.init()
 
     if (setupOverdrawMarking() === false)
         console.error("Couldn't set up overdraw counting; it will show as n/a");
@@ -316,7 +323,7 @@ function appSetup()
 async function loadAssets()
 {
     FontManager.setDefaultFamily("'Segoe UI', Arial, sans-serif");
-    gBatcher = new MaterialBatcher();
+    gBatcher = new Batcher();
     gBatcher.setLayerLit(Layers.kLit, true);
 
     // Build every shader the test draws with now, so none compiles mid-frame (e.g. when page 2 first shows)
@@ -753,6 +760,10 @@ function buildScene()
             batcher.submit(screenRect, 1);
         }));
 
+    // *** Entities ***
+
+    items.push(makeHierarchyItem(t.circle, t.rect));
+
     // *** Pages and labels ***
 
     const labelAtlas = new TextAtlas(font, items.map((item) => item.label).join(""), LABEL_FONT_SIZE);
@@ -840,7 +851,7 @@ function makeLitItem(label, model, lights, dotTexture, rocks)
     through a camera the keys move, its viewport the item's slot: A / D pan left /
     right, W / S zoom in / out, E shakes it (adds trauma, with a little rotation
     shake), only while its page is showing.
-    It has its own MaterialBatcher with the camera: layer 0 ignores the camera (the
+    It has its own Batcher with the camera: layer 0 ignores the camera (the
     frame, in screen units), layers 1 and 2 follow it. The pointer, over the
     viewport, is turned into world units (screenToWorld()) and marked with a dot
     in the world, so the dot should sit right under it however the camera moves.
@@ -855,7 +866,7 @@ function makeCameraItem(world, dotTexture)
     let camera = new Camera2D();
     camera.setPosition(worldCenter, worldCenter);
     camera.setShakeLimits(camera.getShakeMaxOffset(), CAMERA_SHAKE_ROTATION);
-    let batcher = new MaterialBatcher();
+    let batcher = new Batcher();
     batcher.setCamera(camera);
     batcher.setLayerFollowsCamera(0, false);
 
@@ -990,7 +1001,7 @@ function makePostItem(label, effect, format, update, draw)
 
     chain.addEffect(effect);
 
-    let batcher = new MaterialBatcher();
+    let batcher = new Batcher();
     let center = new Vector2();
 
     const drawable = {
@@ -1014,6 +1025,81 @@ function makePostItem(label, effect, format, update, draw)
 }
 
 /*
+    Entities as a test item: a sun with planets circling it and a moon circling
+    each planet, where only the pivots are turned. The system is the root; each
+    planet's pivot (an empty Entity) is a child of it and each planet a child
+    of its pivot, so it's carried round and turns with it (its arrow always
+    points out). Each moon (a plain rect) has a pivot that's a child of its
+    planet, so it follows the planet, turning as it circles and pulsing its
+    own scale. The root breathes and rocks, carrying everything under it.
+*/
+function makeHierarchyItem(circleTexture, arrowTexture)
+{
+    const white = TextureManager.getWhiteTexture();
+    let system = new Entity("system");
+    let pivots = [];  // { entity, speed, start }
+    let models = [];
+    let moons = [];
+
+    let sun = new Rect2D();
+    sun.setName("sun");
+    sun.load(circleTexture, HIERARCHY_SUN_SIZE, HIERARCHY_SUN_SIZE);
+    sun.setColor(Colors.kGold);
+    sun.setPos(0, 0, Alignment.kMiddleCenter);
+    system.addChild(sun);
+    models.push(sun);
+
+    for (let i = 0; i < HIERARCHY_PLANETS.length; ++i)
+    {
+        const p = HIERARCHY_PLANETS[i];
+
+        let orbit = new Entity(`orbit ${i}`);
+        system.addChild(orbit);
+        pivots.push({ entity: orbit, speed: p.speed, start: i * 2.1 });
+
+        let planet = new Rect2D();
+        planet.setName(`planet ${i}`);
+        planet.load(arrowTexture, p.size, p.size);
+        planet.setColor(Colors.kParticles[i % Colors.kParticles.length]);
+        planet.setPos(p.radius, 0, Alignment.kMiddleCenter);
+        planet.setRotation(-MathDefines.kHalfPi); // The arrow points up; this points it away from the sun
+        orbit.addChild(planet);
+        models.push(planet);
+
+        // The moon's pivot sits on the planet's anchor (its center); turning the planet above doesn't matter to it
+        let moonOrbit = new Entity(`moon orbit ${i}`);
+        moonOrbit.setRotation(MathDefines.kHalfPi); // Undoes the planet's turn, so the moon's speed reads the same
+        planet.addChild(moonOrbit);
+        pivots.push({ entity: moonOrbit, speed: p.speed * HIERARCHY_MOON_SPEED, start: MathDefines.kHalfPi });
+
+        let moon = new Rect2D();
+        moon.setName(`moon ${i}`);
+        moon.load(white, HIERARCHY_MOON_SIZE, HIERARCHY_MOON_SIZE);
+        moon.setPos((p.size / 2.0) + HIERARCHY_MOON_SIZE, 0, Alignment.kMiddleCenter);
+        moonOrbit.addChild(moon);
+        models.push(moon);
+        moons.push(moon);
+    }
+
+    return { label: `Entity - ${models.length} models, parented 3 deep`,
+             place: (x, y) => system.setPosition(x, y),
+             update: (dt, time) => {
+                 system.setRotation(0.2 * Math.sin(time * 0.5));
+                 system.setScale(0.92 + (0.08 * Math.sin(time * 1.1)));
+
+                 for (const pivot of pivots)
+                     pivot.entity.setRotation(pivot.start + (time * pivot.speed));
+
+                 for (let i = 0; i < moons.length; ++i)
+                     moons[i].setScale(1.0 + (HIERARCHY_MOON_PULSE * Math.sin((time * 2.5) + (i * 2.0))));
+             },
+             submit: () => {
+                 for (const m of models)
+                     gBatcher.submit(m, Layers.kShapes);
+             } };
+}
+
+/*
     A RenderTarget as a test item: the camera item's whole world drawn into a small
     target of its own (its design rect is the world, no camera needed), with what
     the camera sees marked in gold, then the target's texture shown on a Rect2D
@@ -1030,7 +1116,7 @@ function makeMinimapItem(world, camera)
 
     target.setDesignRect(0, 0, world.size, world.size);
 
-    let batcher = new MaterialBatcher();
+    let batcher = new Batcher();
 
     let view = new Rect2D(); // 1 x 1, scaled to the camera's view each frame
     view.load(white, 1, 1);
@@ -1089,7 +1175,7 @@ function makeCachedItem()
     const height = CACHE_ROWS * CACHE_CELL.y;
 
     let cache = new CachedLayer();
-    let batcher = new MaterialBatcher();
+    let batcher = new Batcher();
     let origin = new Vector2();
     let timer = 0.0;
 
@@ -1365,7 +1451,7 @@ function quadsIn(mode, count, instances, isInstanced)
     if (mode !== gl.TRIANGLES)
         return 0;
 
-    // Every instanced draw here is a 6-index quad per instance (MaterialBatcher, Particles2D)
+    // Every instanced draw here is a 6-index quad per instance (Batcher, Particles2D)
     if (isInstanced === true)
         return (count === 6) ? instances : 0;
 
@@ -1386,6 +1472,7 @@ function beginCounting()
     gStats.vertices = 0;
     gStats.rects = 0;
     gStats.drawCalls = 0;
+    gStats.stateStart = RenderState.getChangeCount();
     gStats.materials.clear();
 }
 
@@ -1395,6 +1482,7 @@ function endCounting()
     gStats.last.vertices = gStats.vertices;
     gStats.last.rects = gStats.rects;
     gStats.last.drawCalls = gStats.drawCalls;
+    gStats.last.stateChanges = RenderState.getChangeCount() - gStats.stateStart;
     gStats.last.materials = gStats.materials.size;
     gStats.materials.clear(); // Don't keep Materials alive
 }
@@ -1450,6 +1538,7 @@ function updateHud(ts)
         formatCount(l.rects),
         overdraw,
         String(l.drawCalls),
+        String(l.stateChanges),
         `${RenderTarget.getCount()} (${(RenderTarget.getTotalMemoryBytes() / 1048576).toFixed(1)} MB), ${RenderTargetPool.getCount()} pooled`,
         "Space pause, O overdraw"
     ];

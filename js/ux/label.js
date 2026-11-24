@@ -117,7 +117,7 @@ class Label
     isLoaded() { return (this.#text.isLoaded() === true && this.#panel.isLoaded() === true); }
 
     /*
-        Queues the label on a MaterialBatcher: the panel on panelLayer and the
+        Queues the label on a Batcher: the panel on panelLayer and the
         text on textLayer, one above it by default, so the text is always drawn
         over the panel. Returns false if not loaded.
     */

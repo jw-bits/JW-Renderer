@@ -144,12 +144,6 @@ class FontManager
     static #fonts = new Map(); // Source key -> Font
     static #defaultFont;       // sans-serif until setDefaultFamily()
 
-    // A system font needs nothing from WebGL or the page, so the default can be made as soon as this loads
-    static
-    {
-        FontManager.#defaultFont = FontManager.#makeFallback();
-    }
-
     /*
         Makes the system font cssFamily the default font, replacing the current
         one. Returns false (keeping the current one) if it can't be used.
@@ -261,6 +255,12 @@ class FontManager
         font.loadFromSystem(FontManager.#kFallbackCss);
             return font;
     }
+
+    // A system font needs nothing from WebGL or the page, so the default can be made as soon as this loads
+    static
+    {
+        FontManager.#defaultFont = FontManager.#makeFallback();
+    }
 }
 
 /*
@@ -281,7 +281,7 @@ class FontManager
     Texture, sharing an in-progress load, so an image is only loaded once.
 
     Atlases (see TextureAtlas) are kept the same way, one per JSON url.
-    Their SubTextures are BaseTextures like Texture, so they go wherever one does:
+    Their AtlasSubTextures are BaseTextures like Texture, so they go wherever one does:
         const atlas = await TextureManager.loadAtlas("./textures/checkers.json");
         rect.load(atlas.getSubTexture("checker_king"), 64, 64);
 */
@@ -423,7 +423,7 @@ class TextureManager
         return TextureManager.#atlases.has(TextureManager.#key(atlasUrl, true, useMipmaps));
     }
 
-    // Unloads an atlas; its SubTextures stop being loaded
+    // Unloads an atlas; its AtlasSubTextures stop being loaded
     static unloadAtlas(atlasUrl, useMipmaps = true)
     {
         const key = TextureManager.#key(atlasUrl, true, useMipmaps);

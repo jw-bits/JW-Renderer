@@ -1,7 +1,8 @@
 "use strict";
 
 /*
-    AnimPlayer - Plays an AnimAction or AnimSequence on one Model2D.
+    AnimPlayer - Plays an AnimAction or AnimSequence on one Entity: a Model2D,
+    a Camera2D, or a plain Entity grouping others (its children move with it).
 
     Play modes (AnimPlayMode):
         kOnce          Start to end, then stops at the end
@@ -35,7 +36,7 @@ class AnimPlayer
     #eventCallback; // (player, AnimEvent) or null
 
     // Set by play()
-    #target;        // The Model2D, or null
+    #target;        // The Entity, or null
     #motion;        // The AnimAction or AnimSequence, or null
     #playMode;      // AnimPlayMode
     #actions;       // The actions, as they were when play() was called
@@ -67,15 +68,15 @@ class AnimPlayer
     }
 
     /*
-        Plays motion (an AnimAction or AnimSequence) on model. Motion with no
-        duration jumps to its end and completes. Returns false (and changes
-        nothing) if the arguments aren't valid.
+        Plays motion (an AnimAction or AnimSequence) on model, an Entity (a
+        Model2D must be loaded). Motion with no duration jumps to its end and
+        completes. Returns false (and changes nothing) if the arguments aren't valid.
     */
     play(model, motion, playMode = AnimPlayMode.kOnce)
     {
-        if ((model instanceof Model2D) === false || model.isLoaded() === false)
+        if ((model instanceof Entity) === false || AnimPlayer.#isUnloaded(model) === true)
         {
-            console.error("AnimPlayer.play() needs a loaded Model2D");
+            console.error("AnimPlayer.play() needs an Entity, and a Model2D must be loaded");
                 return false;
         }
 
@@ -163,7 +164,7 @@ class AnimPlayer
         if (Number.isFinite(dt) === false || dt < 0.0)
             return; // Time never runs backwards here; ping-pong handles direction
 
-        if (this.#target.isLoaded() === false)
+        if (AnimPlayer.#isUnloaded(this.#target) === true)
         {
             this.stop(); // The model was unloaded
                 return;
@@ -228,6 +229,9 @@ class AnimPlayer
     isReversed() { return this.#isReversed; }
 
     // *** Internal Methods ***
+
+    // True for a Model2D that isn't loaded; other Entities have nothing to load
+    static #isUnloaded(entity) { return (entity instanceof Model2D && entity.isLoaded() === false); }
 
     /*
         Applies the motion seconds in. Actions passed on the way to the one

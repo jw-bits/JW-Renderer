@@ -59,14 +59,14 @@ class Vector4
     static kBlack = Object.freeze(new Vector4());
     static kWhite = Object.freeze(new Vector4(1.0, 1.0, 1.0, 1.0));
 
+    // *** Static Methods: new, changeable copies of the constants ***
+
+    static black() { return new Vector4(); }
+    static white() { return new Vector4(1.0, 1.0, 1.0, 1.0); }
+
     static
     {
         for (const name of ["kBlack", "kWhite"])
             Object.defineProperty(Vector4, name, { writable: false, configurable: false });
     }
-
-    // *** Static Methods: new, changeable copies of the constants ***
-
-    static black() { return new Vector4(); }
-    static white() { return new Vector4(1.0, 1.0, 1.0, 1.0); }
 }

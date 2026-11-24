@@ -20,7 +20,7 @@
         m.setSampler(0, repeatSampler);       // Or set / change one later
 
     Samplers and textures belong to the caller; one can be shared by many Materials.
-    A texture can be a SubTexture of a TextureAtlas: it binds the atlas, and
+    A texture can be an AtlasSubTexture of a TextureAtlas: it binds the atlas, and
     models draw only its part (see Model2D.getUVRect()).
 
     Blend mode: how its draws combine with what's there (see BlendMode),
@@ -163,8 +163,8 @@ class Material
         mode. Two Materials built from the same objects get the same key, e.g.
         "s3|t7,9|p-,12|b0" (shader 3, textures 7 and 9, unit 0 default sampler,
         unit 1 sampler 12, BlendMode.kAlpha). Uniform values aren't part of it. null if not loaded.
-        Each SubTexture counts as its own texture, so models reading their
-        SubTexture from a shared Material get the right one.
+        Each AtlasSubTexture counts as its own texture, so models reading their
+        AtlasSubTexture from a shared Material get the right one.
     */
     getKey()
     {
@@ -177,9 +177,9 @@ class Material
     /*
         Like getKey() without the shader: just the textures, samplers and blend mode,
         e.g. "t7,9|p-,12|b0". Materials with different shaders but the same textures,
-        samplers and blend mode share it, which is what MaterialBatcher's instanced
-        drawing needs (it uses its own shader). A SubTexture counts as its
-        atlas's Texture, since that's what it binds: SubTextures of one atlas
+        samplers and blend mode share it, which is what Batcher's instanced
+        drawing needs (it uses its own shader). An AtlasSubTexture counts as its
+        atlas's Texture, since that's what it binds: AtlasSubTextures of one atlas
         (and the atlas Texture itself) batch together, each drawing its own
         UV rect. null if not loaded.
     */
@@ -198,7 +198,7 @@ class Material
         Sets the blend mode and binds the shader, and every texture with its sampler
         (each in its own unit, whether or not the shader reads it). Call before
         setUniform() and drawing. Either the shader or the textures can be skipped,
-        e.g. MaterialBatcher binds only the textures and then a shader of its own.
+        e.g. Batcher binds only the textures and then a shader of its own.
     */
     bind(bindShader = true, bindTextures = true)
     {
@@ -302,7 +302,7 @@ class Material
         sampler.bind(textureIndex);
     }
 
-    // The textures, samplers and blend mode part of a key; byAtlas counts each SubTexture as its atlas's Texture
+    // The textures, samplers and blend mode part of a key; byAtlas counts each AtlasSubTexture as its atlas's Texture
     #makeTextureKey(byAtlas)
     {
         const textures = this.#textures.map((t) => Material.#idOf((byAtlas === true) ? t.getTexture() : t));

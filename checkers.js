@@ -163,7 +163,7 @@ const Colors = {
     kSpark: new Vector4(1.0, 0.85, 0.40, 1.0)
 };
 
-// MaterialBatcher layers, back (0) to front (7). Things with different materials
+// Batcher layers, back (0) to front (7). Things with different materials
 // that must overlap a certain way (a button and its label) go on different layers.
 const Layers = {
     kBoard: 0,        // Border, then squares (one material, so submission order holds)
@@ -236,7 +236,7 @@ window.onresize = () => WGLV.resizeToWindow();
 
 function appSetup()
 {
-    WGLV.context.disable(WGLV.context.DEPTH_TEST);
+    // The depth test and the rest of the fixed state are set by WGLV.init() (RenderState.applyDefaults()).
     // Blending is each Material's (BlendMode.kAlpha by default), which keeps the canvas alpha
     // at 1, so translucent overlays darken the scene instead of letting the page show through
 
@@ -247,7 +247,7 @@ function appSetup()
 async function loadAssets()
 {
     FontManager.setDefaultFamily(FONT_FAMILY);
-    gBatcher = new MaterialBatcher();
+    gBatcher = new Batcher();
     gUIFont = FontManager.getDefault();
 
     // Build the shaders now, so none compiles mid-frame the first time it's drawn
@@ -258,7 +258,7 @@ async function loadAssets()
         particle: "./textures/particleA.png"
     };
 
-    // gTextures name -> SubTexture name in the atlas
+    // gTextures name -> AtlasSubTexture name in the atlas
     const atlasTextures = {
         square: "square",
         piece: "checker_piece",

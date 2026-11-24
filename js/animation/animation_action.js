@@ -1,8 +1,9 @@
 "use strict";
 
 /*
-    AnimAction - Animates any of a model's translation, scale and rotation
-    (each an AnimChannel) from a start to a target. Each channel has its own
+    AnimAction - Animates any of an Entity's (a model's, a camera's ...) local
+    translation, scale and rotation (each an AnimChannel) from a start to a
+    target. Animating a parent carries its children. Each channel has its own
     duration and easing; the action lasts as long as its longest channel, and
     shorter ones hold their target until it ends.
 
@@ -194,17 +195,17 @@ class AnimAction
         return out;
     }
 
-    // Writes the AnimChannel parts in channels of transform (position is the anchor) to model; the model keeps its alignment
-    static applyChannels(transform, model, channels = AnimChannel.kAll)
+    // Writes the AnimChannel parts in channels of transform to entity's local transform; a model keeps its alignment
+    static applyChannels(transform, entity, channels = AnimChannel.kAll)
     {
         if ((channels & AnimChannel.kTranslation) !== 0)
-            model.setPos(transform.getX(), transform.getY(), model.getAlignment());
+            entity.setPosition(transform.getX(), transform.getY());
 
         if ((channels & AnimChannel.kScale) !== 0)
-            model.setScale(transform.getScaleX(), transform.getScaleY());
+            entity.setScale(transform.getScaleX(), transform.getScaleY());
 
         if ((channels & AnimChannel.kRotation) !== 0)
-            model.setRotation(transform.getRotation());
+            entity.setRotation(transform.getRotation());
     }
 
     // *** Internal Methods ***

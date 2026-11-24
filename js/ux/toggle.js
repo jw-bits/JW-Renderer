@@ -339,7 +339,7 @@ class Toggle
     }
 
     /*
-        Queues it on a MaterialBatcher: the shapes on layer (drawn in order:
+        Queues it on a Batcher: the shapes on layer (drawn in order:
         outline, track, knob) and the text on textLayer, one above by default.
         Returns false if not loaded.
     */

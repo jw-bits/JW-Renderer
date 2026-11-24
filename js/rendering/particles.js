@@ -82,7 +82,7 @@ class Particles2D
     }
 
     /*
-        maxParticles is how many can be alive at once. The texture (or SubTexture) is
+        maxParticles is how many can be alive at once. The texture (or AtlasSubTexture) is
         drawn on each particle; sampler is optional (see Material). Returns false on failure.
     */
     load(maxParticles, texture, sampler = null)
@@ -263,7 +263,7 @@ class Particles2D
         m.setUniform(RenderUniforms.kVector0, Particles2D.#kGravityScaleTime);
         m.setUniform(RenderUniforms.kVector1, this.#frames); // Every render: the shader is shared by every Particles2D
 
-        // The whole texture, or a SubTexture's part of its atlas
+        // The whole texture, or an AtlasSubTexture's part of its atlas
         const r = m.getTexture(0).getUVRect();
         Particles2D.#kUVOffset.set(r.getX(), r.getY());
         Particles2D.#kUVTile.set(r.getWidth(), r.getHeight());

@@ -113,7 +113,7 @@ class BaseTextEffect
         this.#glyphs.setGlyphColors(null);
     }
 
-    // Queues the text (and its shadow, behind it) on a MaterialBatcher layer
+    // Queues the text (and its shadow, behind it) on a Batcher layer
     submit(batcher, layer) { this.#draw((model) => batcher.submit(model, layer)); }
 
     // Draws the text (and its shadow, first) right away
@@ -658,7 +658,7 @@ class ScrollTextEffect extends BaseTextEffect
     #gap;         // Design units between the text's end and its start coming round
     #pos;         // How far it has scrolled, design units, kept within one wrap
     #viewRect;    // Vector4 (x, y, width, height), from getView()
-    #clippedDraw; // Given to MaterialBatcher.submitDrawable()
+    #clippedDraw; // Given to Batcher.submitDrawable()
     #offsets;     // Float32Array: x, y per glyph
 
     // _glyphs is a TextGlyphs2D
@@ -747,7 +747,7 @@ class ScrollTextEffect extends BaseTextEffect
         return this.#viewRect;
     }
 
-    // Queues the text on a MaterialBatcher layer, with submitDrawable() so it can be clipped to its view
+    // Queues the text on a Batcher layer, with submitDrawable() so it can be clipped to its view
     submit(batcher, layer)
     {
         if (this.#isSet() === false)

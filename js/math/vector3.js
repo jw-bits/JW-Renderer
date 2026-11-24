@@ -102,14 +102,14 @@ class Vector3
     static kZero = Object.freeze(new Vector3());
     static kOne = Object.freeze(new Vector3(1.0, 1.0, 1.0));
 
+    // *** Static Methods: new, changeable copies of the constants ***
+
+    static zero() { return new Vector3(); }
+    static one() { return new Vector3(1.0, 1.0, 1.0); }
+
     static
     {
         for (const name of ["kZero", "kOne"])
             Object.defineProperty(Vector3, name, { writable: false, configurable: false });
     }
-
-    // *** Static Methods: new, changeable copies of the constants ***
-
-    static zero() { return new Vector3(); }
-    static one() { return new Vector3(1.0, 1.0, 1.0); }
 };

@@ -34,7 +34,7 @@
         // Each frame, after moving lights and before drawing
         lights.apply();
 
-    Lit layers: MaterialBatcher.setLayerLit(layer, true) lights every
+    Lit layers: Batcher.setLayerLit(layer, true) lights every
     instanced model (Rect2D, Sprite, Text2D) on that layer, still batched.
     They keep their usual Materials; a Material with a second texture uses
     it as the normal map there. apply() uploads to the batcher's lit shaders
@@ -298,7 +298,7 @@ class LightSet
     // The lit shader with a texture (unit 0) and a normal map (unit 1) (null if it can't be built)
     static getNormalMapShader() { return ShaderManager.get(LitNormalMapRect2DShaderSource); }
 
-    // MaterialBatcher's lit instanced shaders, one texture or with a normal map (null if it can't be built)
+    // Batcher's lit instanced shaders, one texture or with a normal map (null if it can't be built)
     static getInstancedShader() { return ShaderManager.get(LitRect2DInstancedShaderSource); }
     static getInstancedNormalMapShader() { return ShaderManager.get(LitNormalMapRect2DInstancedShaderSource); }
 

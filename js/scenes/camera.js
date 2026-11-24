@@ -12,6 +12,11 @@
         zoom       Screen design units per world unit: 2 shows things twice as big
         rotation   Radians, counter-clockwise: the camera turns, so the world appears to turn clockwise
 
+    Entity: a Camera2D is an Entity (entity.js), so its position and rotation
+    are its local transform, and its world transform is what it shows. Make it
+    a child of something (a ship, a car) to move and turn with it, instead of
+    or as well as follow(). Scale isn't used: zoom with setZoom().
+
     Usage:
         let camera = new Camera2D();
         camera.setPosition(player.getAnchor().x, player.getAnchor().y);
@@ -21,7 +26,7 @@
 
         // Each frame
         camera.update(dt);                 // Follow, bounds and shake
-        batcher.setCamera(camera);         // Layers that follow the camera draw through it (see MaterialBatcher)
+        batcher.setCamera(camera);         // Layers that follow the camera draw through it (see Batcher)
 
         // A tap on the world
         const world = camera.screenToWorld(InputManager.getPosition());
@@ -37,17 +42,19 @@
     added when drawing (and in screenToWorld() / worldToScreen()); the position
     and rotation themselves don't change.
 
+    World bounds: setWorldBounds() keeps the view inside a world rect. With
+    no parent, update() keeps the position inside them; with one, the view is
+    held inside when it's drawn, so a parent can't push it out.
+
     Pixel snap: setPixelSnap(true) rounds the position so the world moves in
     whole device pixels, which stops thin lines and pixel art shimmering
     while the camera moves. It only lines up while the rotation (with any
     rotation shake) is 0.
 */
-class Camera2D
+class Camera2D extends Entity
 {
-    #position;     // Vector2, world; the center of the view
     #zoom;
-    #rotation;     // Radians, counter-clockwise
-    #viewport;     // Vector4 (x, y, width, height) in screen design units, or null for the whole view
+    #viewport;    // Vector4 (x, y, width, height) in screen design units, or null for the whole view
     #worldBounds;  // Vector4 (x, y, width, height) the view stays inside, or null
 
     #isPixelSnap;
@@ -74,6 +81,7 @@ class Camera2D
     #builtView;    // Vector4: the viewport it was built for (the surface's design area with no viewport set)
     #builtScale;   // The surface's pixels per design unit it was built for (pixel snapping)
     #version;      // Goes up on every change, so ClipSpace knows to upload again
+    #seenWorldVersion; // The world version (Entity) #version last caught up with
 
     // Shake defaults
     static #kDefaultTraumaDecay = 1.0;     // Full trauma is gone in 1 second
@@ -83,12 +91,13 @@ class Camera2D
     // Scratch for the view's center
     static #kCenter = new Vector2();
     static #kViewport = new Vector4();
+    static #kWorldPoint = new Vector2();
 
-    constructor()
+    constructor(_name = "")
     {
-        this.#position = new Vector2(0, 0);
+        super(_name);
+
         this.#zoom = 1.0;
-        this.#rotation = 0.0;
         this.#viewport = null;
         this.#worldBounds = null;
         this.#isPixelSnap = false;
@@ -112,17 +121,10 @@ class Camera2D
         this.#builtView = new Vector4();
         this.#builtScale = 0;
         this.#version = 0;
+        this.#seenWorldVersion = -1;
     }
 
-    // The world point at the center of the view
-    setPosition(x, y)
-    {
-        this.#position.set(x, y);
-        this.#changed();
-    }
-
-    // Read-only; change it with setPosition()
-    getPosition() { return this.#position; }
+    // Position and rotation (Entity): the point at the center of the view, and the turn, relative to the parent
 
     // Screen design units per world unit, above 0. Returns false (changing nothing) otherwise.
     setZoom(zoom)
@@ -139,15 +141,6 @@ class Camera2D
     }
 
     getZoom() { return this.#zoom; }
-
-    // Radians, counter-clockwise
-    setRotation(radians)
-    {
-        this.#rotation = radians;
-        this.#changed();
-    }
-
-    getRotation() { return this.#rotation; }
 
     // The part of the screen it draws into, in design units ((x, y) its bottom-left). Returns false if the size isn't above 0.
     setViewport(x, y, width, height)
@@ -220,8 +213,8 @@ class Camera2D
     isPixelSnap() { return this.#isPixelSnap; }
 
     /*
-        update() moves the camera after target: a Model2D (its anchor) or anything with
-        x and y (a Vector2). null stops following. smoothing is the seconds it takes to
+        update() moves the camera after target: an Entity (its world position, a
+        Model2D's anchor) or anything with x and y (a Vector2). null stops following. smoothing is the seconds it takes to
         close half the distance (0 stays exactly on it). The target moves freely inside
         a dead zone of deadZoneWidth x deadZoneHeight world units around the center.
     */
@@ -333,7 +326,10 @@ class Camera2D
     update(dt)
     {
         this.#updateFollow(dt);
-        this.#clampToBounds();
+
+        if (this.getParent() === null)
+            this.#clampToBounds();
+
         this.#updateShake(dt);
         this.#changed();
     }
@@ -382,6 +378,8 @@ class Camera2D
     // World to screen design units, for ClipSpace (which takes the screen to clip space for the surface). Read-only.
     getWorldToScreen()
     {
+        this.#catchUpWorld();
+
         const v = this.getViewport(Camera2D.#kViewport);
         const b = this.#builtView;
         const scale = ClipSpace.getSurfaceScale();
@@ -393,8 +391,12 @@ class Camera2D
         return this.#worldToScreen;
     }
 
-    // Goes up whenever the camera changes
-    getVersion() { return this.#version; }
+    // Goes up whenever the camera changes, including through a parent
+    getVersion()
+    {
+        this.#catchUpWorld();
+            return this.#version;
+    }
 
     // *** Internal Methods ***
 
@@ -404,11 +406,30 @@ class Camera2D
         ++this.#version;
     }
 
-    // The position the view is centered on: shaken, then snapped. Shared; read it right away.
+    // The camera, or a parent, moved or turned since the last check: the view changed
+    #catchUpWorld()
+    {
+        const worldVersion = this.getWorldVersion();
+
+        if (worldVersion !== this.#seenWorldVersion)
+        {
+            this.#seenWorldVersion = worldVersion;
+            this.#changed();
+        }
+    }
+
+    // The world position the view is centered on: held inside the world bounds, shaken, then snapped. Shared; read it right away.
     #getCenter()
     {
+        const world = this.getWorldTransform();
         let c = Camera2D.#kCenter;
-        c.set(this.#position.x + this.#shakeOffset.x, this.#position.y + this.#shakeOffset.y);
+
+        c.set(world.getX(), world.getY());
+
+        if (this.getParent() !== null)
+            this.#clampPoint(c); // With no parent, update() already did
+
+        c.set(c.x + this.#shakeOffset.x, c.y + this.#shakeOffset.y);
 
         if (this.#isPixelSnap === true)
         {
@@ -467,8 +488,8 @@ class Camera2D
         if (t === null)
             return;
 
-        const anchor = (typeof t.getAnchor === "function") ? t.getAnchor() : t;
-        const p = this.#position;
+        const anchor = (t instanceof Entity) ? t.getWorldTransform().getPosition() : t;
+        const p = this.getWorldTransform().getPosition();
         let goalX = p.x;
         let goalY = p.y;
 
@@ -484,20 +505,43 @@ class Camera2D
 
         // Half the way every smoothing seconds, whatever the frame rate
         const k = (this.#smoothing > 0.0) ? 1.0 - Math.pow(0.5, dt / this.#smoothing) : 1.0;
-        p.set(p.x + ((goalX - p.x) * k), p.y + ((goalY - p.y) * k));
+        let w = Camera2D.#kWorldPoint;
+
+        w.set(p.x + ((goalX - p.x) * k), p.y + ((goalY - p.y) * k));
+
+        // The goal is in the world; the position is relative to the parent
+        const parent = this.getParent();
+
+        if (parent !== null)
+            parent.worldToLocal(w, w);
+
+        this.setPosition(w.x, w.y);
     }
 
+    // With no parent: keeps the position inside the world bounds
     #clampToBounds()
+    {
+        const p = this.getPosition();
+        let c = Camera2D.#kWorldPoint;
+
+        c.set(p.x, p.y);
+        this.#clampPoint(c);
+
+        if (c.x !== p.x || c.y !== p.y)
+            this.setPosition(c.x, c.y);
+    }
+
+    // Moves the view center c (a world point) so the view stays inside the world bounds, if any
+    #clampPoint(c)
     {
         const b = this.#worldBounds;
 
         if (b === null)
             return;
 
-        const half = this.#getHalfExtents(this.#rotation); // Unshaken, so the shake doesn't push the camera about
-        const p = this.#position;
-        let x = p.x;
-        let y = p.y;
+        const half = this.#getHalfExtents(this.getWorldTransform().getRotation()); // Unshaken, so the shake doesn't push the camera about
+        let x = c.x;
+        let y = c.y;
 
         // A level smaller than the view is centered
         if (half.x * 2.0 >= b.z)
@@ -510,7 +554,7 @@ class Camera2D
         else
             y = Math.min(Math.max(y, b.y + half.y), b.y + b.w - half.y);
 
-        p.set(x, y);
+        c.set(x, y);
     }
 
     /*
@@ -541,396 +585,6 @@ class Camera2D
         this.#trauma = Math.max(0.0, this.#trauma - (this.#traumaDecay * dt));
     }
 
-    // The rotation the view is drawn at: the camera's, plus the shake's
-    #getViewRotation() { return this.#rotation + this.#shakeRotation; }
+    // The rotation the view is drawn at: the camera's world rotation, plus the shake's
+    #getViewRotation() { return this.getWorldTransform().getRotation() + this.#shakeRotation; }
 }
-
-/*
-    ClipSpace - How design units reach the GL's clip space, and what is clipped.
-
-    Camera: setCamera(camera) draws the world through a Camera2D from then on;
-    setCamera(null) draws in screen design units again (the world is the
-    screen). The active camera's world-to-clip matrix is in the Frame uniform
-    block (see RenderUniformBlocks), uploaded once when the camera changes, so
-    every shader reads it without per-draw uniforms. A camera with a viewport
-    also clips drawing to it. MaterialBatcher sets the camera for each layer.
-
-    Clipping: pushClipRect(x, y, width, height) limits drawing to a rect in
-    screen design units (the GL scissor test) until the matching
-    popClipRect(). Clip rects nest: each one is cut down to the one it's
-    inside, and to the active camera's viewport. Only what's drawn while it's
-    pushed is clipped, so with a MaterialBatcher push and pop inside something
-    drawn from the batcher (see submitDrawable()), not around submit().
-
-    The Frame block is created and given the screen mapping when the first
-    shader using it is loaded (uploadBuffer()), so drawing works without a
-    camera or beginFrame(). beginFrame() resets the per-frame state.
-
-    Surfaces: drawing goes to the canvas or to a RenderTarget (see
-    RenderTargets in render_target.js). Each surface has a design area (the
-    whole design resolution on the canvas, the target's design rect in a
-    target) that ClipSpace maps onto its pixels: the camera's world-to-screen
-    matrix is taken on to the surface's clip space, and clip rects and camera
-    viewports to its pixels. RenderTargets saves ClipSpace's state on push()
-    (saveState()), starts the target clean (resetState()) and puts it back on
-    pop() (restoreState()).
-
-    Each frame, after WGLV.beginFrame():
-        ClipSpace.beginFrame(); // No clip rects, no camera
-
-        ClipSpace.pushClipRect(100, 200, 400, 80);
-        model.render();
-        ClipSpace.popClipRect();
-*/
-class ClipSpace
-{
-    // Frame block, std140: mat3 u_worldToClip (3 columns of 4 floats), vec2 u_res, 2 unused
-    static #kFrameFloats = 16;
-
-    static #frame = null;       // UniformBuffer, made on first use
-    static #frameData = new Float32Array(ClipSpace.#kFrameFloats);
-    static #camera = null;      // Active Camera2D, or null for the screen
-    static #uploadedVersion = -1;
-    static #uploadedSurface = new Vector4(); // The surface design area it was uploaded for
-    static #isUploaded = false;
-
-    static #clipStack = [];     // Pushed clip rects in the surface's pixels: { x, y, w, h }, innermost last
-
-    static #kIdentity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-
-    // Scratch, one per use so they never overwrite each other
-    static #kViewport = new Vector4();
-    static #kSurface = new Vector4();
-    static #kScaleRect = new Vector4();
-    static #kPixelRect = new Vector4();
-
-    /*
-        Back to the canvas (popping any RenderTargets left pushed), with no clip rects
-        and no camera. Call each frame after WGLV.beginFrame().
-    */
-    static beginFrame()
-    {
-        RenderTargets.beginFrame();
-
-        if (ClipSpace.#clipStack.length > 0)
-        {
-            console.error(`ClipSpace.beginFrame(): ${ClipSpace.#clipStack.length} clip rect(s) were never popped`);
-            ClipSpace.#clipStack.length = 0;
-        }
-
-        ClipSpace.setCamera(null);
-        ClipSpace.#applyClip();
-    }
-
-    /*
-        Draws through camera (a Camera2D) from now on, or in screen design units with
-        null. Call again after changing the camera; it uploads only if something changed.
-    */
-    static setCamera(camera)
-    {
-        if (camera !== null && (camera instanceof Camera2D) === false)
-        {
-            console.error("ClipSpace.setCamera() needs a Camera2D or null");
-                return false;
-        }
-
-        if (ClipSpace.#ensureFrame() === false)
-            return false;
-
-        const s = ClipSpace.getSurfaceRect(ClipSpace.#kSurface);
-        const u = ClipSpace.#uploadedSurface;
-        const isSameSurface = (s.x === u.x && s.y === u.y && s.z === u.z && s.w === u.w);
-        const version = (camera !== null) ? camera.getVersion() : -1;
-        const viewportChanged = (camera !== ClipSpace.#camera || (camera !== null && version !== ClipSpace.#uploadedVersion) || isSameSurface === false);
-
-        if (ClipSpace.#isUploaded === true && camera === ClipSpace.#camera && version === ClipSpace.#uploadedVersion && isSameSurface === true)
-            return true; // Already there
-
-        // World to screen design units (the camera's, or the same units with none), then on to the surface's clip space
-        let d = ClipSpace.#frameData;
-        const m = (camera !== null) ? camera.getWorldToScreen().m : ClipSpace.#kIdentity;
-
-        ClipSpace.#writeMatrix(d, m, s);
-        d[12] = s.z;
-        d[13] = s.w;
-        ClipSpace.#frame.update(d);
-
-        ClipSpace.#camera = camera;
-        ClipSpace.#uploadedVersion = version;
-        u.set(s.x, s.y, s.z, s.w);
-        ClipSpace.#isUploaded = true;
-
-        if (viewportChanged === true)
-            ClipSpace.#applyClip(); // A camera viewport clips too
-
-        return true;
-    }
-
-    // The active Camera2D, or null for the screen
-    static getCamera() { return ClipSpace.#camera; }
-
-    // The design area of the surface being drawn, written into out (a Vector4: x, y, width, height) and returned
-    static getSurfaceRect(out = new Vector4())
-    {
-        const target = RenderTargets.getCurrent();
-
-        if (target !== null)
-            return target.getDesignRect(out);
-
-        out.set(0, 0, WGLV.getWidth(), WGLV.getHeight());
-            return out;
-    }
-
-    // Device pixels per design unit on the surface being drawn, across (the view scale on the canvas)
-    static getSurfaceScale()
-    {
-        const target = RenderTargets.getCurrent();
-
-        if (target === null)
-            return WGLV.getViewScale();
-
-        return target.getWidth() / target.getDesignRect(ClipSpace.#kScaleRect).z;
-    }
-
-    // A rect in screen design units in the surface's pixels ({ x, y, w, h }, rounded outward), e.g. for a GL viewport
-    static toPixelRect(x, y, width, height) { return ClipSpace.#toPixels(x, y, width, height); }
-
-    // *** For RenderTargets ***
-
-    // The camera and clip rects, to put back with restoreState()
-    static saveState() { return { camera: ClipSpace.#camera, clips: ClipSpace.#clipStack.slice() }; }
-
-    // No camera and no clip rects, on the surface now being drawn
-    static resetState()
-    {
-        ClipSpace.#clipStack.length = 0;
-        ClipSpace.setCamera(null);
-        ClipSpace.#applyClip();
-    }
-
-    // Back to a saveState(), on the surface now being drawn
-    static restoreState(state)
-    {
-        ClipSpace.#clipStack = state.clips.slice();
-        ClipSpace.setCamera(state.camera);
-        ClipSpace.#applyClip();
-    }
-
-    // Sets the scissor test again, after GL calls that changed it (e.g. a blit)
-    static refresh() { ClipSpace.#applyClip(); }
-
-    /*
-        The Frame block's buffer provider (see RenderUniformBlocks), called by Shader.load():
-        the first time, creates the buffer and sends the active camera's mapping (the
-        screen until a camera is set) to the Frame binding point; afterwards returns
-        right away. So models draw in screen design units even before any setCamera()
-        or beginFrame().
-    */
-    static uploadBuffer()
-    {
-        if (ClipSpace.#isUploaded === true)
-            return true;
-
-        return ClipSpace.setCamera(ClipSpace.#camera);
-    }
-
-    /*
-        Limits drawing to a rect in screen design units ((x, y) its bottom-left), cut
-        down to any clip rect already pushed (or the camera's viewport), until
-        popClipRect(). Returns false (pushing nothing) if the size isn't valid.
-    */
-    static pushClipRect(x, y, width, height)
-    {
-        if (WGLV.context === null)
-            return false;
-
-        if (Number.isFinite(x) === false || Number.isFinite(y) === false || Number.isFinite(width) === false || Number.isFinite(height) === false || width < 0 || height < 0)
-        {
-            console.error("ClipSpace.pushClipRect() needs a position and a size of 0 or more");
-                return false;
-        }
-
-        const outer = (ClipSpace.#clipStack.length > 0) ? ClipSpace.#clipStack[ClipSpace.#clipStack.length - 1] : ClipSpace.#getBaseRect();
-        const r = ClipSpace.#toPixels(x, y, width, height);
-
-        const left = Math.max(r.x, outer.x);
-        const bottom = Math.max(r.y, outer.y);
-        const right = Math.min(r.x + r.w, outer.x + outer.w);
-        const top = Math.min(r.y + r.h, outer.y + outer.h);
-
-        ClipSpace.#clipStack.push({ x: left, y: bottom, w: Math.max(0, right - left), h: Math.max(0, top - bottom) });
-        ClipSpace.#applyClip();
-            return true;
-    }
-
-    // Removes the last pushed clip rect; the one before it (or none) applies again
-    static popClipRect()
-    {
-        if (ClipSpace.#clipStack.length === 0)
-        {
-            console.error("ClipSpace.popClipRect() without a pushClipRect()");
-                return;
-        }
-
-        ClipSpace.#clipStack.pop();
-        ClipSpace.#applyClip();
-    }
-
-    // Clip rects pushed and not yet popped
-    static getClipDepth() { return ClipSpace.#clipStack.length; }
-
-    // Frees the Frame block's buffer; the next setCamera() or beginFrame() makes it again
-    static unload()
-    {
-        if (ClipSpace.#frame !== null)
-            ClipSpace.#frame.unload();
-
-        ClipSpace.#frame = null;
-        ClipSpace.#camera = null;
-        ClipSpace.#isUploaded = false;
-        ClipSpace.#uploadedSurface.set(0, 0, 0, 0);
-        ClipSpace.#clipStack.length = 0;
-    }
-
-    // *** Internal Methods ***
-
-    static #ensureFrame()
-    {
-        if (ClipSpace.#frame !== null)
-            return true;
-
-        if (WGLV.context === null)
-        {
-            console.error("ClipSpace needs WGLV.init() first");
-                return false;
-        }
-
-        let frame = new UniformBuffer();
-
-        if (frame.load(RenderUniformBlocks.kFrame, ClipSpace.#kFrameFloats) === false)
-            return false;
-
-        ClipSpace.#frame = frame;
-        ClipSpace.#isUploaded = false;
-            return true;
-    }
-
-    /*
-        A row-major world-to-screen Matrix3 m (its 9 values), taken on to clip space for the
-        surface design area s (screen (s.x, s.y) - (s.x + s.z, s.y + s.w) to (-1, -1) - (1, 1)),
-        written as the std140 mat3's columns: its rows become GLSL's columns, so GLSL works
-        out [x, y, 1] * M.
-    */
-    static #writeMatrix(d, m, s)
-    {
-        const ax = 2.0 / s.z;
-        const ay = 2.0 / s.w;
-        const bx = -1.0 - (s.x * ax);
-        const by = -1.0 - (s.y * ay);
-
-        for (let row = 0; row < 3; ++row)
-        {
-            const i = row * 3;
-            const o = row * 4;
-            const w = m[i + 2];
-
-            d[o] = (m[i] * ax) + (bx * w);
-            d[o + 1] = (m[i + 1] * ay) + (by * w);
-            d[o + 2] = w;
-            d[o + 3] = 0.0;
-        }
-    }
-
-    // A rect in screen design units, in the surface's pixels, rounded outward so edges in between pixels aren't lost
-    static #toPixels(x, y, width, height)
-    {
-        const target = RenderTargets.getCurrent();
-        let ox = 0.0; // The design area's bottom-left, in pixels
-        let oy = 0.0;
-        let sx = 0.0; // Pixels per design unit
-        let sy = 0.0;
-        let dx = 0.0; // The design area's bottom-left, in design units
-        let dy = 0.0;
-
-        if (target === null)
-        {
-            ox = WGLV.getViewportX();
-            oy = WGLV.getViewportY();
-            sx = WGLV.getViewScale();
-            sy = sx;
-        }
-        else
-        {
-            const r = target.getDesignRect(ClipSpace.#kPixelRect);
-            sx = target.getWidth() / r.z;
-            sy = target.getHeight() / r.w;
-            dx = r.x;
-            dy = r.y;
-        }
-
-        const left = Math.floor(ox + ((x - dx) * sx));
-        const bottom = Math.floor(oy + ((y - dy) * sy));
-        const right = Math.ceil(ox + ((x + width - dx) * sx));
-        const top = Math.ceil(oy + ((y + height - dy) * sy));
-
-        return { x: left, y: bottom, w: right - left, h: top - bottom };
-    }
-
-    // All of the surface being drawn, in its pixels: the canvas's view, or the whole target
-    static #getSurfacePixels()
-    {
-        const target = RenderTargets.getCurrent();
-
-        if (target !== null)
-            return { x: 0, y: 0, w: target.getWidth(), h: target.getHeight() };
-
-        return { x: WGLV.getViewportX(), y: WGLV.getViewportY(), w: WGLV.getViewportWidth(), h: WGLV.getViewportHeight() };
-    }
-
-    // What clip rects are cut down to: the camera's viewport, or the whole surface
-    static #getBaseRect()
-    {
-        const view = ClipSpace.#getSurfacePixels();
-        const c = ClipSpace.#camera;
-
-        if (c === null || c.hasViewport() === false)
-            return view;
-
-        const v = c.getViewport(ClipSpace.#kViewport);
-        const r = ClipSpace.#toPixels(v.x, v.y, v.z, v.w);
-        const left = Math.max(r.x, view.x);
-        const bottom = Math.max(r.y, view.y);
-        const right = Math.min(r.x + r.w, view.x + view.w);
-        const top = Math.min(r.y + r.h, view.y + view.h);
-
-        return { x: left, y: bottom, w: Math.max(0, right - left), h: Math.max(0, top - bottom) };
-    }
-
-    // Sets the scissor test to the innermost clip rect or the camera's viewport, or turns it off when neither applies
-    static #applyClip()
-    {
-        const gl = WGLV.context;
-
-        if (gl === null)
-            return;
-
-        let r = null;
-
-        if (ClipSpace.#clipStack.length > 0)
-            r = ClipSpace.#clipStack[ClipSpace.#clipStack.length - 1];
-        else if (ClipSpace.#camera !== null && ClipSpace.#camera.hasViewport() === true)
-            r = ClipSpace.#getBaseRect();
-
-        if (r === null)
-        {
-            gl.disable(gl.SCISSOR_TEST); // The GL viewport already clips drawing to the view
-                return;
-        }
-
-        gl.enable(gl.SCISSOR_TEST);
-        gl.scissor(r.x, r.y, r.w, r.h);
-    }
-}
-
-// Every shader declaring the Frame block gets its data on load (see RenderUniformBlocks)
-RenderUniformBlocks.setBufferProvider(RenderUniformBlocks.kFrame, ClipSpace.uploadBuffer);

@@ -101,7 +101,7 @@ class TextCanvas
     it again (see TextGlyphs2D). One TextAtlas can be shared by any number of
     TextGlyphs2Ds, which all draw with its one Material.
 
-    Each glyph is a SubTexture named by its character, drawn in white like
+    Each glyph is an AtlasSubTexture named by its character, drawn in white like
     Text2D (the color is a tint). A space and the fallback character "?" are
     always included; a character that isn't in the atlas draws as "?".
 
@@ -139,7 +139,7 @@ class TextAtlas
     #font;
     #fontSize;
     #fontWeight;
-    #atlas;      // TextureAtlas: one SubTexture per character
+    #atlas;      // TextureAtlas: one AtlasSubTexture per character
     #material;   // The atlas Texture on Rect2D's default shader, shared by every TextGlyphs2D
     #glyphs;     // Character -> { subTexture, advance, width, height }, in design units
     #lineHeight; // Design units: the height of every glyph, padding included
@@ -387,7 +387,7 @@ class TextAtlas
         ctx.textBaseline = "middle";
         ctx.fillStyle = "#ffffff";
 
-        // Draw them, and describe each as a SubTexture (V up, so the canvas's top row is V 1)
+        // Draw them, and describe each as an AtlasSubTexture (V up, so the canvas's top row is V 1)
         let textures = {};
 
         for (const cell of cells)

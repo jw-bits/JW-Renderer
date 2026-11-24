@@ -308,6 +308,27 @@ class Interpolator
 */
 class Easing extends Interpolator
 {
+    // Easing types; the first six keep their original values
+    static kQuadraticIn = 0;
+    static kQuadraticOut = 1;
+    static kQuadraticInOut = 2;
+    static kCubicIn = 3;
+    static kCubicOut = 4;
+    static kCubicInOut = 5;
+    static kLinear = 6;
+    static kSineIn = 7;
+    static kSineOut = 8;
+    static kSineInOut = 9;
+    static kBackIn = 10;
+    static kBackOut = 11;
+    static kBackInOut = 12;
+    static kElasticOut = 13;
+    static kBounceOut = 14;
+
+    static #kBackC1 = 1.70158;                // How far Back overshoots (about 10%)
+    static #kBackC3 = Easing.#kBackC1 + 1.0;
+    static #kElasticC4 = MathDefines.kTwoPi / 3.0;   // Elastic Out wobble period
+
     #easingType;
 
     // With no arguments it starts finished; call init() to start it
@@ -474,29 +495,6 @@ class Easing extends Interpolator
         const t1 = t - (2.625 / d1);
             return (n1 * t1 * t1) + 0.984375;
     }
-
-    // *** Static Vars ***
-
-    static #kBackC1 = 1.70158;                // How far Back overshoots (about 10%)
-    static #kBackC3 = Easing.#kBackC1 + 1.0;
-    static #kElasticC4 = MathDefines.kTwoPi / 3.0;   // Elastic Out wobble period
-
-    // Easing types; the first six keep their original values
-    static kQuadraticIn = 0;
-    static kQuadraticOut = 1;
-    static kQuadraticInOut = 2;
-    static kCubicIn = 3;
-    static kCubicOut = 4;
-    static kCubicInOut = 5;
-    static kLinear = 6;
-    static kSineIn = 7;
-    static kSineOut = 8;
-    static kSineInOut = 9;
-    static kBackIn = 10;
-    static kBackOut = 11;
-    static kBackInOut = 12;
-    static kElasticOut = 13;
-    static kBounceOut = 14;
 
     static
     {
