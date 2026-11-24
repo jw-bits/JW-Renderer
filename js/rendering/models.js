@@ -10,8 +10,9 @@
                              and samplers, so many models can share one (see MaterialManager).
 
     Uniform values live here, not in the Material: render() binds the
-    material, then uploads this model's u_res, u_color, u_vec0, u_scale, and
-    its UV rect as u_uvOffset and u_uvTile (for shaders that use them).
+    material, then uploads this model's u_color, u_vec0, u_scale, and its UV
+    rect as u_uvOffset and u_uvTile (for shaders that use them). Positions are
+    world design units; the active camera (see ClipSpace) takes them to the screen.
 
     A subclass's load() builds the mesh, calls its bindAttribs(), then hands
     both to the base with the "_" setters below (for subclasses only).
@@ -42,7 +43,6 @@
 class Model2D
 {
     // Scratch values for uploading uniforms in render()
-    static #kRes = new Vector2();
     static #kRect = new Vector4();
     static #kScaleRot = new Vector3();
     static #kUVOffset = new Vector2();
@@ -181,13 +181,11 @@ class Model2D
         const m = this.#material;
         const r = uvRect ?? this.getUVRect();
 
-        Model2D.#kRes.set(WGLV.getWidth(), WGLV.getHeight());
         Model2D.#kRect.set(transform.getX(), transform.getY(), this.#width / 2.0, this.#height / 2.0);
         Model2D.#kScaleRot.set(transform.getScaleX(), transform.getScaleY(), transform.getRotation());
         Model2D.#kUVOffset.set(r.getX(), r.getY());
         Model2D.#kUVTile.set(r.getWidth(), r.getHeight());
 
-        m.setUniform("u_res", Model2D.#kRes);
         m.setUniform("u_color", color);
         m.setUniform("u_vec0", Model2D.#kRect);
         m.setUniform("u_scale", Model2D.#kScaleRot);

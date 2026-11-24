@@ -61,6 +61,7 @@ class Shader
                 return false;
         }
 
+        this.#bindUniformBlocks();
         return true; // Shader made
 
     }
@@ -93,15 +94,27 @@ class Shader
 
     getUniform(uniformName) { return WGLV.context.getUniformLocation(this.#programId, uniformName); } // null if not found
 
-    // Names of the uniforms the linked program actually uses (the compiler drops unused ones)
+    /*
+        Names of the uniforms the linked program actually uses (the compiler drops unused ones),
+        outside any uniform block: block members come from a UniformBuffer, not a Material.
+    */
     getActiveUniformNames()
     {
         const gl = WGLV.context;
         const count = gl.getProgramParameter(this.#programId, gl.ACTIVE_UNIFORMS) ?? 0;
         let names = [];
 
+        if (count === 0)
+            return names;
+
+        const indices = Array.from({ length: count }, (_, i) => i);
+        const blockIndices = gl.getActiveUniforms(this.#programId, indices, gl.UNIFORM_BLOCK_INDEX);
+
         for (let i = 0; i < count; ++i)
         {
+            if (blockIndices[i] !== -1)
+                continue; // In a uniform block
+
             const info = gl.getActiveUniform(this.#programId, i);
 
             if (info !== null)
@@ -111,12 +124,41 @@ class Shader
         return names;
     }
 
+    // True if the program declares (and uses) the uniform block blockName, e.g. RenderUniformBlocks.kFrame
+    hasUniformBlock(blockName)
+    {
+        return (WGLV.context.getUniformBlockIndex(this.#programId, blockName) !== WGLV.context.INVALID_INDEX);
+    }
+
     bind()
     {
         WGLV.context.useProgram(this.#programId);
     }
 
     // *** Internal Methods ***
+
+    /*
+        Points each RenderUniformBlocks block the program declares at its binding point, where
+        its UniformBuffer is, then calls the block's bufferProvider (if registered) so the buffer
+        has its data before anything draws with this shader.
+    */
+    #bindUniformBlocks()
+    {
+        const gl = WGLV.context;
+
+        for (const [name, block] of RenderUniformBlocks.allBlocks)
+        {
+            const index = gl.getUniformBlockIndex(this.#programId, name);
+
+            if (index === gl.INVALID_INDEX)
+                continue; // Not declared (or not used) by this program
+
+            gl.uniformBlockBinding(this.#programId, index, block.binding);
+
+            if (block.bufferProvider !== null)
+                block.bufferProvider();
+        }
+    }
 
     #logCompilerFailure(shaderId, shaderSource)
     {

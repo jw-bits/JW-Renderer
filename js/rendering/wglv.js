@@ -1,9 +1,10 @@
 "use strict";
 
 /*
-    WGLV (WebGL View) - The WebGL2 context and everything about the view:
-    the app's fixed design resolution, fitting it to the window, clearing,
-    and converting input positions.
+    WGLV (WebGL View) - The WebGL2 context and fitting the view to the
+    device: the app's fixed design resolution, letter-boxing it into the
+    canvas at the device's physical resolution, clearing, and converting
+    input positions. Cameras and clipping are ClipSpace's (camera.js).
 
     Everything is drawn in design units: (0, 0) is the bottom-left of the
     design area and (getWidth(), getHeight()) is the top-right, whatever the
@@ -24,6 +25,7 @@
 
         // Each frame
         WGLV.beginFrame();
+        ClipSpace.beginFrame();
         ...draw...
 
         // Mouse / touch input in design units (+Y up)
@@ -37,17 +39,6 @@
         WGLV.removeRasterScaleListener(obj); // Listeners are held strongly; always remove them
 
     Model2D wraps this with listenForRasterScale(true / false).
-
-    Clipping: pushClipRect(x, y, width, height) limits drawing to a rect in
-    design units (the GL scissor test) until the matching popClipRect().
-    Clip rects nest: each one is cut down to the one it's inside. Only what's
-    drawn while it's pushed is clipped, so with a MaterialBatcher push and pop
-    inside something drawn from the batcher (see submitDrawable()), not
-    around submit(). beginFrame() clears any left pushed.
-
-        WGLV.pushClipRect(100, 200, 400, 80);
-        model.render();
-        WGLV.popClipRect();
 */
 class WGLV
 {
@@ -67,8 +58,6 @@ class WGLV
     static #clearColor = new Vector4(0, 0, 0, 1);
 
     static #rasterScaleListeners = new Set();
-
-    static #clipStack = []; // Pushed clip rects in canvas pixels: { x, y, w, h }, innermost last
 
     static init(canvasId, ctxAttributes = null)
     {
@@ -125,6 +114,12 @@ class WGLV
     static getWidth() { return WGLV.#designWidth; }   // Design units
     static getHeight() { return WGLV.#designHeight; } // Design units
     static getViewScale() { return WGLV.#viewScale; } // Device pixels per design unit; the scale to rasterize at
+
+    // The view's rect in the canvas, in device pixels with the GL origin at the bottom-left (the bars are outside it)
+    static getViewportX() { return WGLV.#viewX; }
+    static getViewportY() { return WGLV.#viewY; }
+    static getViewportWidth() { return WGLV.#viewW; }
+    static getViewportHeight() { return WGLV.#viewH; }
 
     // listener needs an onRasterScaleChanged(newScale) method. Returns false if it doesn't have one.
     static addRasterScaleListener(listener)
@@ -198,7 +193,7 @@ class WGLV
         WGLV.context.viewport(WGLV.#viewX, WGLV.#viewY, WGLV.#viewW, WGLV.#viewH);
     }
 
-    // Fills the bars with the bar color and the view with the clear color
+    // Fills the bars with the bar color and the view with the clear color. Then call ClipSpace.beginFrame().
     static beginFrame()
     {
         if (WGLV.context === null)
@@ -208,12 +203,6 @@ class WGLV
         const bits = gl.COLOR_BUFFER_BIT; // No depth buffer: 2D draws in layer order
 
         WGLV.restoreView();
-
-        if (WGLV.#clipStack.length > 0)
-        {
-            console.error(`WGLV.beginFrame(): ${WGLV.#clipStack.length} clip rect(s) were never popped`);
-            WGLV.#clipStack.length = 0;
-        }
 
         gl.disable(gl.SCISSOR_TEST);
         gl.clearColor(WGLV.#barColor.x, WGLV.#barColor.y, WGLV.#barColor.z, WGLV.#barColor.w);
@@ -225,60 +214,6 @@ class WGLV
         gl.clear(bits);
         gl.disable(gl.SCISSOR_TEST); // The viewport already clips drawing to the view
     }
-
-    /*
-        Limits drawing to a rect in design units ((x, y) its bottom-left), cut
-        down to any clip rect already pushed, until popClipRect(). Returns
-        false (pushing nothing) if the size isn't valid.
-    */
-    static pushClipRect(x, y, width, height)
-    {
-        if (WGLV.context === null)
-            return false;
-
-        if (Number.isFinite(x) === false || Number.isFinite(y) === false || Number.isFinite(width) === false || Number.isFinite(height) === false || width < 0 || height < 0)
-        {
-            console.error("WGLV.pushClipRect() needs a position and a size of 0 or more");
-                return false;
-        }
-
-        // To canvas pixels, rounded outward so edges in between pixels aren't lost
-        const s = WGLV.#viewScale;
-        let left = Math.floor(WGLV.#viewX + (x * s));
-        let bottom = Math.floor(WGLV.#viewY + (y * s));
-        let right = Math.ceil(WGLV.#viewX + ((x + width) * s));
-        let top = Math.ceil(WGLV.#viewY + ((y + height) * s));
-
-        // Inside the view, and inside the clip rect it's pushed into
-        const outer = (WGLV.#clipStack.length > 0) ? WGLV.#clipStack[WGLV.#clipStack.length - 1] : { x: WGLV.#viewX, y: WGLV.#viewY, w: WGLV.#viewW, h: WGLV.#viewH };
-
-        left = Math.max(left, outer.x);
-        bottom = Math.max(bottom, outer.y);
-        right = Math.min(right, outer.x + outer.w);
-        top = Math.min(top, outer.y + outer.h);
-
-        const rect = { x: left, y: bottom, w: Math.max(0, right - left), h: Math.max(0, top - bottom) };
-
-        WGLV.#clipStack.push(rect);
-        WGLV.#applyClip();
-            return true;
-    }
-
-    // Removes the last pushed clip rect; the one before it (or none) applies again
-    static popClipRect()
-    {
-        if (WGLV.#clipStack.length === 0)
-        {
-            console.error("WGLV.popClipRect() without a pushClipRect()");
-                return;
-        }
-
-        WGLV.#clipStack.pop();
-        WGLV.#applyClip();
-    }
-
-    // Clip rects pushed and not yet popped
-    static getClipDepth() { return WGLV.#clipStack.length; }
 
     // A point in page (client) pixels, e.g. from a mouse event, in design units with +Y up.
     // Points over the bars land outside 0..getWidth() / 0..getHeight().
@@ -293,23 +228,5 @@ class WGLV
         const py = c.height - ((clientY - bounds.top) * (c.height / bounds.height)); // Flip to +Y up
 
         return new Vector2((px - WGLV.#viewX) / WGLV.#viewScale, (py - WGLV.#viewY) / WGLV.#viewScale);
-    }
-
-    // *** Internal Methods ***
-
-    // Sets the scissor test to the innermost clip rect, or turns it off with none pushed
-    static #applyClip()
-    {
-        const gl = WGLV.context;
-
-        if (WGLV.#clipStack.length === 0)
-        {
-            gl.disable(gl.SCISSOR_TEST);
-                return;
-        }
-
-        const r = WGLV.#clipStack[WGLV.#clipStack.length - 1];
-        gl.enable(gl.SCISSOR_TEST);
-        gl.scissor(r.x, r.y, r.w, r.h);
     }
 }

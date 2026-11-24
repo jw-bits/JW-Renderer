@@ -38,6 +38,35 @@ class MathUtil
     {
         return Math.min(1.0, Math.max(0.0, v));
     }
+
+    /*
+        Smooth 1D gradient noise, -1 to 1: a wavy line through x that's 0 at every
+        whole number and changes direction about once per unit. The same x and seed
+        always give the same value; a different seed (a whole number) gives a
+        different line. Sampled over time (x = seconds * frequency) it wobbles the
+        same way whatever the frame rate.
+    */
+    static noise1D(x, seed = 0)
+    {
+        const i = Math.floor(x);
+        const f = x - i;
+        const v0 = MathUtil.gradient(i, seed) * f;
+        const v1 = MathUtil.gradient(i + 1, seed) * (f - 1.0);
+        const u = f * f * f * ((f * ((f * 6.0) - 15.0)) + 10.0); // Smootherstep: no kinks at whole numbers
+
+        return 2.0 * MathUtil.lerp(v0, v1, u); // Gradient noise peaks at 0.5
+    }
+
+    // A slope from -1 to 1 for whole number i, the same every time for the same i and seed
+    static gradient(i, seed)
+    {
+        let h = Math.imul(i ^ Math.imul(seed, 0x27d4eb2d), 0x9e3779b1);
+        h ^= h >>> 15;
+        h = Math.imul(h, 0x85ebca6b);
+        h ^= h >>> 13;
+
+        return (((h >>> 0) / 4294967295) * 2.0) - 1.0;
+    }
 }
 
 /*

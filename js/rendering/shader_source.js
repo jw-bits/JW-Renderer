@@ -5,7 +5,31 @@
     ShaderManager keys each built shader by it, so a new source needs a name
     no other source uses. Attribute locations come from RenderAttributes and
     InstancedAttributes (render_defines.js).
+
+    Every vertex shader works in world design units and reaches clip space
+    through the Frame uniform block (FrameSharedSource, uploaded by ClipSpace),
+    so the active camera applies to everything drawn.
 */
+
+/*
+    Vertex shader code shared by every shader: the Frame uniform block (see
+    RenderUniformBlocks) and worldToClip(), which takes a world position in
+    design units through the active camera (or straight to the screen with
+    none) to clip space.
+*/
+const FrameSharedSource = {
+    name: "FrameShared", // Code shared by every shader, not a shader of its own
+    VS: `
+        layout(std140) uniform Frame {
+            mat3 u_worldToClip; // [x, y, 1] * M: the uploaded rows are GLSL's columns
+            vec2 u_res;         // The design resolution
+        };
+
+        vec4 worldToClip(vec2 p) {
+            return vec4((u_worldToClip * vec3(p, 1.0)).xy, 0.0, 1.0);
+        }
+    `
+};
 
 const Rect2DShaderSource = {
     name: "Rect2D",
@@ -13,7 +37,7 @@ const Rect2DShaderSource = {
         layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
         
-        uniform vec2 u_res;
+        ${FrameSharedSource.VS}
         uniform vec3 u_scale;
 
         // u_vec0 is (x, y, width / 2, height / 2); scale and rotation pivot on the rect's center
@@ -34,10 +58,7 @@ const Rect2DShaderSource = {
             vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
                              ssPos.x * sa + ssPos.y * ca);
 
-            vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
-            vec2 cs = (zTo1 * 2.0) - 1.0;
-
-            gl_Position = vec4(cs, 0.0, 1.0);
+            gl_Position = worldToClip(rPos + u_vec0.zw + u_vec0.xy);
 
             v_uv0 = u_uvOffset + (a_uv0 * u_uvTile);
         }
@@ -63,7 +84,8 @@ const Rect2DShaderSource = {
     Rect2D's vertex inputs and uniforms). The lights come from a LightSet
     (lighting.js), which uploads them once per frame.
 
-    The 2D view lies on the z = 0 plane, in design units, +Y up: lights at
+    The world lies on the z = 0 plane, in design units, +Y up (lighting is in
+    world space, before the camera, so lights move with the world): lights at
     negative z are behind it, positive z in front. Each pixel is lit at
     (x, y, 0) with a surface normal of (0, 0, 1), facing the viewer, or the
     normal map's (LitNormalMapRect2DShaderSource).
@@ -88,7 +110,7 @@ const LightingSharedSource = {
         layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
 
-        uniform vec2 u_res;
+        ${FrameSharedSource.VS}
         uniform vec3 u_scale;
 
         // u_vec0 is (x, y, width / 2, height / 2); scale and rotation pivot on the rect's center
@@ -112,8 +134,7 @@ const LightingSharedSource = {
 
             v_pos = rPos + u_vec0.zw + u_vec0.xy;
 
-            vec2 cs = ((v_pos / u_res) * 2.0) - 1.0;
-            gl_Position = vec4(cs, 0.0, 1.0);
+            gl_Position = worldToClip(v_pos);
 
             v_uv0 = u_uvOffset + (a_uv0 * u_uvTile);
             v_rotFlip = vec4(ca, sa, sign(u_scale.xy));
@@ -235,7 +256,7 @@ const TextGlyphs2DShaderSource = {
         layout(location = 1) in vec2 a_uv0;
         layout(location = 7) in vec4 a_color;
 
-        uniform vec2 u_res;
+        ${FrameSharedSource.VS}
         uniform vec3 u_scale;
 
         // u_vec0 is (x, y, width / 2, height / 2); scale and rotation pivot on the rect's center
@@ -256,10 +277,7 @@ const TextGlyphs2DShaderSource = {
             vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
                              ssPos.x * sa + ssPos.y * ca);
 
-            vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
-            vec2 cs = (zTo1 * 2.0) - 1.0;
-
-            gl_Position = vec4(cs, 0.0, 1.0);
+            gl_Position = worldToClip(rPos + u_vec0.zw + u_vec0.xy);
 
             v_uv0 = u_uvOffset + (a_uv0 * u_uvTile);
             v_color = a_color;
@@ -293,7 +311,7 @@ const SpriteShaderSource = {
         layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
 
-        uniform vec2 u_res;
+        ${FrameSharedSource.VS}
         uniform vec3 u_scale;
 
         // u_vec0 is (x, y, width / 2, height / 2); scale and rotation pivot on the rect's center
@@ -313,10 +331,7 @@ const SpriteShaderSource = {
             vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
                              ssPos.x * sa + ssPos.y * ca);
 
-            vec2 zTo1 = (rPos + u_vec0.zw + u_vec0.xy) / u_res;
-            vec2 cs = (zTo1 * 2.0) - 1.0;
-
-            gl_Position = vec4(cs, 0.0, 1.0);
+            gl_Position = worldToClip(rPos + u_vec0.zw + u_vec0.xy);
 
             v_uv0 = u_vec1.xy + (a_uv0 * u_vec1.zw);
         }
@@ -347,7 +362,7 @@ const Rect2DInstancedShaderSource = {
         layout(location = 10) in vec4 a_instColor;
         layout(location = 11) in vec4 a_instVec0; // UV rect
 
-        uniform vec2 u_res;
+        ${FrameSharedSource.VS}
 
         out vec2 v_uv0;
         out vec4 v_color;
@@ -362,10 +377,7 @@ const Rect2DInstancedShaderSource = {
             vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
                              ssPos.x * sa + ssPos.y * ca);
 
-            vec2 zTo1 = (rPos + halfSize + a_instRect.xy) / u_res;
-            vec2 cs = (zTo1 * 2.0) - 1.0;
-
-            gl_Position = vec4(cs, 0.0, 1.0);
+            gl_Position = worldToClip(rPos + halfSize + a_instRect.xy);
 
             v_uv0 = a_instVec0.xy + (a_pos * a_instVec0.zw);
             v_color = a_instColor;
@@ -403,7 +415,7 @@ const LitRect2DInstancedShaderSource = {
         layout(location = 10) in vec4 a_instColor;
         layout(location = 11) in vec4 a_instVec0; // UV rect
 
-        uniform vec2 u_res;
+        ${FrameSharedSource.VS}
 
         out vec2 v_uv0;
         out vec4 v_color;
@@ -422,8 +434,7 @@ const LitRect2DInstancedShaderSource = {
 
             v_pos = rPos + halfSize + a_instRect.xy;
 
-            vec2 cs = ((v_pos / u_res) * 2.0) - 1.0;
-            gl_Position = vec4(cs, 0.0, 1.0);
+            gl_Position = worldToClip(v_pos);
 
             v_uv0 = a_instVec0.xy + (a_pos * a_instVec0.zw);
             v_color = a_instColor;
@@ -489,7 +500,7 @@ const LitNormalMapRect2DInstancedShaderSource = {
     size * endScale. Particles that haven't started or have died are
     collapsed off-screen, so dead slots cost almost nothing.
 
-    Uniforms: u_res, and u_vec0 = (gravityX, gravityY, endScale, time), time in seconds.
+    Uniforms: u_vec0 = (gravityX, gravityY, endScale, time), time in seconds.
     u_uvOffset / u_uvTile are the part of the texture drawn on each particle:
     (0, 0) / (1, 1) for all of it, or a SubTexture's UV rect (see TextureAtlas).
 
@@ -512,7 +523,7 @@ const Particles2DShaderSource = {
         layout(location = 11) in vec4 a_instVec0; // Motion
         layout(location = 12) in vec4 a_instVec1; // Life
 
-        uniform vec2 u_res;
+        ${FrameSharedSource.VS}
         uniform vec4 u_vec0; // (gravityX, gravityY, endScale, time)
         uniform vec4 u_vec1; // (cols, rows, firstFrame, frameCount)
         uniform vec2 u_uvOffset;
@@ -537,7 +548,7 @@ const Particles2DShaderSource = {
             float size = a_instVec1.z * mix(1.0, u_vec0.z, t);
             vec2 p = center + (a_pos * size);
 
-            gl_Position = vec4(((p / u_res) * 2.0) - 1.0, 0.0, 1.0);
+            gl_Position = worldToClip(p);
 
             // The frame for its age, then its cell in the grid; rows count down from the top, V runs up
             float cols = u_vec1.x;

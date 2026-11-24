@@ -4,8 +4,8 @@
     Performance Test - One of every Model2D type (Rect2D, RoundedRect2D,
     NinePatch2D, Sprite, Text2D, TextGlyphs2D), a Particles2D, every text
     effect (Wave, Fade, Ease, Scroll), two lit Rect2Ds, two Toggles, two
-    CheckBoxes and three Buttons (tap them; see InputManager), with a small
-    metrics window.
+    CheckBoxes, three Buttons (tap them; see InputManager) and a Camera2D
+    view of a small world, with a small metrics window.
 
     Pages: the view is a 3 x 3 grid of slots. The metrics window always has
     the upper-left slot, so each page shows up to 8 test items, one per slot,
@@ -112,6 +112,18 @@ const BUTTON_ICON_SIZE = 30;
 const BUTTON_GAP = 88;                    // The three Buttons sit this far apart, top to bottom
 const CHECKBOX_GAP = 80;                  // The two CheckBoxes sit this far left and right of their slot's center
 
+// Camera: a small checkered world seen through a Camera2D whose viewport is its slot
+const CAMERA_TILE = 80;                   // World units per tile
+const CAMERA_TILES = 8;                   // Tiles per side
+const CAMERA_VIEW = new Vector2(CELL_W - 60, CELL_H - 90); // The viewport, screen design units, centered in its slot
+const CAMERA_BORDER = 4;                  // The frame around the viewport
+const CAMERA_PAN_SPEED = 300;             // A / D pan, screen design units per second (so the same on screen at any zoom)
+const CAMERA_ZOOM_RATE = 2.0;             // W / S zoom, times per second
+const CAMERA_ZOOM_MIN = 0.25;
+const CAMERA_ZOOM_MAX = 4.0;
+const CAMERA_TRAUMA = 0.4;                // E shake: trauma added per press, so quick presses build up
+const CAMERA_SHAKE_ROTATION = 0.06;       // Radians at full trauma
+
 const Layers = {
     kLit: 0,       // The lit brick Rect2Ds; the batcher lights this layer
     kShapes: 1,    // Rect2D, RoundedRect2D, NinePatch2D, Sprite
@@ -135,6 +147,8 @@ const Colors = {
     kCheckGreen: new Vector4(0.42, 0.78, 0.26, 1.0),
     kButtonGreenHover: new Vector4(0.52, 0.86, 0.36, 1.0),
     kButtonGreenPressed: new Vector4(0.32, 0.62, 0.18, 1.0),
+    kTileLight: new Vector4(0.30, 0.34, 0.44, 1.0),
+    kTileDark: new Vector4(0.20, 0.23, 0.30, 1.0),
     kParticles: [new Vector4(1.0, 0.55, 0.20, 1.0), new Vector4(1.0, 0.85, 0.35, 1.0),
                  new Vector4(0.45, 0.75, 1.0, 1.0), new Vector4(0.95, 0.40, 0.70, 1.0)]
 };
@@ -589,6 +603,10 @@ function buildScene()
 
     items.push(buttonItem);
 
+    // *** Camera ***
+
+    items.push(makeCameraItem(t.rect, t.circle));
+
     // *** Pages and labels ***
 
     const labelAtlas = new TextAtlas(font, items.map((item) => item.label).join(""), LABEL_FONT_SIZE);
@@ -671,6 +689,128 @@ function makeLitItem(label, model, lights, dotTexture, rocks)
              } };
 }
 
+/*
+    A Camera2D as a test item: a checkered world with an arrow at its center, seen
+    through a camera the keys move, its viewport the item's slot: A / D pan left /
+    right, W / S zoom in / out, E shakes it (adds trauma, with a little rotation
+    shake), only while its page is showing.
+    It has its own MaterialBatcher with the camera: layer 0 ignores the camera (the
+    frame, in screen units), layers 1 and 2 follow it. The pointer, over the
+    viewport, is turned into world units (screenToWorld()) and marked with a dot
+    in the world, so the dot should sit right under it however the camera moves.
+    The batcher is drawn from the main one as a drawable.
+*/
+function makeCameraItem(arrowTexture, dotTexture)
+{
+    const white = TextureManager.getWhiteTexture();
+    const worldCenter = (CAMERA_TILE * CAMERA_TILES) / 2.0;
+
+    let camera = new Camera2D();
+    camera.setPosition(worldCenter, worldCenter);
+    camera.setShakeLimits(camera.getShakeMaxOffset(), CAMERA_SHAKE_ROTATION);
+    let batcher = new MaterialBatcher();
+    batcher.setCamera(camera);
+    batcher.setLayerFollowsCamera(0, false);
+
+    let border = new Rect2D();
+    border.load(white, CAMERA_VIEW.x + (CAMERA_BORDER * 2), CAMERA_VIEW.y + (CAMERA_BORDER * 2));
+    border.setColor(Colors.kLabel);
+
+    let backdrop = new Rect2D();
+    backdrop.load(white, CAMERA_VIEW.x, CAMERA_VIEW.y);
+    backdrop.setColor(Colors.kBackground);
+
+    let tile = new Rect2D(); // Submitted once per tile, moved and recolored in between
+    tile.load(white, CAMERA_TILE, CAMERA_TILE);
+
+    let arrow = new Rect2D();
+    arrow.load(arrowTexture, CAMERA_TILE * 2, CAMERA_TILE * 2);
+    arrow.setPos(worldCenter, worldCenter, Alignment.kMiddleCenter);
+
+    let cursor = new Rect2D();
+    cursor.load(dotTexture, 20, 20);
+    cursor.setColor(Colors.kGold);
+
+    const viewport = new Vector4();
+    const pointer = new Vector2();
+    let showCursor = false;
+
+    const drawable = { render: () => batcher.render() };
+
+    let item = {
+        label: "Camera2D - A/D pan, W/S zoom, E shake",
+        place: (x, y) => {
+            camera.setViewport(x - (CAMERA_VIEW.x / 2.0), y - (CAMERA_VIEW.y / 2.0), CAMERA_VIEW.x, CAMERA_VIEW.y);
+            border.setPos(x, y, Alignment.kMiddleCenter);
+            backdrop.setPos(x, y, Alignment.kMiddleCenter);
+        },
+        update: (dt, time) => {
+            // Keys, only while its page is showing
+            if (item.page === gPages.current)
+            {
+                const pan = (InputManager.isKeyHeld(KeyCode.kD) ? 1.0 : 0.0) - (InputManager.isKeyHeld(KeyCode.kA) ? 1.0 : 0.0);
+                const zoomDir = (InputManager.isKeyHeld(KeyCode.kW) ? 1.0 : 0.0) - (InputManager.isKeyHeld(KeyCode.kS) ? 1.0 : 0.0);
+
+                if (pan !== 0.0)
+                {
+                    const p = camera.getPosition();
+                    camera.setPosition(p.x + ((pan * CAMERA_PAN_SPEED * dt) / camera.getZoom()), p.y);
+                }
+
+                if (zoomDir !== 0.0)
+                {
+                    const zoom = camera.getZoom() * Math.pow(CAMERA_ZOOM_RATE, zoomDir * dt);
+                    camera.setZoom(Math.min(Math.max(zoom, CAMERA_ZOOM_MIN), CAMERA_ZOOM_MAX));
+                }
+
+                if (InputManager.wasKeyPressed(KeyCode.kE) === true)
+                    camera.addTrauma(CAMERA_TRAUMA);
+            }
+
+            camera.update(dt);
+
+            // The pointer, when it's over the viewport, in world units
+            showCursor = false;
+
+            if (item.page === gPages.current && InputManager.hasPosition() === true)
+            {
+                const p = InputManager.getPosition();
+                const v = camera.getViewport(viewport);
+
+                if (p.x >= v.x && p.x <= v.x + v.z && p.y >= v.y && p.y <= v.y + v.w)
+                {
+                    camera.screenToWorld(p, pointer);
+                    cursor.setPos(pointer.x, pointer.y, Alignment.kMiddleCenter);
+                    showCursor = true;
+                }
+            }
+        },
+        submit: () => {
+            batcher.submit(border, 0);
+            batcher.submit(backdrop, 0);
+
+            for (let r = 0; r < CAMERA_TILES; ++r)
+            {
+                for (let c = 0; c < CAMERA_TILES; ++c)
+                {
+                    tile.setColor(((r + c) % 2 === 0) ? Colors.kTileLight : Colors.kTileDark);
+                    tile.setPos(c * CAMERA_TILE, r * CAMERA_TILE);
+                    batcher.submit(tile, 1);
+                }
+            }
+
+            batcher.submit(arrow, 1);
+
+            if (showCursor === true)
+                batcher.submit(cursor, 2);
+
+            gBatcher.submitDrawable(drawable, Layers.kShapes);
+        }
+    };
+
+    return item;
+}
+
 // A 1 x 4 strip of numbered discs for the Sprite to count through
 function makeSpriteStrip()
 {
@@ -730,13 +870,17 @@ function appMain(ts)
         }
 
         WGLV.beginFrame();
+        ClipSpace.beginFrame();
         beginCounting();
         submitScene();
         gBatcher.render();
         endCounting();
     }
     else
+    {
         WGLV.beginFrame();
+        ClipSpace.beginFrame();
+    }
 
     updateFPS(ts);
     updateHud(ts);
@@ -1089,6 +1233,7 @@ function measureOverdraw()
     const gl = WGLV.context;
 
     WGLV.beginFrame(); // Also points drawing at the canvas through the view
+    ClipSpace.beginFrame();
 
     gl.stencilMask(0xFF);
     gl.clearStencil(0);
@@ -1116,13 +1261,11 @@ function measureOverdraw()
     gl.disable(gl.STENCIL_TEST);
     gl.enable(gl.BLEND);
 
-    // The view rect in canvas pixels, worked out as WGLV does
-    const c = gl.canvas;
-    const scale = WGLV.getViewScale();
-    const w = Math.round(WGLV.getWidth() * scale);
-    const h = Math.round(WGLV.getHeight() * scale);
-    const x = Math.floor((c.width - w) / 2);
-    const y = Math.floor((c.height - h) / 2);
+    // The view rect in canvas pixels
+    const x = WGLV.getViewportX();
+    const y = WGLV.getViewportY();
+    const w = WGLV.getViewportWidth();
+    const h = WGLV.getViewportHeight();
     const size = w * h * 4;
 
     if (gMark.pixels === null || gMark.pixels.length !== size)

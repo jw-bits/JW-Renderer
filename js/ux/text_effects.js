@@ -638,7 +638,8 @@ class EaseTextEffect extends BaseTextEffect
 
     Directions: kLeft, kRight, kUp, kDown.
 
-    Drawing outside the view is clipped (WGLV.pushClipRect()). With a
+    Drawing outside the view is clipped (ClipSpace.pushClipRect(), in screen
+    design units, so put it on a layer that ignores the camera). With a
     batcher, it goes on its layer with submitDrawable(), so it's drawn after
     that layer's models. Until set() is called the text is drawn as it is.
 */
@@ -770,11 +771,11 @@ class ScrollTextEffect extends BaseTextEffect
 
         const v = this.getView();
 
-        if (WGLV.pushClipRect(v.x, v.y, v.z, v.w) === false)
+        if (ClipSpace.pushClipRect(v.x, v.y, v.z, v.w) === false)
             return;
 
         super.render();
-        WGLV.popClipRect();
+        ClipSpace.popClipRect();
     }
 
     _onUpdate(dt)

@@ -129,7 +129,8 @@ class InstancedAttributes
 /*
     Every uniform name a shader may use. Material only finds uniforms listed
     here, so a new shader packs its values into these (e.g. the generic
-    u_vec0 - u_vec7) rather than inventing names.
+    u_vec0 - u_vec7) rather than inventing names. Uniforms inside a uniform
+    block are listed in RenderUniformBlocks instead.
 */
 class RenderUniforms
 {
@@ -142,7 +143,6 @@ class RenderUniforms
     // 2-component
     static kUVTile = "u_uvTile"; // (X, Y) => (U = U * X, V = V * Y)
     static kUVOffset = "u_uvOffset"; // (X, Y) => (U = U + X, V = V + Y)
-    static kResolution = "u_res"; // (W, H)
 
     // 3-component
     static kScale = "u_scale"; // (SX, SY, SZ)
@@ -194,7 +194,6 @@ class RenderUniforms
         this.allUniforms.set(RenderUniforms.kTexture3, 1);
         this.allUniforms.set(RenderUniforms.kUVTile, 2);
         this.allUniforms.set(RenderUniforms.kUVOffset, 2);
-        this.allUniforms.set(RenderUniforms.kResolution, 2);
         this.allUniforms.set(RenderUniforms.kScale, 3);
         this.allUniforms.set(RenderUniforms.kEulerRotation, 3);
         this.allUniforms.set(RenderUniforms.kColor, 4);
@@ -233,6 +232,69 @@ class RenderUniforms
             case RenderUniforms.kTexture3: return 3;
             default: return -1;
         }
+    }
+}
+
+/*
+    Every uniform block a shader may declare, each with its own binding point.
+    A block's values live in one UniformBuffer (buffers.js) that every shader
+    declaring the block reads; Shader.load() connects them by name. Members of
+    a block aren't Material uniforms, so they aren't in RenderUniforms.
+
+    bufferProvider: the code that owns a block's buffer registers a function
+    with setBufferProvider(). Shader.load() calls it for each block the shader
+    declares, after connecting the block, so the buffer has its data at the
+    binding point before anything draws with the shader. It's called once per
+    shader load, so it must create and upload only the first time and return
+    right away afterwards. null (the default) calls nothing.
+
+        Frame (binding 0, see ClipSpace in camera.js), std140:
+            mat3 u_worldToClip   World position (design units) to clip space, through the active camera
+            vec2 u_res           The design resolution (W, H)
+*/
+class RenderUniformBlocks
+{
+    static kFrame = "Frame";
+
+    static allBlocks = new Map(); // Name -> { binding, bufferProvider }; bufferProvider is a function or null
+
+    // -1 for a name that isn't listed
+    static getBinding(name)
+    {
+        const b = RenderUniformBlocks.allBlocks.get(name);
+            return (b !== undefined) ? b.binding : -1;
+    }
+
+    // The function that sends name's data to its binding point, or null
+    static getBufferProvider(name)
+    {
+        const b = RenderUniformBlocks.allBlocks.get(name);
+            return (b !== undefined) ? b.bufferProvider : null;
+    }
+
+    // Registers (or with null, removes) the function that sends name's data to its binding point. Returns false if name isn't listed.
+    static setBufferProvider(name, bufferProvider)
+    {
+        const b = RenderUniformBlocks.allBlocks.get(name);
+
+        if (b === undefined)
+        {
+            console.error(`RenderUniformBlocks.setBufferProvider(): "${name}" isn't a uniform block`);
+                return false;
+        }
+
+        if (bufferProvider !== null && typeof bufferProvider !== "function")
+        {
+            console.error("RenderUniformBlocks.setBufferProvider() needs a function or null");
+                return false;
+        }
+
+        b.bufferProvider = bufferProvider;
+            return true;
+    }
+
+    static {
+        RenderUniformBlocks.allBlocks.set(RenderUniformBlocks.kFrame, { binding: 0, bufferProvider: null });
     }
 }
 

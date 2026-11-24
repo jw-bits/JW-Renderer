@@ -161,6 +161,58 @@ class Matrix3
         return mat;
     } 
 
+    /*
+        2D helpers. A 2D point is the row vector [x, y, 1], so it's point * M
+        and a translation sits in the last row (m[6], m[7]).
+    */
+
+    // Moves by (x, y)
+    static fromTranslation2D(x, y)
+    {
+        const mat = new Matrix3();
+        mat.m[6] = x;
+        mat.m[7] = y;
+        return mat;
+    }
+
+    // Scales by (sx, sy) about the origin
+    static fromScale2D(sx, sy = sx)
+    {
+        const mat = new Matrix3();
+        mat.m[0] = sx;
+        mat.m[4] = sy;
+        return mat;
+    }
+
+    // b * a, like Matrix4.multiply(): with row vectors, b is applied first, then a. A new Matrix3.
+    static multiply(a, b)
+    {
+        const out = new Matrix3();
+        const ae = a.m, be = b.m, te = out.m;
+
+        for (let r = 0; r < 3; ++r)
+        {
+            const b0 = be[(r * 3)], b1 = be[(r * 3) + 1], b2 = be[(r * 3) + 2];
+
+            te[(r * 3)]     = (b0 * ae[0]) + (b1 * ae[3]) + (b2 * ae[6]);
+            te[(r * 3) + 1] = (b0 * ae[1]) + (b1 * ae[4]) + (b2 * ae[7]);
+            te[(r * 3) + 2] = (b0 * ae[2]) + (b1 * ae[5]) + (b2 * ae[8]);
+        }
+
+        return out;
+    }
+
+    // [point.x, point.y, 1] * mat, written into out (also returned). out may be point.
+    static transformPoint2D(mat, point, out = new Vector2())
+    {
+        const m = mat.m;
+        const x = point.x, y = point.y;
+
+        out.set((x * m[0]) + (y * m[3]) + m[6],
+                (x * m[1]) + (y * m[4]) + m[7]);
+        return out;
+    }
+
 	static orthonormalize(mat) // (Matrix3)
     {
         const v0 = new Vector3(mat.m[0], mat.m[1], mat.m[2]);

@@ -38,7 +38,6 @@ class Particles2D
     static #kRebaseTime = 600.0;     // Seconds; the clock restarts after this once nothing's alive
 
     // Scratch values for uploading uniforms in render()
-    static #kRes = new Vector2();
     static #kGravityScaleTime = new Vector4(); // u_vec0: (gravityX, gravityY, endScale, time)
     static #kUVOffset = new Vector2();
     static #kUVTile = new Vector2();
@@ -258,11 +257,9 @@ class Particles2D
         this.#upload();
 
         const m = this.#material;
-        Particles2D.#kRes.set(WGLV.getWidth(), WGLV.getHeight());
         Particles2D.#kGravityScaleTime.set(this.#gravity.x, this.#gravity.y, this.#endScale, this.#time);
 
         m.bind(); // Shader, texture, sampler
-        m.setUniform(RenderUniforms.kResolution, Particles2D.#kRes);
         m.setUniform(RenderUniforms.kVector0, Particles2D.#kGravityScaleTime);
         m.setUniform(RenderUniforms.kVector1, this.#frames); // Every render: the shader is shared by every Particles2D
 

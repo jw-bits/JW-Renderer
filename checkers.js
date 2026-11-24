@@ -591,7 +591,8 @@ function appUpdate(dt)
 
 function appRender()
 {
-    WGLV.beginFrame(); // Clears the view and the bars around it
+    WGLV.beginFrame();      // Clears the view and the bars around it
+    ClipSpace.beginFrame(); // No clip rects; screen design units until a camera is set
 
     // The render functions only submit to the batcher; it draws everything at the end
     if (gScreen === GameScreen.kMenu)

@@ -47,6 +47,16 @@
     drawn one at a time (RoundedRect2D, NinePatch2D, custom shaders) and
     drawables draw as they always do. Call LightSet.apply() each frame before
     render().
+
+    Camera: setCamera(camera) gives the batcher one Camera2D. Every layer
+    follows it (drawn through it, in world units) unless
+    setLayerFollowsCamera(layer, false) makes the layer ignore it and draw in
+    screen design units, e.g. the UI and HUD over a scrolling world. With no
+    camera every layer draws in screen design units. render() leaves
+    ClipSpace's camera as it found it.
+
+        batcher.setCamera(camera);
+        batcher.setLayerFollowsCamera(Layers.kUI, false);
 */
 class MaterialBatcher
 {
@@ -61,18 +71,19 @@ class MaterialBatcher
     #groups;      // Per layer: group key (texture key string for instanced, else the Material) -> group number, in order of first submission
     #drawables;   // Per layer: objects with render(), drawn after the layer's models
     #litLayers;   // Per layer: true if its instanced models are lit
+    #ignoresCamera; // Per layer: true if it draws in screen design units whatever the camera
+    #camera;      // Camera2D the layers follow, or null
     #pool;        // Entry objects reused from frame to frame
     #poolUsed;
 
     // Instanced Rect2D drawing; null shader if it couldn't be set up (every model is drawn on its own then)
     #instShader;
-    #instResLocation;
     #instMesh;
     #instData;
     #instCapacity;
 
     // Lit instanced drawing (LightSet's shaders): [one texture, with a normal map], each
-    // { shader, resLocation }; null until first needed, false if it couldn't be built
+    // a Shader; null until first needed, false if it couldn't be built
     #litShaders;
 
     #drawCalls;     // Draw calls made by the last render()
@@ -83,6 +94,8 @@ class MaterialBatcher
         this.#groups = [];
         this.#drawables = [];
         this.#litLayers = [];
+        this.#ignoresCamera = [];
+        this.#camera = null;
 
         for (let i = 0; i < MaterialBatcher.kLayerCount; ++i)
         {
@@ -90,6 +103,7 @@ class MaterialBatcher
             this.#groups.push(new Map());
             this.#drawables.push([]);
             this.#litLayers.push(false);
+            this.#ignoresCamera.push(false);
         }
 
         this.#litShaders = [null, null];
@@ -98,7 +112,6 @@ class MaterialBatcher
         this.#poolUsed = 0;
 
         this.#instShader = null;
-        this.#instResLocation = null;
         this.#instMesh = new InstancedQuadMesh();
         this.#instData = null;
         this.#instCapacity = 0;
@@ -200,13 +213,53 @@ class MaterialBatcher
 
     isLayerLit(layer) { return (this.#litLayers[layer] === true); }
 
+    // The Camera2D the layers follow, or null for none (every layer in screen design units). Kept until changed.
+    setCamera(camera)
+    {
+        if (camera !== null && (camera instanceof Camera2D) === false)
+        {
+            console.error("MaterialBatcher.setCamera() needs a Camera2D or null");
+                return false;
+        }
+
+        this.#camera = camera;
+            return true;
+    }
+
+    getCamera() { return this.#camera; }
+
+    /*
+        Whether a layer draws through the camera (true, the default) or ignores it and
+        draws in screen design units (false). Kept until changed. Returns false if the
+        layer isn't valid.
+    */
+    setLayerFollowsCamera(layer, follows)
+    {
+        if (Number.isInteger(layer) === false || layer < MaterialBatcher.kMinLayer || layer > MaterialBatcher.kMaxLayer)
+        {
+            console.error(`MaterialBatcher.setLayerFollowsCamera(): layer must be ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}`);
+                return false;
+        }
+
+        this.#ignoresCamera[layer] = (follows === false);
+            return true;
+    }
+
+    doesLayerFollowCamera(layer) { return (this.#ignoresCamera[layer] !== true); }
+
     // Draws everything submitted since the last render(), back layer to front, then empties the batcher
     render()
     {
         this.#drawCalls = 0;
 
+        const before = ClipSpace.getCamera(); // Put back afterwards
+
         for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
         {
+            if (this.#layers[l].length === 0 && this.#drawables[l].length === 0)
+                continue;
+
+            ClipSpace.setCamera((this.#ignoresCamera[l] === true) ? null : this.#camera);
             this.#renderModels(this.#layers[l], this.#litLayers[l]);
 
             for (const d of this.#drawables[l])
@@ -216,6 +269,7 @@ class MaterialBatcher
             }
         }
 
+        ClipSpace.setCamera(before);
         this.clear();
     }
 
@@ -314,7 +368,6 @@ class MaterialBatcher
     // Draws quads sharing textures and samplers in one instanced call; lit uses a lit shader
     #drawInstanced(list, start, end, lit)
     {
-        const gl = WGLV.context;
         const count = end - start;
         const stride = MaterialBatcher.#kFloatsPerInstance;
 
@@ -349,22 +402,17 @@ class MaterialBatcher
         // Any Material in the group has the same textures and samplers; bind just those, then the instanced shader
         const material = list[start].material;
         let shader = this.#instShader;
-        let resLocation = this.#instResLocation;
 
         if (lit === true)
         {
             const litShader = this.#getLitShader(material.getTexture(1) !== null); // Texture 1 is the normal map
 
             if (litShader !== false)
-            {
-                shader = litShader.shader;
-                resLocation = litShader.resLocation;
-            }
+                shader = litShader;
         }
 
         material.bind(false, true);
-        shader.bind();
-        gl.uniform2f(resLocation, WGLV.getWidth(), WGLV.getHeight());
+        shader.bind(); // Positions reach the screen through the Frame block (ClipSpace)
 
         this.#instMesh.updateInstanceData(d, 0, count * stride);
         this.#instMesh.render(count);
@@ -410,7 +458,7 @@ class MaterialBatcher
                 gl.uniform1i(shader.getUniform("u_tex0"), 0);
                 gl.uniform1i(shader.getUniform("u_tex1"), 1); // null location (no normal map) is ignored
 
-                this.#litShaders[i] = { shader: shader, resLocation: shader.getUniform("u_res") };
+                this.#litShaders[i] = shader;
             }
         }
 
@@ -424,8 +472,6 @@ class MaterialBatcher
 
         if (shader === null)
             return false;
-
-        this.#instResLocation = shader.getUniform("u_res");
 
         // Texture unit 0 never changes; uniform values stay with the program
         shader.bind();
