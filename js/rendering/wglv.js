@@ -31,14 +31,32 @@
         // Mouse / touch input in design units (+Y up)
         const p = WGLV.clientToView(e.clientX, e.clientY);
 
-    Raster scale event: anything drawn into a texture at screen resolution
-    (like Text2D) needs redrawing when the view scale changes. Listeners are
-    objects with an onRasterScaleChanged(newScale) method:
+    Listeners: anything that needs to know when the view changes registers a
+    listeners object, a plain object holding one or more of these callbacks
+    (and nothing else):
 
-        WGLV.addRasterScaleListener(obj);    // obj.onRasterScaleChanged(scale) is called on each change
-        WGLV.removeRasterScaleListener(obj); // Listeners are held strongly; always remove them
+        {
+            onRasterScaleChanged: (newScale) => { },  // The view scale changed (getViewScale()). Anything
+                                                      // drawn into a texture at screen resolution (Text2D,
+                                                      // TextAtlas) draws itself again so it stays sharp.
+            onContextLost: () => { },                 // The GL context was taken away (see below)
+            onContextRestored: () => { }              // A new, empty GL context was given back
+        }
+
+        const listeners = { onRasterScaleChanged: (scale) => this.redraw(scale) };
+        WGLV.addListeners(listeners);
+        ...
+        WGLV.removeListeners(listeners);              // The same object; held strongly until then
 
     Model2D wraps this with listenForRasterScale(true / false).
+
+    Lost context: the browser can take the GL context away (often on phones,
+    under memory pressure or in a background tab) and give a new, empty one
+    back later. WGLV asks for it back and calls onContextLost() and
+    onContextRestored(). Every GL object is gone on restore; RenderTargets
+    (render_target.js) make theirs again, and RenderState forgets what it
+    set. Shaders, textures and meshes aren't rebuilt yet; an app that must
+    survive a lost context reloads them in its own onContextRestored().
 */
 class WGLV
 {
@@ -57,7 +75,10 @@ class WGLV
     static #barColor = new Vector4(0, 0, 0, 1);
     static #clearColor = new Vector4(0, 0, 0, 1);
 
-    static #rasterScaleListeners = new Set();
+    static #kListenerNames = ["onRasterScaleChanged", "onContextLost", "onContextRestored"];
+
+    static #listeners = new Set(); // Listeners objects (see the top of this file)
+    static #isContextLost = false;
 
     static init(canvasId, ctxAttributes = null)
     {
@@ -93,7 +114,39 @@ class WGLV
                 return false;
         }
 
-        return true;
+        c.addEventListener("webglcontextlost", (e) => WGLV.#onContextLost(e));
+        c.addEventListener("webglcontextrestored", () => WGLV.#onContextRestored());
+            return true;
+    }
+
+    // True between the context being lost and given back; nothing drawn meanwhile shows
+    static isContextLost() { return WGLV.#isContextLost; }
+
+    /*
+        Registers a listeners object (see the top of this file): one or more of
+        onRasterScaleChanged, onContextLost and onContextRestored, each a function, and
+        no other keys. Adding the same object again does nothing. Returns false (adding
+        nothing) if it isn't one.
+    */
+    static addListeners(listeners)
+    {
+        const names = (listeners !== null && typeof listeners === "object") ? Object.keys(listeners) : [];
+        const isValid = (names.length > 0 && names.every((n) => WGLV.#kListenerNames.includes(n) === true && typeof listeners[n] === "function"));
+
+        if (isValid === false)
+        {
+            console.error(`WGLV.addListeners() needs an object of one or more callbacks named ${WGLV.#kListenerNames.join(", ")}`);
+                return false;
+        }
+
+        WGLV.#listeners.add(listeners);
+            return true;
+    }
+
+    // Unregisters a listeners object given to addListeners()
+    static removeListeners(listeners)
+    {
+        WGLV.#listeners.delete(listeners);
     }
 
     // Call before resizeToWindow(), usually once at startup
@@ -120,24 +173,6 @@ class WGLV
     static getViewportY() { return WGLV.#viewY; }
     static getViewportWidth() { return WGLV.#viewW; }
     static getViewportHeight() { return WGLV.#viewH; }
-
-    // listener needs an onRasterScaleChanged(newScale) method. Returns false if it doesn't have one.
-    static addRasterScaleListener(listener)
-    {
-        if (typeof listener?.onRasterScaleChanged !== "function")
-        {
-            console.error("WGLV.addRasterScaleListener() needs an object with an onRasterScaleChanged(newScale) method");
-                return false;
-        }
-
-        WGLV.#rasterScaleListeners.add(listener);
-            return true;
-    }
-
-    static removeRasterScaleListener(listener)
-    {
-        WGLV.#rasterScaleListeners.delete(listener);
-    }
 
     static setBarColor(color) { WGLV.#barColor.set(color.x, color.y, color.z, color.w); }
     static setClearColor(color) { WGLV.#clearColor.set(color.x, color.y, color.z, color.w); }
@@ -176,11 +211,7 @@ class WGLV
         WGLV.restoreView();
 
         if (scaleChanged === true)
-        {
-            // A copy, so listeners can add or remove listeners while being called
-            for (const listener of Array.from(WGLV.#rasterScaleListeners))
-                listener.onRasterScaleChanged(scale);
-        }
+            WGLV.#notify("onRasterScaleChanged", scale);
     }
 
     // Draws to the canvas through the design view again (e.g. after rendering into a framebuffer)
@@ -228,5 +259,35 @@ class WGLV
         const py = c.height - ((clientY - bounds.top) * (c.height / bounds.height)); // Flip to +Y up
 
         return new Vector2((px - WGLV.#viewX) / WGLV.#viewScale, (py - WGLV.#viewY) / WGLV.#viewScale);
+    }
+
+    // *** Internal Methods ***
+
+    static #onContextLost(e)
+    {
+        e.preventDefault(); // Without this the browser never gives the context back
+        WGLV.#isContextLost = true;
+        RenderState.invalidate();
+        console.error("WGLV: the WebGL context was lost; waiting for it to come back");
+        WGLV.#notify("onContextLost");
+    }
+
+    static #onContextRestored()
+    {
+        WGLV.#isContextLost = false;
+        RenderState.invalidate();
+        WGLV.resizeToWindow(); // A new context: the viewport again
+        WGLV.#notify("onContextRestored");
+    }
+
+    // Calls name on every listeners object that has it
+    static #notify(name, value = undefined)
+    {
+        // A copy, so listeners can add or remove listeners while being called
+        for (const listeners of Array.from(WGLV.#listeners))
+        {
+            if (listeners[name] !== undefined)
+                listeners[name](value);
+        }
     }
 }

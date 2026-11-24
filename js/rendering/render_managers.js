@@ -459,7 +459,8 @@ class TextureManager
 
 /*
     MaterialManager - Keeps one Material per unique shader + textures + samplers
-    (see Material.getKey()).
+    + blend mode (see Material.getKey()). Don't change a shared Material's blend
+    mode; load one with the mode you need.
 
     Requesting the same combination again returns the same Material. The
     shaders, textures and samplers belong to the caller (or their managers);
@@ -478,8 +479,8 @@ class MaterialManager
 {
     static #materials = new Map(); // Key -> Material
 
-    // The Material for this shader, textures and samplers (samplers optional, per unit), or null on failure
-    static load(shader, textures = [], samplers = null)
+    // The Material for this shader, textures, samplers (optional, per unit) and BlendMode, or null on failure
+    static load(shader, textures = [], samplers = null, blendMode = BlendMode.kAlpha)
     {
         if (shader == null)
         {
@@ -489,7 +490,7 @@ class MaterialManager
 
         let material = new Material();
 
-        if (material.load(shader, textures, samplers) === false)
+        if (material.load(shader, textures, samplers) === false || material.setBlendMode(blendMode) === false)
         {
             console.error("MaterialManager couldn't load a material (up to 4 textures and samplers are supported)");
                 return null;

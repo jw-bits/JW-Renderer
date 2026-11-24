@@ -4,8 +4,14 @@
     Performance Test - One of every Model2D type (Rect2D, RoundedRect2D,
     NinePatch2D, Sprite, Text2D, TextGlyphs2D), a Particles2D, every text
     effect (Wave, Fade, Ease, Scroll), two lit Rect2Ds, two Toggles, two
-    CheckBoxes, three Buttons (tap them; see InputManager) and a Camera2D
-    view of a small world, with a small metrics window.
+    CheckBoxes, three Buttons (tap them; see InputManager), a Camera2D
+    view of a small world, and render targets: a minimap of that world, a
+    CachedLayer, and bloom, blur and screen (CRT) effects each on their own
+    slot, with a small metrics window.
+
+    Render targets (render_target.js, post_effects.js): pages change with a
+    ScreenTransition (a wipe, circle, dissolve, fade or wipe up, in turn)
+    from a capture of the old page.
 
     Pages: the view is a 3 x 3 grid of slots. The metrics window always has
     the upper-left slot, so each page shows up to 8 test items, one per slot,
@@ -32,7 +38,8 @@
                     the batcher, and every particle), plus Rect2D / Sprite / Text2D drawn on their own
                     and each glyph of a TextGlyphs2D. RoundedRect2D and NinePatch2D aren't quads.
         Overdraw    Pixels drawn 2 or more times, and the share of the view that is
-        Draw calls  GL draw calls
+        Draw calls  GL draw calls (post effect passes included)
+        Targets     RenderTargets loaded and their GPU memory, and how many are RenderTargetPool's
 
     The counts come from wrapping, from here, the GL
     context's draw calls, Material.prototype.bind and Model2D.prototype.draw.
@@ -43,7 +50,11 @@
     and they're read back and counted. Transparent parts of a quad count as
     drawn (they're still rasterized and blended); clipped (scissored)
     fragments don't. The normal frame is then drawn over it, so the extra
-    pass is never seen, but it does cost those frames some time.
+    pass is never seen, but it does cost those frames some time. Only the
+    canvas has a stencil buffer, so what's drawn into render targets counts
+    once, as the pass that draws the target onto the canvas. Reading the
+    pixels back stalls the GPU, so on touch screens (phones) it starts off;
+    O turns it on and off.
 
     Particles2D draws every slot of its ring each frame, alive or not, so its
     vertices and rectangles are its capacity's worth.
@@ -63,6 +74,11 @@ const CELL_H = DESIGN_HEIGHT / GRID_ROWS;  // 360
 const ITEMS_PER_PAGE = (GRID_COLS * GRID_ROWS) - 1;
 const PAGE_SECONDS = 5.0;        // Auto-cycle; space pauses and resumes it
 
+// Each page's background (the clear color), in turn, so page transitions stand out
+const PAGE_BACKGROUNDS = [new Vector4(0.0, 0.0, 64.0 / 255.0, 1.0),
+                          new Vector4(0.0, 64.0 / 255.0, 0.0, 1.0),
+                          new Vector4(64.0 / 255.0, 64.0 / 255.0, 64.0 / 255.0, 1.0)];
+
 const ITEM_RAISE = 20;           // An item sits this far above its cell's center, leaving room for its label
 const LABEL_FONT_SIZE = 20;
 const LABEL_Y = 26;              // A label's center, above its cell's bottom
@@ -74,7 +90,7 @@ const HUD_FONT = "Consolas, 'Courier New', monospace"; // Monospaced, so the lab
 const HUD_FONT_SIZE = 16.5;
 const HUD_MARGIN = 10.5;         // From the view's top-left corner
 const HUD_PADDING = 7.5;         // Around the text, inside the panel
-const HUD_LABELS = ["Page", "FPS", "Vertices", "Materials", "Rectangles", "Overdraw", "Draw calls"];
+const HUD_LABELS = ["Page", "FPS", "Vertices", "Materials", "Rectangles", "Overdraw", "Draw calls", "Targets", "Keys"];
 const OVERDRAW_SAMPLE_MS = 500;  // How often overdraw is measured
 const MAX_DT = 0.1;              // Seconds; longer frames (e.g. a hidden tab) are clamped
 
@@ -124,6 +140,19 @@ const CAMERA_ZOOM_MAX = 4.0;
 const CAMERA_TRAUMA = 0.4;                // E shake: trauma added per press, so quick presses build up
 const CAMERA_SHAKE_ROTATION = 0.06;       // Radians at full trauma
 
+// Render targets
+const POST_VIEW = new Vector2(CELL_W - 60, CELL_H - 90); // Each post effect item's rect, centered in its slot
+const MINIMAP_PIXELS = 256;               // The minimap's target, pixels per side...
+const MINIMAP_SIZE = 230;                 // ...shown this big, design units
+const CACHE_COLS = 20;                    // The cached layer's grid of rects
+const CACHE_ROWS = 14;
+const CACHE_CELL = new Vector2(26, 18);   // Design units per rect, with a 2 unit gap all round
+const CACHE_REDRAW_SECONDS = 2.0;         // New colors, so it's drawn again, this often
+const TRANSITION_SECONDS = 0.7;
+const TRANSITION_SOFTNESS = 0.15;
+const TRANSITION_TYPES = [ScreenTransition.kWipeLeft, ScreenTransition.kCircle, ScreenTransition.kDissolve,
+                          ScreenTransition.kFade, ScreenTransition.kWipeUp]; // In turn, one per page change
+
 const Layers = {
     kLit: 0,       // The lit brick Rect2Ds; the batcher lights this layer
     kShapes: 1,    // Rect2D, RoundedRect2D, NinePatch2D, Sprite
@@ -172,8 +201,12 @@ let gIsReady = false;
 let gPrevTS = 0.0;
 let gEaseHold = 0.0;    // Seconds the ease holds its end before playing again
 
-// Which page is shown; it changes every PAGE_SECONDS unless paused (space)
-let gPages = { current: 0, count: 1, timer: 0.0, isPaused: false };
+// Which page is shown; it changes every PAGE_SECONDS unless paused (space). isTurning: change at the end of this frame.
+let gPages = { current: 0, count: 1, timer: 0.0, isPaused: false, isTurning: false };
+
+// The page transition
+let gTransition = null; // ScreenTransition
+let gTransitionIndex = 0;
 
 /*
     Metrics. Counting is only on while the visible frame draws, so the
@@ -198,7 +231,8 @@ let gStats = {
     fps: 0.0,
     frameMs: 0.0,
 
-    // Overdraw, from the last sample
+    // Overdraw, from the last sample. Reading pixels back stalls the GPU, which costs a phone more, so it starts off there (O toggles it).
+    isOverdrawOn: (window.matchMedia?.("(pointer: coarse)").matches !== true),
     overdrawPixels: 0,
     viewPixels: 0,
     nextOverdraw: 0.0,
@@ -228,7 +262,7 @@ window.onload = () => {
 
     WGLV.setDesignResolution(DESIGN_WIDTH, DESIGN_HEIGHT);
     WGLV.setBarColor(Colors.kBars);
-    WGLV.setClearColor(Colors.kBackground);
+    WGLV.setClearColor(PAGE_BACKGROUNDS[0]); // Page 1's
     WGLV.resizeToWindow();
 
     if (InputManager.init() === false)
@@ -239,22 +273,29 @@ window.onload = () => {
 
 window.onresize = () => WGLV.resizeToWindow();
 
-// Space pauses and resumes the page cycle
+// Space pauses and resumes the page cycle, O toggles the overdraw measuring
 window.addEventListener("keydown", (e) => {
-    if (e.code !== "Space" || e.repeat === true)
+    if (e.repeat === true)
         return;
 
-    e.preventDefault(); // No page scroll
-    gPages.isPaused = !gPages.isPaused;
+    switch (e.code)
+    {
+        case KeyCode.kSpace:
+            e.preventDefault(); // No page scroll
+            gPages.isPaused = !gPages.isPaused;
+            break;
+
+        case KeyCode.kO:
+            gStats.isOverdrawOn = !gStats.isOverdrawOn;
+            break;
+    }
 });
 
 function appSetup()
 {
     const gl = WGLV.context;
 
-    gl.disable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.DEPTH_TEST); // Blending is each Material's (see BlendMode)
 
     installHooks();
 
@@ -605,7 +646,112 @@ function buildScene()
 
     // *** Camera ***
 
-    items.push(makeCameraItem(t.rect, t.circle));
+    const world = makeCameraWorld(t.rect);
+    const cameraItem = makeCameraItem(world, t.circle);
+    items.push(cameraItem);
+
+    // *** Render targets ***
+
+    buildTransition();
+    items.push(makeMinimapItem(world, cameraItem.camera));
+    items.push(makeCachedItem());
+
+    const white = TextureManager.getWhiteTexture();
+    const shader = Rect2D.getDefaultShader();
+
+    // Bloom: orbs drawn additively (BlendMode.kAdditive) so overlaps go over 1, kept by a half-float target
+    let backdrop = new Rect2D();
+    backdrop.load(white, POST_VIEW.x, POST_VIEW.y);
+    backdrop.setColor(Colors.kTileDark);
+
+    let orb = new Rect2D();
+    orb.load(MaterialManager.load(shader, [t.circle], null, BlendMode.kAdditive), 110, 110);
+
+    let bar = new Rect2D();
+    bar.load(white, 300, 24);
+    bar.setColor(Colors.kGold);
+
+    let bloom = new BloomEffect();
+    bloom.set(0.6, 0.25, 1.4);
+    bloom.setBlur(1.5, 2);
+
+    items.push(makePostItem("BloomEffect - additive orbs, HDR target", bloom, RenderTarget.kRGBA16F, () => { },
+        (batcher, c, time) => {
+            backdrop.setPos(c.x, c.y, Alignment.kMiddleCenter);
+            batcher.submit(backdrop, 0);
+
+            bar.setPos(c.x, c.y - 95, Alignment.kMiddleCenter);
+            batcher.submit(bar, 1);
+
+            for (let i = 0; i < 5; ++i)
+            {
+                const a = (time * 0.9) + ((i * MathDefines.kTwoPi) / 5.0);
+                orb.setColor(Colors.kParticles[i % Colors.kParticles.length]);
+                orb.setPos(c.x + (Math.cos(a) * 150), c.y + 25 + (Math.sin(a) * 55), Alignment.kMiddleCenter);
+                batcher.submit(orb, 2);
+            }
+        }));
+
+    // Blur: a turning rect and dots, the blur's radius pulsing
+    let blurRect = new Rect2D();
+    blurRect.load(t.rect, 170, 170);
+
+    let dot = new Rect2D();
+    dot.load(t.circle, 70, 70);
+
+    let blur = new BlurEffect();
+
+    items.push(makePostItem("BlurEffect - radius pulsing, half size", blur, RenderTarget.kRGBA8,
+        (dt, time) => blur.set(0.3 + (1.7 * (0.5 + (0.5 * Math.sin(time * 1.5))))),
+        (batcher, c, time) => {
+            blurRect.setPos(c.x, c.y, Alignment.kMiddleCenter);
+            blurRect.setRotation(time * 0.5);
+            batcher.submit(blurRect, 0);
+
+            for (let i = 0; i < 3; ++i)
+            {
+                dot.setColor(Colors.kParticles[i]);
+                dot.setPos(c.x + ((i - 1) * 180), c.y - 60, Alignment.kMiddleCenter);
+                batcher.submit(dot, 1);
+            }
+        }));
+
+    // Screen effect: a checkered panel and a turning rect, graded, vignetted and on a curved, scanned tube
+    let panelTile = new Rect2D();
+    panelTile.load(white, 66, 66);
+
+    let screenRect = new Rect2D();
+    screenRect.load(t.rect, 150, 150);
+
+    let screen = new ScreenEffect();
+    screen.setCurvature(0.15);
+    screen.setScanlines(0.45, 80);
+    screen.setColorFringe(0.006);
+    screen.setVignette(0.7, 0.45, 0.6);
+    screen.setSaturation(1.4);
+    screen.setContrast(1.1);
+
+    items.push(makePostItem("ScreenEffect - CRT, vignette, grading", screen, RenderTarget.kRGBA8, () => { },
+        (batcher, c, time) => {
+            const cols = Math.ceil(POST_VIEW.x / 66);
+            const rows = Math.ceil(POST_VIEW.y / 66);
+            const left = c.x - (POST_VIEW.x / 2.0);
+            const bottom = c.y - (POST_VIEW.y / 2.0);
+
+            for (let r = 0; r < rows; ++r)
+            {
+                for (let col = 0; col < cols; ++col)
+                {
+                    panelTile.setColor(((r + col) % 2 === 0) ? Colors.kTileLight : Colors.kTileDark);
+                    panelTile.setPos(left + (col * 66), bottom + (r * 66));
+                    batcher.submit(panelTile, 0);
+                }
+            }
+
+            screenRect.setPos(c.x, c.y, Alignment.kMiddleCenter);
+            screenRect.setRotation(time * -0.4);
+            batcher.submit(screenRect, 1);
+        }));
 
     // *** Pages and labels ***
 
@@ -698,12 +844,13 @@ function makeLitItem(label, model, lights, dotTexture, rocks)
     frame, in screen units), layers 1 and 2 follow it. The pointer, over the
     viewport, is turned into world units (screenToWorld()) and marked with a dot
     in the world, so the dot should sit right under it however the camera moves.
-    The batcher is drawn from the main one as a drawable.
+    The batcher is drawn from the main one as a drawable. The item's camera is
+    item.camera (the minimap shows what it sees).
 */
-function makeCameraItem(arrowTexture, dotTexture)
+function makeCameraItem(world, dotTexture)
 {
     const white = TextureManager.getWhiteTexture();
-    const worldCenter = (CAMERA_TILE * CAMERA_TILES) / 2.0;
+    const worldCenter = world.size / 2.0;
 
     let camera = new Camera2D();
     camera.setPosition(worldCenter, worldCenter);
@@ -719,13 +866,6 @@ function makeCameraItem(arrowTexture, dotTexture)
     let backdrop = new Rect2D();
     backdrop.load(white, CAMERA_VIEW.x, CAMERA_VIEW.y);
     backdrop.setColor(Colors.kBackground);
-
-    let tile = new Rect2D(); // Submitted once per tile, moved and recolored in between
-    tile.load(white, CAMERA_TILE, CAMERA_TILE);
-
-    let arrow = new Rect2D();
-    arrow.load(arrowTexture, CAMERA_TILE * 2, CAMERA_TILE * 2);
-    arrow.setPos(worldCenter, worldCenter, Alignment.kMiddleCenter);
 
     let cursor = new Rect2D();
     cursor.load(dotTexture, 20, 20);
@@ -788,27 +928,251 @@ function makeCameraItem(arrowTexture, dotTexture)
         submit: () => {
             batcher.submit(border, 0);
             batcher.submit(backdrop, 0);
+            world.submit(batcher, 1);
 
+            if (showCursor === true)
+                batcher.submit(cursor, 2);
+
+            gBatcher.submitDrawable(drawable, Layers.kShapes);
+        },
+        camera: camera
+    };
+
+    return item;
+}
+
+// The camera's world: a checkered square (world.size per side, world units) with an arrow at its center; world.submit(batcher, layer) queues it
+function makeCameraWorld(arrowTexture)
+{
+    const white = TextureManager.getWhiteTexture();
+    const size = CAMERA_TILE * CAMERA_TILES;
+
+    let tile = new Rect2D(); // Submitted once per tile, moved and recolored in between
+    tile.load(white, CAMERA_TILE, CAMERA_TILE);
+
+    let arrow = new Rect2D();
+    arrow.load(arrowTexture, CAMERA_TILE * 2, CAMERA_TILE * 2);
+    arrow.setPos(size / 2.0, size / 2.0, Alignment.kMiddleCenter);
+
+    return {
+        size: size,
+        submit: (batcher, layer) => {
             for (let r = 0; r < CAMERA_TILES; ++r)
             {
                 for (let c = 0; c < CAMERA_TILES; ++c)
                 {
                     tile.setColor(((r + c) % 2 === 0) ? Colors.kTileLight : Colors.kTileDark);
                     tile.setPos(c * CAMERA_TILE, r * CAMERA_TILE);
-                    batcher.submit(tile, 1);
+                    batcher.submit(tile, layer);
                 }
             }
 
-            batcher.submit(arrow, 1);
+            batcher.submit(arrow, layer);
+        }
+    };
+}
 
-            if (showCursor === true)
-                batcher.submit(cursor, 2);
+/*
+    A PostChain working on just its slot (PostChain.setRect()) as a test item: draw(batcher,
+    center, time) submits a small scene onto a batcher of its own each frame, in screen
+    design units around center; it's drawn into the chain and through effect back into
+    the slot. format is the chain's target format; update(dt, time) runs every frame.
+*/
+function makePostItem(label, effect, format, update, draw)
+{
+    let chain = new PostChain();
 
-            gBatcher.submitDrawable(drawable, Layers.kShapes);
+    // The slot's size from the start; place() moves it into the slot, which doesn't remake the target
+    const rect = { x: 0, y: 0, width: POST_VIEW.x, height: POST_VIEW.y };
+
+    if (chain.load({ format: format, samples: 4, rect: rect }) === false)
+        console.error(`Couldn't load the PostChain for "${label}"`);
+
+    chain.addEffect(effect);
+
+    let batcher = new MaterialBatcher();
+    let center = new Vector2();
+
+    const drawable = {
+        render: () => {
+            if (chain.begin() === false)
+                return;
+
+            draw(batcher, center, gScene.time);
+            batcher.render();
+            chain.end();
         }
     };
 
-    return item;
+    return { label: label,
+             place: (x, y) => {
+                 center.set(x, y);
+                 chain.setRect(x - (POST_VIEW.x / 2.0), y - (POST_VIEW.y / 2.0), POST_VIEW.x, POST_VIEW.y);
+             },
+             update: update,
+             submit: () => gBatcher.submitDrawable(drawable, Layers.kShapes) };
+}
+
+/*
+    A RenderTarget as a test item: the camera item's whole world drawn into a small
+    target of its own (its design rect is the world, no camera needed), with what
+    the camera sees marked in gold, then the target's texture shown on a Rect2D
+    (BlendMode.kPremultiplied, as a target's texture needs).
+*/
+function makeMinimapItem(world, camera)
+{
+    const white = TextureManager.getWhiteTexture();
+
+    let target = new RenderTarget();
+
+    if (target.loadFixed(MINIMAP_PIXELS, MINIMAP_PIXELS, { samples: 4 }) === false)
+        console.error("Couldn't load the minimap's RenderTarget");
+
+    target.setDesignRect(0, 0, world.size, world.size);
+
+    let batcher = new MaterialBatcher();
+
+    let view = new Rect2D(); // 1 x 1, scaled to the camera's view each frame
+    view.load(white, 1, 1);
+    view.setColor(new Vector4(Colors.kGold.x, Colors.kGold.y, Colors.kGold.z, 0.45));
+
+    let map = new Rect2D();
+    map.load(MaterialManager.load(Rect2D.getDefaultShader(), [target.getTexture()], null, BlendMode.kPremultiplied), MINIMAP_SIZE, MINIMAP_SIZE);
+
+    let border = new Rect2D();
+    border.load(white, MINIMAP_SIZE + (CAMERA_BORDER * 2), MINIMAP_SIZE + (CAMERA_BORDER * 2));
+    border.setColor(Colors.kLabel);
+
+    const bounds = new Vector4();
+
+    const drawable = {
+        render: () => {
+            if (target.isLoaded() === false)
+                return;
+
+            // The world into the target...
+            RenderTargets.push(target);
+            world.submit(batcher, 0);
+
+            camera.getWorldBounds(bounds);
+            view.setPos(bounds.x + (bounds.z / 2.0), bounds.y + (bounds.w / 2.0), Alignment.kMiddleCenter);
+            view.setScale(bounds.z, bounds.w);
+            batcher.submit(view, 1);
+
+            batcher.render();
+            RenderTargets.pop();
+
+            // ...then the target onto the screen
+            border.render();
+            map.render();
+        }
+    };
+
+    return { label: "RenderTarget - minimap of the Camera2D world",
+             place: (x, y) => {
+                 border.setPos(x, y, Alignment.kMiddleCenter);
+                 map.setPos(x, y, Alignment.kMiddleCenter);
+             },
+             update: () => { },
+             submit: () => gBatcher.submitDrawable(drawable, Layers.kShapes) };
+}
+
+/*
+    A CachedLayer as a test item: a grid of rects drawn once into the layer, then
+    shown as one instanced quad. It's given new colors (and so drawn again) every
+    CACHE_REDRAW_SECONDS; the frames in between draw just the one quad.
+*/
+function makeCachedItem()
+{
+    const count = CACHE_COLS * CACHE_ROWS;
+    const width = CACHE_COLS * CACHE_CELL.x;
+    const height = CACHE_ROWS * CACHE_CELL.y;
+
+    let cache = new CachedLayer();
+    let batcher = new MaterialBatcher();
+    let origin = new Vector2();
+    let timer = 0.0;
+
+    let cell = new Rect2D();
+    cell.load(TextureManager.getWhiteTexture(), CACHE_CELL.x - 4, CACHE_CELL.y - 4);
+
+    let colors = Array.from({ length: count }, () => new Vector4());
+    const recolor = () => colors.forEach((c) => c.set(randomRange(0.2, 1.0), randomRange(0.2, 1.0), randomRange(0.2, 1.0), 1.0));
+    recolor();
+
+    const drawCells = () => {
+        for (let i = 0; i < count; ++i)
+        {
+            cell.setColor(colors[i]);
+            cell.setPos(origin.x + ((i % CACHE_COLS) * CACHE_CELL.x) + 2, origin.y + (Math.floor(i / CACHE_COLS) * CACHE_CELL.y) + 2);
+            batcher.submit(cell, 0);
+        }
+
+        batcher.render();
+    };
+
+    return { label: `CachedLayer - ${count} rects drawn once, new every ${CACHE_REDRAW_SECONDS} s`,
+             place: (x, y) => {
+                 origin.set(x - (width / 2.0), y - (height / 2.0));
+
+                 if (cache.load(origin.x, origin.y, width, height) === false)
+                     console.error("Couldn't load the CachedLayer");
+             },
+             update: (dt) => {
+                 timer += dt;
+
+                 if (timer >= CACHE_REDRAW_SECONDS)
+                 {
+                     timer = 0.0;
+                     recolor();
+                     cache.markDirty();
+                 }
+             },
+             submit: () => {
+                 cache.update(drawCells); // Draws only when it needs to
+                 cache.submit(gBatcher, Layers.kShapes);
+             } };
+}
+
+// The page transition (see turnPage())
+function buildTransition()
+{
+    gTransition = new ScreenTransition();
+
+    if (gTransition.load() === false)
+    {
+        console.error("Couldn't load the page transition; pages will just change");
+        gTransition = null;
+    }
+}
+
+/*
+    Drawn after the labels (see drawHud()): a page change captures the canvas (this
+    frame's scene and labels) and turns the page; otherwise a running transition
+    draws the captured page over the new one.
+*/
+const gTransitionDrawable = {
+    render: () => {
+        if (gPages.isTurning === true)
+            turnPage();
+        else if (gTransition !== null)
+            gTransition.render();
+    }
+};
+
+// The next page, with a transition from what's on the canvas now (the scene and labels, before the metrics window)
+function turnPage()
+{
+    gPages.isTurning = false;
+
+    if (gTransition !== null && gTransition.capture() === true)
+    {
+        gTransition.start(TRANSITION_TYPES[gTransitionIndex], TRANSITION_SECONDS, Easing.kQuadraticInOut, TRANSITION_SOFTNESS);
+        gTransitionIndex = (gTransitionIndex + 1) % TRANSITION_TYPES.length;
+    }
+
+    gPages.current = (gPages.current + 1) % gPages.count;
+    WGLV.setClearColor(PAGE_BACKGROUNDS[gPages.current % PAGE_BACKGROUNDS.length]);
 }
 
 // A 1 x 4 strip of numbered discs for the Sprite to count through
@@ -863,7 +1227,7 @@ function appMain(ts)
     {
         appUpdate(dt);
 
-        if (ts >= gStats.nextOverdraw)
+        if (gStats.isOverdrawOn === true && ts >= gStats.nextOverdraw)
         {
             measureOverdraw();
             gStats.nextOverdraw = ts + OVERDRAW_SAMPLE_MS;
@@ -901,9 +1265,12 @@ function appUpdate(dt)
         if (gPages.timer >= PAGE_SECONDS)
         {
             gPages.timer = 0.0;
-            gPages.current = (gPages.current + 1) % gPages.count;
+            gPages.isTurning = true; // After this frame's labels are drawn (see gTransitionDrawable)
         }
     }
+
+    if (gTransition !== null)
+        gTransition.update(dt);
 
     // Every item moves, shown or not
     for (const item of s.items)
@@ -1063,7 +1430,9 @@ function updateHud(ts)
     const l = gStats.last;
     let overdraw = "n/a";
 
-    if (gMark !== null && gStats.viewPixels > 0)
+    if (gStats.isOverdrawOn === false)
+        overdraw = "off (O turns it on)";
+    else if (gMark !== null && gStats.viewPixels > 0)
     {
         const share = (100.0 * gStats.overdrawPixels) / gStats.viewPixels;
         overdraw = `${formatCount(gStats.overdrawPixels)} px (${share.toFixed(1)}% of view)`;
@@ -1080,7 +1449,9 @@ function updateHud(ts)
         String(l.materials),
         formatCount(l.rects),
         overdraw,
-        String(l.drawCalls)
+        String(l.drawCalls),
+        `${RenderTarget.getCount()} (${(RenderTarget.getTotalMemoryBytes() / 1048576).toFixed(1)} MB), ${RenderTargetPool.getCount()} pooled`,
+        "Space pause, O overdraw"
     ];
 
     // Labels padded to one width; the font is monospaced, so the values line up
@@ -1109,7 +1480,6 @@ function buildHud()
     gHud.setTextColor(Colors.kHudText);
     gHud.setPadding(HUD_PADDING);
     gHud.setPos(HUD_MARGIN, DESIGN_HEIGHT - HUD_MARGIN, Alignment.kTopLeft);
-    gHud.listenForRasterScale(true); // Stays sharp at any window size
     gHud.setText("Loading...");
 }
 
@@ -1119,7 +1489,12 @@ function setHudText(str)
         gHud.setText(str);
 }
 
-// The shown page's item labels and the metrics window, in their own batcher pass on top of the scene
+/*
+    The shown page's item labels and the metrics window, in their own batcher pass on top
+    of the scene. The page transition is a drawable on the labels' layer, so it runs after
+    the labels and before the metrics window's layers: the old page's labels are in the
+    capture and leave with its items, and the metrics window is never in it.
+*/
 function drawHud()
 {
     if (gIsReady === true)
@@ -1129,6 +1504,8 @@ function drawHud()
             if (item.page === gPages.current)
                 gBatcher.submit(item.labelText, Layers.kLabels);
         }
+
+        gBatcher.submitDrawable(gTransitionDrawable, Layers.kLabels);
     }
 
     if (gHud === null)
@@ -1259,7 +1636,7 @@ function measureOverdraw()
     gl.bindVertexArray(null);
     gl.colorMask(true, true, true, true);
     gl.disable(gl.STENCIL_TEST);
-    gl.enable(gl.BLEND);
+    RenderState.invalidate(); // Blending was turned off here, behind its back
 
     // The view rect in canvas pixels
     const x = WGLV.getViewportX();

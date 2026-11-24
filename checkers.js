@@ -237,10 +237,8 @@ window.onresize = () => WGLV.resizeToWindow();
 function appSetup()
 {
     WGLV.context.disable(WGLV.context.DEPTH_TEST);
-    WGLV.context.enable(WGLV.context.BLEND);
-    // Blend color normally but keep the canvas alpha at 1, so translucent overlays
-    // darken the scene instead of letting the white page show through the canvas
-    WGLV.context.blendFuncSeparate(WGLV.context.SRC_ALPHA, WGLV.context.ONE_MINUS_SRC_ALPHA, WGLV.context.ONE, WGLV.context.ONE_MINUS_SRC_ALPHA);
+    // Blending is each Material's (BlendMode.kAlpha by default), which keeps the canvas alpha
+    // at 1, so translucent overlays darken the scene instead of letting the page show through
 
     loadAssets().then(appOnAssetsLoaded);
 }
@@ -669,7 +667,6 @@ function appLayout()
     gTitleAtlas = new TextAtlas(gTitleFont, "CHECKERS", Math.max(8, Math.round(unit * 0.15)), "normal");
     gTexts.title = new TextGlyphs2D(gTitleAtlas);
     gTexts.title.setColor(Colors.kTitle);
-    gTexts.title.listenForRasterScale(true); // Redraws its glyphs when the view's scale changes, so it stays sharp
     gTexts.title.setPos(Math.round(w / 2), Math.round(h * 0.70), Alignment.kMiddleCenter);
     gTexts.title.setText("CHECKERS");
     gTitleEffect = null; // The old one was on the old title; startTitleEffect(0) below makes the first
@@ -709,7 +706,6 @@ function appLayout()
     gTimeAtlas = new TextAtlas(gUIFont, "0123456789:", Math.max(8, Math.round(unit * 0.04)), "bold");
     gTexts.time = new TextGlyphs2D(gTimeAtlas);
     gTexts.time.setColor(Colors.kText);
-    gTexts.time.listenForRasterScale(true); // Redraws its glyphs when the view's scale changes, so it stays sharp
     gTexts.time.setPos(Math.round(w - margin), Math.round(h - margin - (menuH / 2)), Alignment.kMiddleRight);
 
     // Menu screen

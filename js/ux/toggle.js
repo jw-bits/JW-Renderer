@@ -308,13 +308,6 @@ class Toggle
         this.#layout();
     }
 
-    // Keeps the text sharp when the view's scale changes (see TextGlyphs2D.listenForRasterScale())
-    listenForRasterScale(listen)
-    {
-        this.#onText?.listenForRasterScale(listen);
-        this.#offText?.listenForRasterScale(listen);
-    }
-
     // *** Each frame ***
 
     // True if (x, y), design units, is inside the toggle's box

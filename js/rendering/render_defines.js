@@ -250,7 +250,8 @@ class RenderUniforms
 
         Frame (binding 0, see ClipSpace in camera.js), std140:
             mat3 u_worldToClip   World position (design units) to clip space, through the active camera
-            vec2 u_res           The design resolution (W, H)
+                                 and onto the surface being drawn (the canvas or a RenderTarget)
+            vec2 u_res           The size of that surface's design area (the design resolution on the canvas)
 */
 class RenderUniformBlocks
 {
@@ -296,6 +297,93 @@ class RenderUniformBlocks
     static {
         RenderUniformBlocks.allBlocks.set(RenderUniformBlocks.kFrame, { binding: 0, bufferProvider: null });
     }
+}
+
+/*
+    How a draw's colors combine with what's already there. Each Material has one
+    (Material.setBlendMode(); kAlpha by default) and sets it when bound, through
+    RenderState, so the GL is only told when it changes.
+
+        kAlpha          Straight alpha: color * alpha over what's there. Textures and
+                        colors as they're loaded. Alpha builds up, so drawing into a
+                        cleared RenderTarget leaves premultiplied colors in it.
+        kPremultiplied  For colors already multiplied by their alpha, like a RenderTarget's
+                        texture (see above) drawn back over the screen.
+        kAdditive       Adds color * alpha, brightening (glows, sparks); alpha is left alone.
+        kMultiply       Multiplies what's there by the color, darkening; white changes
+                        nothing, so transparent parts should be white. Alpha is left alone.
+        kNone           Replaces what's there, alpha included (blending off).
+*/
+class BlendMode
+{
+    static kAlpha = 0;
+    static kPremultiplied = 1;
+    static kAdditive = 2;
+    static kMultiply = 3;
+    static kNone = 4;
+
+    static isValid(mode) { return (Number.isInteger(mode) === true && mode >= BlendMode.kAlpha && mode <= BlendMode.kNone); }
+}
+
+/*
+    RenderState - The GL state the renderer sets, remembered so it's only sent
+    when it changes. For now, the blend mode (see BlendMode).
+
+    Anything that changes that state with the GL directly (e.g. gl.disable(gl.BLEND))
+    should call invalidate() afterwards, so the next setBlendMode() sends it again.
+*/
+class RenderState
+{
+    static #blendMode = -1; // -1: unknown, the next setBlendMode() sends it
+
+    // Returns false (changing nothing) if mode isn't a BlendMode
+    static setBlendMode(mode)
+    {
+        if (mode === RenderState.#blendMode)
+            return true;
+
+        const gl = WGLV.context;
+
+        switch (mode)
+        {
+            case BlendMode.kAlpha:
+                gl.enable(gl.BLEND);
+                gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+                break;
+
+            case BlendMode.kPremultiplied:
+                gl.enable(gl.BLEND);
+                gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+                break;
+
+            case BlendMode.kAdditive:
+                gl.enable(gl.BLEND);
+                gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE);
+                break;
+
+            case BlendMode.kMultiply:
+                gl.enable(gl.BLEND);
+                gl.blendFuncSeparate(gl.DST_COLOR, gl.ZERO, gl.ZERO, gl.ONE);
+                break;
+
+            case BlendMode.kNone:
+                gl.disable(gl.BLEND);
+                break;
+
+            default:
+                console.error("RenderState.setBlendMode() needs a BlendMode such as BlendMode.kAlpha");
+                    return false;
+        }
+
+        RenderState.#blendMode = mode;
+            return true;
+    }
+
+    // The last mode set, or -1 if it's unknown (after invalidate())
+    static getBlendMode() { return RenderState.#blendMode; }
+
+    // Forgets what was set, so everything is sent again; after changing GL state directly, or a lost context
+    static invalidate() { RenderState.#blendMode = -1; }
 }
 
 // How a SpriteSequence plays through its frames

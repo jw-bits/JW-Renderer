@@ -27,7 +27,8 @@
 
     Raster scale: a model that draws into a texture at screen resolution can
     call listenForRasterScale(true) and override onRasterScaleChanged(newScale)
-    (see WGLV). unload() stops listening.
+    (see WGLV.addListeners()); Text2D does. unload() stops listening.
+    TextGlyphs2D doesn't need to: its TextAtlas follows the scale itself.
 
     UV rect: the part of the texture a model draws (getUVRect()); the whole
     texture unless a subclass says otherwise (Sprite draws one atlas frame,
@@ -58,7 +59,8 @@ class Model2D
     #mesh;
     #color;
     #isLoaded;
-    #isListening; // For raster scale changes
+    #isListening;   // For raster scale changes
+    #viewListeners; // Given to WGLV.addListeners() while listening
 
     constructor()
     {
@@ -72,6 +74,7 @@ class Model2D
         this.#color = new Vector4(1, 1, 1, 1);
         this.#isLoaded = false;
         this.#isListening = false;
+        this.#viewListeners = { onRasterScaleChanged: (newScale) => this.onRasterScaleChanged(newScale) };
     }
 
     // (x, y) is the anchor point; align says which part of the model sits on it
@@ -131,9 +134,9 @@ class Model2D
             return;
 
         if (listen === true)
-            WGLV.addRasterScaleListener(this);
+            WGLV.addListeners(this.#viewListeners);
         else
-            WGLV.removeRasterScaleListener(this);
+            WGLV.removeListeners(this.#viewListeners);
 
         this.#isListening = listen;
     }
@@ -920,12 +923,9 @@ class Text2D extends Model2D
     white and setColor() tints them, and its size is the text plus the
     padding around it, so alignment matches Text2D's.
 
-    Raster scale: by default it isn't drawn again when the view's scale
-    changes, so it stretches with the view. listenForRasterScale(true)
-    makes it redraw its TextAtlas at the new scale, like Text2D, so it stays
-    sharp; the setting is kept through unload() and setText(). The atlas is
-    shared, so every TextGlyphs2D on it rebuilds its quads and gets sharp
-    too, listening or not.
+    Raster scale: its TextAtlas draws its glyphs again when the view's scale
+    changes and every TextGlyphs2D on it rebuilds its quads, so the text
+    stays sharp (see TextAtlas.setFollowsViewScale()).
 
     Usage:
         let digits = new TextAtlas(font, "0123456789:", 40, "bold");
@@ -974,7 +974,6 @@ class TextGlyphs2D extends Model2D
     #glyphCount;   // Quads with a character; line breaks aren't counted
     #lineCount;
     #lineAlign;    // Alignment; only its column is used. Kept through unload()
-    #wantsRasterScale;  // Set by listenForRasterScale(); kept through unload()
     #onAtlasRasterized; // Given to the TextAtlas: rebuilds the quads after it draws the glyphs again
 
     // _textAtlas is a loaded TextAtlas, which can be shared by many TextGlyphs2Ds
@@ -993,7 +992,6 @@ class TextGlyphs2D extends Model2D
         this.#glyphCount = 0;
         this.#lineCount = 0;
         this.#lineAlign = Alignment.kBottomLeft;
-        this.#wantsRasterScale = false;
         this.#onAtlasRasterized = () => {
             if (this.#text !== null)
                 this.#buildMesh(this.#text); // New UVs and sizes; glyph offsets are cleared
@@ -1063,26 +1061,6 @@ class TextGlyphs2D extends Model2D
     }
 
     getLineAlignment() { return this.#lineAlign; }
-
-    /*
-        true redraws the TextAtlas at the new scale when the view's scale changes,
-        so the text stays sharp; false (the default) lets it stretch with the
-        view. The setting is kept through unload() and setText().
-    */
-    listenForRasterScale(listen)
-    {
-        this.#wantsRasterScale = (listen === true);
-        super.listenForRasterScale(this.#wantsRasterScale);
-    }
-
-    isListeningForRasterScale() { return this.#wantsRasterScale; }
-
-    // The view scale changed while listening: redraw the atlas, which rebuilds the quads of every TextGlyphs2D on it
-    onRasterScaleChanged(newScale)
-    {
-        if (this.#text !== null && this.#textAtlas !== null)
-            this.#textAtlas.rasterize();
-    }
 
     /*
         Moves each glyph by (x, y) design units from where the text puts it:
@@ -1194,13 +1172,10 @@ class TextGlyphs2D extends Model2D
     getGlyphWidth(index) { return this.#glyphCorner(index, 2, 0) - this.#glyphCorner(index, 0, 0); }
     getGlyphHeight(index) { return this.#glyphCorner(index, 2, 1) - this.#glyphCorner(index, 0, 1); }
 
-    // Frees the mesh; the TextAtlas belongs to the caller. setText() loads it again, listening again if it was.
+    // Frees the mesh; the TextAtlas belongs to the caller. setText() loads it again.
     unload()
     {
-        const wantsRasterScale = this.#wantsRasterScale;
-
-        super.unload(); // Stops listening, through listenForRasterScale(false)
-        this.#wantsRasterScale = wantsRasterScale;
+        super.unload();
         this.#textAtlas?.removeRasterizeListener(this.#onAtlasRasterized);
         this.#text = null;
         this.#mesh = null;
@@ -1311,12 +1286,8 @@ class TextGlyphs2D extends Model2D
         this._setMaterial(ta.getMaterial());
         this._setLoaded(true);
 
-        // Rebuild when the atlas draws its glyphs again; listen for scale changes if asked to
+        // Rebuild when the atlas draws its glyphs again (e.g. at a new view scale)
         ta.addRasterizeListener(this.#onAtlasRasterized);
-
-        if (this.#wantsRasterScale === true)
-            super.listenForRasterScale(true);
-
             return true;
     }
 

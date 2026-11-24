@@ -105,13 +105,15 @@ class TextCanvas
     Text2D (the color is a tint). A space and the fallback character "?" are
     always included; a character that isn't in the atlas draws as "?".
 
-    The glyphs are drawn at fontSize times the view's scale when the TextAtlas
-    is created. By default they aren't drawn again: when the window's scale
-    changes, text made from them stretches with the view. rasterize() draws
-    them again at the current scale, keeping the same Material and Texture,
-    and tells every TextGlyphs2D on the atlas to rebuild its quads; a
-    TextGlyphs2D listening for raster scale changes calls it (see
-    TextGlyphs2D.listenForRasterScale()).
+    The glyphs are drawn at fontSize times the view's scale. When the view's
+    scale changes (e.g. the window is resized, or the page loaded while it
+    was small), the atlas draws them again at the new scale (rasterize()),
+    keeping the same Material and Texture, and every TextGlyphs2D on it
+    rebuilds its quads, so text stays sharp. setFollowsViewScale(false)
+    stops that, so the text stretches with the view instead (cheaper while
+    the window is being dragged to a new size, say); rasterize() still draws
+    them again when called. The atlas listens through WGLV.addListeners()
+    until unload().
 
     Usage:
         const font = await FontManager.load("./fonts/MyFont-Regular.ttf");
@@ -145,6 +147,8 @@ class TextAtlas
     #chars;      // The characters drawn, in atlas order
     #scale;      // The view scale the glyphs were last drawn at
     #listeners;  // Functions called after rasterize() redraws the glyphs
+    #followsViewScale;
+    #viewListeners; // Given to WGLV.addListeners() while loaded and following the view scale
 
     /*
         _font is a loaded Font, usually from FontManager. _glyphs is a
@@ -165,6 +169,8 @@ class TextAtlas
         this.#chars = [];
         this.#scale = 0.0;
         this.#listeners = new Set();
+        this.#followsViewScale = true;
+        this.#viewListeners = { onRasterScaleChanged: () => this.rasterize() };
 
         if (_font == null || _font.isLoaded() === false)
         {
@@ -182,8 +188,36 @@ class TextAtlas
         this.#chars = Array.from(new Set(Array.from(_glyphs + " " + TextAtlas.kFallbackChar)));
 
         if (this.#build() === false)
+        {
             this.unload();
+                return;
+        }
+
+        WGLV.addListeners(this.#viewListeners);
     }
+
+    /*
+        true (the default) draws the glyphs again whenever the view's scale changes, so
+        text stays sharp; false lets it stretch with the view until rasterize() is called.
+        A setting of false followed by true draws them now if the scale changed meanwhile.
+    */
+    setFollowsViewScale(follow)
+    {
+        this.#followsViewScale = (follow === true);
+
+        if (this.isLoaded() === false)
+            return;
+
+        if (this.#followsViewScale === true)
+        {
+            WGLV.addListeners(this.#viewListeners);
+            this.rasterize(); // Catch up with any change while it wasn't following
+        }
+        else
+            WGLV.removeListeners(this.#viewListeners);
+    }
+
+    followsViewScale() { return this.#followsViewScale; }
 
     /*
         Draws the glyphs again at the view's current scale, if it changed since
@@ -272,9 +306,11 @@ class TextAtlas
         return this.#lineHeight * text.split(/\r?\n/).length;
     }
 
-    // Frees the atlas and Material; TextGlyphs2Ds using it stop drawing
+    // Frees the atlas and Material, and stops following the view scale; TextGlyphs2Ds using it stop drawing
     unload()
     {
+        WGLV.removeListeners(this.#viewListeners);
+
         if (this.#material !== null)
         {
             this.#material.unload(); // Leaves the shared shader alone

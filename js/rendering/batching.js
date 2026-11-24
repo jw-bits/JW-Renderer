@@ -57,6 +57,19 @@
 
         batcher.setCamera(camera);
         batcher.setLayerFollowsCamera(Layers.kUI, false);
+
+    Post effects: setLayerPost(first, last, chain) draws layers first - last
+    into a PostChain (post_effects.js), which runs its effects and draws the
+    result back after the last of them, so later layers (a HUD, say) are left
+    out. Ranges can nest (a bloom range inside a whole-screen CRT range) but
+    not overlap otherwise, and a chain can only have one range. A render()
+    with nothing on any of a range's layers skips its chain.
+
+        batcher.setLayerPost(Layers.kWorld, Layers.kEffects, bloomChain);
+        batcher.setLayerPost(MaterialBatcher.kMinLayer, MaterialBatcher.kMaxLayer, crtChain); // Everything
+
+    Blend modes: each Material's (see BlendMode); models with different
+    modes never share an instanced draw.
 */
 class MaterialBatcher
 {
@@ -73,6 +86,9 @@ class MaterialBatcher
     #litLayers;   // Per layer: true if its instanced models are lit
     #ignoresCamera; // Per layer: true if it draws in screen design units whatever the camera
     #camera;      // Camera2D the layers follow, or null
+    #postRanges;  // { first, last, chain, isRunning }: PostChains around ranges of layers
+    #postBegins;  // Per layer: ranges to begin before it, outermost first
+    #postEnds;    // Per layer: ranges to end after it, innermost first
     #pool;        // Entry objects reused from frame to frame
     #poolUsed;
 
@@ -96,6 +112,9 @@ class MaterialBatcher
         this.#litLayers = [];
         this.#ignoresCamera = [];
         this.#camera = null;
+        this.#postRanges = [];
+        this.#postBegins = [];
+        this.#postEnds = [];
 
         for (let i = 0; i < MaterialBatcher.kLayerCount; ++i)
         {
@@ -104,6 +123,8 @@ class MaterialBatcher
             this.#drawables.push([]);
             this.#litLayers.push(false);
             this.#ignoresCamera.push(false);
+            this.#postBegins.push([]);
+            this.#postEnds.push([]);
         }
 
         this.#litShaders = [null, null];
@@ -247,6 +268,60 @@ class MaterialBatcher
 
     doesLayerFollowCamera(layer) { return (this.#ignoresCamera[layer] !== true); }
 
+    /*
+        Draws layers first - last through a loaded PostChain (see the top of this file).
+        Kept until clearLayerPost(). Returns false (changing nothing) if the range isn't
+        valid, overlaps another without nesting, or the chain already has a range.
+    */
+    setLayerPost(first, last, chain)
+    {
+        const isLayer = (l) => (Number.isInteger(l) === true && l >= MaterialBatcher.kMinLayer && l <= MaterialBatcher.kMaxLayer);
+
+        if (isLayer(first) === false || isLayer(last) === false || first > last)
+        {
+            console.error(`MaterialBatcher.setLayerPost(): first and last must be layers ${MaterialBatcher.kMinLayer} - ${MaterialBatcher.kMaxLayer}, first <= last`);
+                return false;
+        }
+
+        if ((chain instanceof PostChain) === false || chain.isLoaded() === false)
+        {
+            console.error("MaterialBatcher.setLayerPost() needs a loaded PostChain");
+                return false;
+        }
+
+        for (const r of this.#postRanges)
+        {
+            const isApart = (last < r.first || first > r.last);
+            const isNested = ((first >= r.first && last <= r.last) || (r.first >= first && r.last <= last));
+
+            if (r.chain === chain)
+            {
+                console.error("MaterialBatcher.setLayerPost(): that chain already has a range; clearLayerPost() it first");
+                    return false;
+            }
+
+            if (isApart === false && (isNested === false || (first === r.first && last === r.last)))
+            {
+                console.error(`MaterialBatcher.setLayerPost(): ${first} - ${last} overlaps ${r.first} - ${r.last}; ranges can only nest`);
+                    return false;
+            }
+        }
+
+        this.#postRanges.push({ first: first, last: last, chain: chain, isRunning: false });
+        this.#sortPostRanges();
+            return true;
+    }
+
+    // Stops drawing through chain
+    clearLayerPost(chain)
+    {
+        this.#postRanges = this.#postRanges.filter((r) => r.chain !== chain);
+        this.#sortPostRanges();
+    }
+
+    // The PostChain whose range starts at first and ends at last, or null
+    getLayerPost(first, last) { return this.#postRanges.find((r) => r.first === first && r.last === last)?.chain ?? null; }
+
     // Draws everything submitted since the last render(), back layer to front, then empties the batcher
     render()
     {
@@ -256,16 +331,27 @@ class MaterialBatcher
 
         for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
         {
-            if (this.#layers[l].length === 0 && this.#drawables[l].length === 0)
-                continue;
+            for (const r of this.#postBegins[l])
+                r.isRunning = (this.#hasAnything(r.first, r.last) === true && r.chain.begin() === true);
 
-            ClipSpace.setCamera((this.#ignoresCamera[l] === true) ? null : this.#camera);
-            this.#renderModels(this.#layers[l], this.#litLayers[l]);
-
-            for (const d of this.#drawables[l])
+            if (this.#layers[l].length > 0 || this.#drawables[l].length > 0)
             {
-                d.render();
-                ++this.#drawCalls; // Counted as one, though a drawable may draw more or nothing
+                ClipSpace.setCamera((this.#ignoresCamera[l] === true) ? null : this.#camera);
+                this.#renderModels(this.#layers[l], this.#litLayers[l]);
+
+                for (const d of this.#drawables[l])
+                {
+                    d.render();
+                    ++this.#drawCalls; // Counted as one, though a drawable may draw more or nothing
+                }
+            }
+
+            for (const r of this.#postEnds[l])
+            {
+                if (r.isRunning === true)
+                    r.chain.end();
+
+                r.isRunning = false;
             }
         }
 
@@ -309,6 +395,28 @@ class MaterialBatcher
     }
 
     // *** Internal Methods ***
+
+    // Per layer, the ranges to begin (outermost, the longest, first) and end (innermost first)
+    #sortPostRanges()
+    {
+        for (let l = 0; l < MaterialBatcher.kLayerCount; ++l)
+        {
+            this.#postBegins[l] = this.#postRanges.filter((r) => r.first === l).sort((a, b) => (b.last - b.first) - (a.last - a.first));
+            this.#postEnds[l] = this.#postRanges.filter((r) => r.last === l).sort((a, b) => (a.last - a.first) - (b.last - b.first));
+        }
+    }
+
+    // True if anything was submitted on layers first - last
+    #hasAnything(first, last)
+    {
+        for (let l = first; l <= last; ++l)
+        {
+            if (this.#layers[l].length > 0 || this.#drawables[l].length > 0)
+                return true;
+        }
+
+        return false;
+    }
 
     // Draws one layer's models, grouped by Material; lit lights the instanced groups
     #renderModels(list, lit)

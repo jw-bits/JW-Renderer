@@ -107,9 +107,6 @@ class Label
         this.#layout();
     }
 
-    // Keeps the text sharp when the view's scale changes (see TextGlyphs2D.listenForRasterScale())
-    listenForRasterScale(listen) { this.#text.listenForRasterScale(listen); }
-
     // The panel's size and bottom-left corner, design units
     getWidth() { return this.#panel.getWidth(); }
     getHeight() { return this.#panel.getHeight(); }

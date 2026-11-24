@@ -68,12 +68,11 @@ class Camera2D
     #shakeOffset;      // Vector2, world units, added to the position this frame
     #shakeRotation;    // Radians added to the rotation this frame
 
-    // The world-to-clip matrix, rebuilt when something changes
-    #worldToClip;  // Matrix3
+    // The world-to-screen matrix, rebuilt when something changes
+    #worldToScreen; // Matrix3
     #isDirty;
-    #builtWidth;   // The design resolution it was built for
-    #builtHeight;
-    #builtScale;   // WGLV's view scale it was built for (pixel snapping)
+    #builtView;    // Vector4: the viewport it was built for (the surface's design area with no viewport set)
+    #builtScale;   // The surface's pixels per design unit it was built for (pixel snapping)
     #version;      // Goes up on every change, so ClipSpace knows to upload again
 
     // Shake defaults
@@ -108,10 +107,9 @@ class Camera2D
         this.#shakeOffset = new Vector2(0, 0);
         this.#shakeRotation = 0.0;
 
-        this.#worldToClip = new Matrix3();
+        this.#worldToScreen = new Matrix3();
         this.#isDirty = true;
-        this.#builtWidth = 0;
-        this.#builtHeight = 0;
+        this.#builtView = new Vector4();
         this.#builtScale = 0;
         this.#version = 0;
     }
@@ -179,11 +177,15 @@ class Camera2D
     // True if it draws into part of the view (setViewport()) rather than all of it
     hasViewport() { return (this.#viewport !== null); }
 
-    // The viewport in screen design units, written into out (a Vector4: x, y, width, height) and returned
+    /*
+        The viewport in screen design units, written into out (a Vector4: x, y, width, height)
+        and returned. With none set, the design area of the surface being drawn (the whole
+        view on the canvas; a RenderTarget's design rect in one).
+    */
     getViewport(out = new Vector4())
     {
         if (this.#viewport === null)
-            out.set(0, 0, WGLV.getWidth(), WGLV.getHeight());
+            ClipSpace.getSurfaceRect(out);
         else
             out.set(this.#viewport.x, this.#viewport.y, this.#viewport.z, this.#viewport.w);
 
@@ -377,17 +379,18 @@ class Camera2D
             return out;
     }
 
-    // World (design units) to clip space, for ClipSpace to upload. Read-only.
-    getWorldToClip()
+    // World to screen design units, for ClipSpace (which takes the screen to clip space for the surface). Read-only.
+    getWorldToScreen()
     {
-        const w = WGLV.getWidth();
-        const h = WGLV.getHeight();
-        const scale = WGLV.getViewScale();
+        const v = this.getViewport(Camera2D.#kViewport);
+        const b = this.#builtView;
+        const scale = ClipSpace.getSurfaceScale();
 
-        if (this.#isDirty === true || w !== this.#builtWidth || h !== this.#builtHeight || (this.#isPixelSnap === true && scale !== this.#builtScale))
-            this.#build(w, h, scale);
+        if (this.#isDirty === true || v.x !== b.x || v.y !== b.y || v.z !== b.z || v.w !== b.w ||
+            (this.#isPixelSnap === true && scale !== this.#builtScale))
+            this.#build(v, scale);
 
-        return this.#worldToClip;
+        return this.#worldToScreen;
     }
 
     // Goes up whenever the camera changes
@@ -409,7 +412,7 @@ class Camera2D
 
         if (this.#isPixelSnap === true)
         {
-            const k = this.#zoom * WGLV.getViewScale(); // Device pixels per world unit
+            const k = this.#zoom * ClipSpace.getSurfaceScale(); // Device pixels per world unit
 
             if (k > 0.0)
                 c.set(Math.round(c.x * k) / k, Math.round(c.y * k) / k);
@@ -431,31 +434,28 @@ class Camera2D
     }
 
     /*
-        World point p, as the row vector [x, y, 1], times this matrix is clip space:
+        World point p, as the row vector [x, y, 1], times this matrix is screen design units:
             view   = rotate by -rotation (p - center) * zoom    (center and rotation include the shake)
             screen = view + the viewport's center
-            clip   = (screen / design size) * 2 - 1
+        v is the viewport (getViewport()), scale the surface's pixels per design unit.
     */
-    #build(w, h, scale)
+    #build(v, scale)
     {
         const c = this.#getCenter();
-        const v = this.getViewport(Camera2D.#kViewport);
         const r = this.#getViewRotation();
         const cos = Math.cos(r);
         const sin = Math.sin(r);
-        const ax = (2.0 * this.#zoom) / w;
-        const ay = (2.0 * this.#zoom) / h;
+        const z = this.#zoom;
         const vcx = v.x + (v.z / 2.0);
         const vcy = v.y + (v.w / 2.0);
 
-        this.#worldToClip.set(ax * cos, -ay * sin, 0.0,
-                              ax * sin,  ay * cos, 0.0,
-                              (-ax * ((cos * c.x) + (sin * c.y))) + ((2.0 * vcx) / w) - 1.0,
-                              (-ay * ((cos * c.y) - (sin * c.x))) + ((2.0 * vcy) / h) - 1.0,
-                              1.0);
+        this.#worldToScreen.set(z * cos, -z * sin, 0.0,
+                                z * sin,  z * cos, 0.0,
+                                (-z * ((cos * c.x) + (sin * c.y))) + vcx,
+                                (-z * ((cos * c.y) - (sin * c.x))) + vcy,
+                                1.0);
 
-        this.#builtWidth = w;
-        this.#builtHeight = h;
+        this.#builtView.set(v.x, v.y, v.z, v.w);
         this.#builtScale = scale;
         this.#isDirty = false;
     }
@@ -566,6 +566,15 @@ class Camera2D
     shader using it is loaded (uploadBuffer()), so drawing works without a
     camera or beginFrame(). beginFrame() resets the per-frame state.
 
+    Surfaces: drawing goes to the canvas or to a RenderTarget (see
+    RenderTargets in render_target.js). Each surface has a design area (the
+    whole design resolution on the canvas, the target's design rect in a
+    target) that ClipSpace maps onto its pixels: the camera's world-to-screen
+    matrix is taken on to the surface's clip space, and clip rects and camera
+    viewports to its pixels. RenderTargets saves ClipSpace's state on push()
+    (saveState()), starts the target clean (resetState()) and puts it back on
+    pop() (restoreState()).
+
     Each frame, after WGLV.beginFrame():
         ClipSpace.beginFrame(); // No clip rects, no camera
 
@@ -582,17 +591,27 @@ class ClipSpace
     static #frameData = new Float32Array(ClipSpace.#kFrameFloats);
     static #camera = null;      // Active Camera2D, or null for the screen
     static #uploadedVersion = -1;
-    static #uploadedWidth = 0;
-    static #uploadedHeight = 0;
+    static #uploadedSurface = new Vector4(); // The surface design area it was uploaded for
     static #isUploaded = false;
 
-    static #clipStack = [];     // Pushed clip rects in canvas pixels: { x, y, w, h }, innermost last
+    static #clipStack = [];     // Pushed clip rects in the surface's pixels: { x, y, w, h }, innermost last
 
+    static #kIdentity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+    // Scratch, one per use so they never overwrite each other
     static #kViewport = new Vector4();
+    static #kSurface = new Vector4();
+    static #kScaleRect = new Vector4();
+    static #kPixelRect = new Vector4();
 
-    // Clears the clip rects and goes back to the screen. Call each frame after WGLV.beginFrame().
+    /*
+        Back to the canvas (popping any RenderTargets left pushed), with no clip rects
+        and no camera. Call each frame after WGLV.beginFrame().
+    */
     static beginFrame()
     {
+        RenderTargets.beginFrame();
+
         if (ClipSpace.#clipStack.length > 0)
         {
             console.error(`ClipSpace.beginFrame(): ${ClipSpace.#clipStack.length} clip rect(s) were never popped`);
@@ -618,38 +637,27 @@ class ClipSpace
         if (ClipSpace.#ensureFrame() === false)
             return false;
 
-        const w = WGLV.getWidth();
-        const h = WGLV.getHeight();
+        const s = ClipSpace.getSurfaceRect(ClipSpace.#kSurface);
+        const u = ClipSpace.#uploadedSurface;
+        const isSameSurface = (s.x === u.x && s.y === u.y && s.z === u.z && s.w === u.w);
         const version = (camera !== null) ? camera.getVersion() : -1;
-        const viewportChanged = (camera !== ClipSpace.#camera || (camera !== null && version !== ClipSpace.#uploadedVersion));
+        const viewportChanged = (camera !== ClipSpace.#camera || (camera !== null && version !== ClipSpace.#uploadedVersion) || isSameSurface === false);
 
-        if (ClipSpace.#isUploaded === true && camera === ClipSpace.#camera && version === ClipSpace.#uploadedVersion &&
-            w === ClipSpace.#uploadedWidth && h === ClipSpace.#uploadedHeight)
+        if (ClipSpace.#isUploaded === true && camera === ClipSpace.#camera && version === ClipSpace.#uploadedVersion && isSameSurface === true)
             return true; // Already there
 
+        // World to screen design units (the camera's, or the same units with none), then on to the surface's clip space
         let d = ClipSpace.#frameData;
+        const m = (camera !== null) ? camera.getWorldToScreen().m : ClipSpace.#kIdentity;
 
-        if (camera === null)
-        {
-            // Design units straight to clip space: (0, 0) - (w, h) to (-1, -1) - (1, 1)
-            ClipSpace.#writeMatrix(d, 2.0 / w, 0.0, 0.0,
-                                      0.0, 2.0 / h, 0.0,
-                                      -1.0, -1.0, 1.0);
-        }
-        else
-        {
-            const m = camera.getWorldToClip().m;
-            ClipSpace.#writeMatrix(d, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]);
-        }
-
-        d[12] = w;
-        d[13] = h;
+        ClipSpace.#writeMatrix(d, m, s);
+        d[12] = s.z;
+        d[13] = s.w;
         ClipSpace.#frame.update(d);
 
         ClipSpace.#camera = camera;
         ClipSpace.#uploadedVersion = version;
-        ClipSpace.#uploadedWidth = w;
-        ClipSpace.#uploadedHeight = h;
+        u.set(s.x, s.y, s.z, s.w);
         ClipSpace.#isUploaded = true;
 
         if (viewportChanged === true)
@@ -660,6 +668,56 @@ class ClipSpace
 
     // The active Camera2D, or null for the screen
     static getCamera() { return ClipSpace.#camera; }
+
+    // The design area of the surface being drawn, written into out (a Vector4: x, y, width, height) and returned
+    static getSurfaceRect(out = new Vector4())
+    {
+        const target = RenderTargets.getCurrent();
+
+        if (target !== null)
+            return target.getDesignRect(out);
+
+        out.set(0, 0, WGLV.getWidth(), WGLV.getHeight());
+            return out;
+    }
+
+    // Device pixels per design unit on the surface being drawn, across (the view scale on the canvas)
+    static getSurfaceScale()
+    {
+        const target = RenderTargets.getCurrent();
+
+        if (target === null)
+            return WGLV.getViewScale();
+
+        return target.getWidth() / target.getDesignRect(ClipSpace.#kScaleRect).z;
+    }
+
+    // A rect in screen design units in the surface's pixels ({ x, y, w, h }, rounded outward), e.g. for a GL viewport
+    static toPixelRect(x, y, width, height) { return ClipSpace.#toPixels(x, y, width, height); }
+
+    // *** For RenderTargets ***
+
+    // The camera and clip rects, to put back with restoreState()
+    static saveState() { return { camera: ClipSpace.#camera, clips: ClipSpace.#clipStack.slice() }; }
+
+    // No camera and no clip rects, on the surface now being drawn
+    static resetState()
+    {
+        ClipSpace.#clipStack.length = 0;
+        ClipSpace.setCamera(null);
+        ClipSpace.#applyClip();
+    }
+
+    // Back to a saveState(), on the surface now being drawn
+    static restoreState(state)
+    {
+        ClipSpace.#clipStack = state.clips.slice();
+        ClipSpace.setCamera(state.camera);
+        ClipSpace.#applyClip();
+    }
+
+    // Sets the scissor test again, after GL calls that changed it (e.g. a blit)
+    static refresh() { ClipSpace.#applyClip(); }
 
     /*
         The Frame block's buffer provider (see RenderUniformBlocks), called by Shader.load():
@@ -730,6 +788,7 @@ class ClipSpace
         ClipSpace.#frame = null;
         ClipSpace.#camera = null;
         ClipSpace.#isUploaded = false;
+        ClipSpace.#uploadedSurface.set(0, 0, 0, 0);
         ClipSpace.#clipStack.length = 0;
     }
 
@@ -756,32 +815,82 @@ class ClipSpace
             return true;
     }
 
-    // A row-major Matrix3's rows as the std140 mat3's columns (GLSL then works out [x, y, 1] * M)
-    static #writeMatrix(d, m0, m1, m2, m3, m4, m5, m6, m7, m8)
+    /*
+        A row-major world-to-screen Matrix3 m (its 9 values), taken on to clip space for the
+        surface design area s (screen (s.x, s.y) - (s.x + s.z, s.y + s.w) to (-1, -1) - (1, 1)),
+        written as the std140 mat3's columns: its rows become GLSL's columns, so GLSL works
+        out [x, y, 1] * M.
+    */
+    static #writeMatrix(d, m, s)
     {
-        d[0] = m0; d[1] = m1; d[2]  = m2; d[3]  = 0.0;
-        d[4] = m3; d[5] = m4; d[6]  = m5; d[7]  = 0.0;
-        d[8] = m6; d[9] = m7; d[10] = m8; d[11] = 0.0;
+        const ax = 2.0 / s.z;
+        const ay = 2.0 / s.w;
+        const bx = -1.0 - (s.x * ax);
+        const by = -1.0 - (s.y * ay);
+
+        for (let row = 0; row < 3; ++row)
+        {
+            const i = row * 3;
+            const o = row * 4;
+            const w = m[i + 2];
+
+            d[o] = (m[i] * ax) + (bx * w);
+            d[o + 1] = (m[i + 1] * ay) + (by * w);
+            d[o + 2] = w;
+            d[o + 3] = 0.0;
+        }
     }
 
-    // A rect in screen design units, in canvas pixels, rounded outward so edges in between pixels aren't lost
+    // A rect in screen design units, in the surface's pixels, rounded outward so edges in between pixels aren't lost
     static #toPixels(x, y, width, height)
     {
-        const s = WGLV.getViewScale();
-        const vx = WGLV.getViewportX();
-        const vy = WGLV.getViewportY();
-        const left = Math.floor(vx + (x * s));
-        const bottom = Math.floor(vy + (y * s));
-        const right = Math.ceil(vx + ((x + width) * s));
-        const top = Math.ceil(vy + ((y + height) * s));
+        const target = RenderTargets.getCurrent();
+        let ox = 0.0; // The design area's bottom-left, in pixels
+        let oy = 0.0;
+        let sx = 0.0; // Pixels per design unit
+        let sy = 0.0;
+        let dx = 0.0; // The design area's bottom-left, in design units
+        let dy = 0.0;
+
+        if (target === null)
+        {
+            ox = WGLV.getViewportX();
+            oy = WGLV.getViewportY();
+            sx = WGLV.getViewScale();
+            sy = sx;
+        }
+        else
+        {
+            const r = target.getDesignRect(ClipSpace.#kPixelRect);
+            sx = target.getWidth() / r.z;
+            sy = target.getHeight() / r.w;
+            dx = r.x;
+            dy = r.y;
+        }
+
+        const left = Math.floor(ox + ((x - dx) * sx));
+        const bottom = Math.floor(oy + ((y - dy) * sy));
+        const right = Math.ceil(ox + ((x + width - dx) * sx));
+        const top = Math.ceil(oy + ((y + height - dy) * sy));
 
         return { x: left, y: bottom, w: right - left, h: top - bottom };
     }
 
-    // What clip rects are cut down to: the camera's viewport, or the whole view
+    // All of the surface being drawn, in its pixels: the canvas's view, or the whole target
+    static #getSurfacePixels()
+    {
+        const target = RenderTargets.getCurrent();
+
+        if (target !== null)
+            return { x: 0, y: 0, w: target.getWidth(), h: target.getHeight() };
+
+        return { x: WGLV.getViewportX(), y: WGLV.getViewportY(), w: WGLV.getViewportWidth(), h: WGLV.getViewportHeight() };
+    }
+
+    // What clip rects are cut down to: the camera's viewport, or the whole surface
     static #getBaseRect()
     {
-        const view = { x: WGLV.getViewportX(), y: WGLV.getViewportY(), w: WGLV.getViewportWidth(), h: WGLV.getViewportHeight() };
+        const view = ClipSpace.#getSurfacePixels();
         const c = ClipSpace.#camera;
 
         if (c === null || c.hasViewport() === false)

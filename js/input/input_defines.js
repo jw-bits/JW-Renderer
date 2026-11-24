@@ -67,6 +67,7 @@ class KeyCode
     static kE = "KeyE";
     static kR = "KeyR";
     static kP = "KeyP";
+    static kO = "KeyO";
 }
 
 /*

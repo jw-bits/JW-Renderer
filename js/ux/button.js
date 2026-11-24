@@ -280,9 +280,6 @@ class Button
         this.#refit();
     }
 
-    // Keeps the text sharp when the view's scale changes (see TextGlyphs2D.listenForRasterScale())
-    listenForRasterScale(listen) { this.#text?.listenForRasterScale(listen); }
-
     // *** Size and shape ***
 
     // A fixed size, outline included; turns auto size off. Returns false if it isn't above 0.
