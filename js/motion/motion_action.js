@@ -2,20 +2,20 @@
 
 /*
     MotionAction - Moves an Entity's local transform from a start Transform2D
-    to a target one, always start to target. Its MotionValues says which
+    to a target one, always start to target. Its MotionParams says which
     channels move and each one's duration and easing; the others are left
     to game code or another motion. The position is the Entity's, which is
     its model's anchor (see Model2D.setAlignment()).
 
     Usage:
-        let timing = new MotionValues({ scale: { duration: 0.2, easing: Easing.kBackOut } });
+        let timing = new MotionParams({ scale: { duration: 0.2, easing: Easing.kBackOut } });
         let grow = new MotionAction(new Transform2D(0, 0, 0.5), new Transform2D(0, 0, 1.0), timing);
 
         piece.addMotion().add("grow", grow);   // piece is an Entity
         piece.getMotion().play("grow");
 
-    The values can also be given as a plain object, which makes one for
-    this action alone (see MotionValues):
+    The params can also be given as a plain object, which makes one for
+    this action alone (see MotionParams):
 
         let spin = new MotionAction(null, new Transform2D(0, 0, 1, 1, MathDefines.kPi), { rotation: { duration: 0.5 } });
 
@@ -39,10 +39,10 @@ class MotionAction extends MotionBase
     #target;      // Transform2D
     #startColor;  // Vector4
     #targetColor; // Vector4
-    #values;      // MotionValues
+    #params;      // MotionParams
 
-    // start and target: Transform2Ds (copied), or null for the identity. values: a MotionValues (shared) or a plain object.
-    constructor(_start = null, _target = null, _values = null)
+    // start and target: Transform2Ds (copied), or null for the identity. params: a MotionParams (shared) or a plain object.
+    constructor(_start = null, _target = null, _params = null)
     {
         super();
 
@@ -50,21 +50,21 @@ class MotionAction extends MotionBase
         this.#target = new Transform2D();
         this.#startColor = new Vector4(1, 1, 1, 1);
         this.#targetColor = new Vector4(1, 1, 1, 1);
-        this.#values = new MotionValues();
+        this.#params = new MotionParams();
 
         if (_start !== null || _target !== null)
-            this.set(_start ?? this.#start, _target ?? this.#target);
+            this.setTransforms(_start ?? this.#start, _target ?? this.#target);
 
-        if (_values !== null)
-            this.setValues(_values);
+        if (_params !== null)
+            this.setParams(_params);
     }
 
     // Copies start and target (Transform2Ds). Returns false (and changes nothing) if they aren't.
-    set(start, target)
+    setTransforms(start, target)
     {
         if ((start instanceof Transform2D) === false || (target instanceof Transform2D) === false)
         {
-            console.error("MotionAction.set() needs a start and target Transform2D");
+            console.error("MotionAction.setTransforms() needs a start and target Transform2D");
                 return false;
         }
 
@@ -72,9 +72,6 @@ class MotionAction extends MotionBase
         this.#target.copy(target);
             return true;
     }
-
-    getStart() { return this.#start; }   // Read-only; change it with set()
-    getTarget() { return this.#target; } // Read-only; change it with set()
 
     // Copies the color channel's start and target (Vector4s, (r, g, b, a) 0 - 1). Returns false (and changes nothing) if they aren't.
     setColors(start, target)
@@ -90,36 +87,36 @@ class MotionAction extends MotionBase
             return true;
     }
 
-    getStartColor() { return this.#startColor; }   // Read-only; change it with setColors()
-    getTargetColor() { return this.#targetColor; } // Read-only; change it with setColors()
-
-    // A MotionValues (shared, not copied) or a plain object for a new one. Returns false (and changes nothing) if it isn't valid.
-    setValues(values)
+    // A MotionParams (shared, not copied) or a plain object for a new one. Returns false (and changes nothing) if it isn't valid.
+    setParams(params)
     {
-        if (values instanceof MotionValues)
+        if (params instanceof MotionParams)
         {
-            this.#values = values;
+            this.#params = params;
                 return true;
         }
 
-        let made = new MotionValues();
+        let made = new MotionParams();
 
-        if (made.set(values) === false)
+        if (made.set(params) === false)
             return false;
 
-        this.#values = made;
+        this.#params = made;
             return true;
     }
 
-    getValues() { return this.#values; }
-
-    getDuration() { return this.#values.getDuration(); }
-    getChannels() { return this.#values.getChannels(); }
+    getStart() { return this.#start; }   // Read-only; change it with setTransforms()
+    getTarget() { return this.#target; } // Read-only; change it with setTransforms()
+    getStartColor() { return this.#startColor; }   // Read-only; change it with setColors()
+    getTargetColor() { return this.#targetColor; } // Read-only; change it with setColors()
+    getParams() { return this.#params; } // Shared; changes to it show in every action using it
+    getDuration() { return this.#params.getDuration(); }
+    getChannels() { return this.#params.getChannels(); }
 
     // Writes the moved channels seconds in into out (a MotionState) and returns it; other channels are left as they are
     evaluateAt(seconds, out)
     {
-        const d = this.#values;
+        const d = this.#params;
         const channels = d.getChannels();
         const s = this.#start;
         const t = this.#target;

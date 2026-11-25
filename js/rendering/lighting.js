@@ -155,6 +155,7 @@ class DirectionalLight extends BaseLight
     }
 
     setTarget(x, y, z) { this.#target.set(x, y, z); }
+    
     getTarget() { return this.#target; } // Read-only; change it with setTarget()
 
     // The way it shines, from its position toward its target, normalized; written into out (a Vector3) and returned
@@ -319,13 +320,13 @@ class LightSet
     }
 
     /*
-        The Lights block's buffer provider (see RenderUniformBlocks), called by Shader.load()
-        for each shader declaring it: the first time, creates the buffer (all zeros until
-        apply()) at the block's binding point; afterwards returns right away.
+        The Lights block's buffer provider (see RenderUniformBlocks), called by WGLV.init():
+        the first time, creates the buffer (all zeros until apply()) at the block's binding
+        point; afterwards returns right away.
     */
     static uploadBuffer() { return LightSet.#ensureBuffer(); }
 
-    // Frees the Lights block's buffer; the next apply() or lit shader load makes it again
+    // Frees the Lights block's buffer; the next apply() makes it again
     static unload()
     {
         if (LightSet.#buffer !== null)
@@ -368,5 +369,5 @@ class LightSet
     }
 }
 
-// Every shader declaring the Lights block finds its buffer at the binding point (see RenderUniformBlocks)
+// The Lights block's buffer is made by WGLV.init(), so every shader declaring it finds it at the binding point (see RenderUniformBlocks)
 RenderUniformBlocks.setBufferProvider(RenderUniformBlocks.kLights, LightSet.uploadBuffer);

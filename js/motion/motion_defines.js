@@ -5,15 +5,15 @@
     color over time. Sprite frame animation (UVs) belongs to rendering; its
     types are in render_defines.js.
 
-        MotionValues      Per channel: duration and easing. Any number of MotionActions can share one. (Below.)
+        MotionParams      Per channel: duration and easing. Any number of MotionActions can share one. (Below.)
         MotionState       A transform and a color: what a motion works out at a moment. (Below.)
         MotionBase        What MotionAction and MotionChain share: play time, direction and update(dt)
-        MotionAction      From a start Transform2D to a target one, timed by a MotionValues
+        MotionAction      From a start Transform2D to a target one, timed by a MotionParams
         MotionChain       MotionActions, one after another
         MotionController  An Entity's named motions and how each plays (see Entity.addMotion())
 
     Usage:
-        let timing = new MotionValues({ translation: { duration: 0.35, easing: Easing.kQuadraticInOut } });
+        let timing = new MotionParams({ translation: { duration: 0.35, easing: Easing.kQuadraticInOut } });
         let slide = new MotionAction(new Transform2D(100, 100), new Transform2D(400, 200), timing);
 
         let motion = piece.addMotion();    // piece is an Entity, e.g. with a Rect2D (Entity.setModel())
@@ -67,7 +67,7 @@ class MotionEvent
 }
 
 /*
-    MotionValues - The timing of a MotionAction: which channels
+    MotionParams - The timing of a MotionAction: which channels
     (MotionChannel) it moves, and each one's duration and easing. Any number
     of actions can share one; a change to it shows in all of them, including
     any playing now.
@@ -75,7 +75,7 @@ class MotionEvent
     It can be made from a plain object, any of whose keys can be left out
     (a channel left out isn't moved; easing defaults to Easing.kLinear):
 
-        let timing = new MotionValues({
+        let timing = new MotionParams({
             translation: { duration: 0.35, easing: Easing.kQuadraticInOut },
             scale:       { duration: 0.35, easing: Easing.kBackOut },
             rotation:    { duration: 0.2 },
@@ -87,7 +87,7 @@ class MotionEvent
     A motion lasts as long as its longest channel; shorter ones hold their
     target until it ends. A channel with a duration of 0 jumps to its target.
 */
-class MotionValues
+class MotionParams
 {
     static #kKeys = ["translation", "scale", "rotation", "color"]; // In #channelIndex() order
     static #kChannels = [MotionChannel.kTranslation, MotionChannel.kScale, MotionChannel.kRotation, MotionChannel.kColor];
@@ -95,44 +95,44 @@ class MotionValues
     #channels; // MotionChannel flags moved
     #timings;  // Per channel, in #kKeys order: { duration (seconds), easing (Easing type) }
 
-    constructor(_values = null)
+    constructor(_params = null)
     {
         this.#channels = MotionChannel.kNone;
-        this.#timings = MotionValues.#kKeys.map(() => ({ duration: 0.0, easing: Easing.kLinear }));
+        this.#timings = MotionParams.#kKeys.map(() => ({ duration: 0.0, easing: Easing.kLinear }));
 
-        if (_values !== null)
-            this.set(_values);
+        if (_params !== null)
+            this.set(_params);
     }
 
     /*
         Replaces every channel from a plain object (see the top of this class).
         Returns false (and changes nothing) if it isn't a valid one.
     */
-    set(values)
+    set(params)
     {
-        const isObject = (values !== null && typeof values === "object");
-        const keys = (isObject === true) ? Object.keys(values) : [];
+        const isObject = (params !== null && typeof params === "object");
+        const keys = (isObject === true) ? Object.keys(params) : [];
 
-        if (isObject === false || keys.every((k) => MotionValues.#kKeys.includes(k)) === false)
+        if (isObject === false || keys.every((k) => MotionParams.#kKeys.includes(k)) === false)
         {
-            console.error(`MotionValues.set() needs an object with any of the keys ${MotionValues.#kKeys.join(", ")}`);
+            console.error(`MotionParams.set() needs an object with any of the keys ${MotionParams.#kKeys.join(", ")}`);
                 return false;
         }
 
         for (const key of keys)
         {
-            const t = values[key];
+            const t = params[key];
             const easing = t?.easing ?? Easing.kLinear;
 
-            if (MotionValues.#isValid(t?.duration, easing, `set() "${key}"`) === false)
+            if (MotionParams.#isValid(t?.duration, easing, `set() "${key}"`) === false)
                 return false;
         }
 
         this.#channels = MotionChannel.kNone;
 
-        for (let i = 0; i < MotionValues.#kKeys.length; ++i)
+        for (let i = 0; i < MotionParams.#kKeys.length; ++i)
         {
-            const t = values[MotionValues.#kKeys[i]];
+            const t = params[MotionParams.#kKeys[i]];
 
             if (t !== undefined)
                 this.#setTiming(i, t.duration, t.easing ?? Easing.kLinear);
@@ -144,15 +144,15 @@ class MotionValues
     // Moves one channel (a single MotionChannel) over duration seconds
     setChannel(channel, duration, easing = Easing.kLinear)
     {
-        const i = MotionValues.#channelIndex(channel);
+        const i = MotionParams.#channelIndex(channel);
 
         if (i < 0)
         {
-            console.error("MotionValues.setChannel() needs a single MotionChannel such as MotionChannel.kScale");
+            console.error("MotionParams.setChannel() needs a single MotionChannel such as MotionChannel.kScale");
                 return false;
         }
 
-        if (MotionValues.#isValid(duration, easing, "setChannel()") === false)
+        if (MotionParams.#isValid(duration, easing, "setChannel()") === false)
             return false;
 
         this.#setTiming(i, duration, easing);
@@ -173,9 +173,9 @@ class MotionValues
     {
         let longest = 0.0;
 
-        for (let i = 0; i < MotionValues.#kChannels.length; ++i)
+        for (let i = 0; i < MotionParams.#kChannels.length; ++i)
         {
-            if ((this.#channels & MotionValues.#kChannels[i]) !== 0)
+            if ((this.#channels & MotionParams.#kChannels[i]) !== 0)
                 longest = Math.max(longest, this.#timings[i].duration);
         }
 
@@ -199,31 +199,31 @@ class MotionValues
     {
         this.#timings[i].duration = duration;
         this.#timings[i].easing = easing;
-        this.#channels |= MotionValues.#kChannels[i];
+        this.#channels |= MotionParams.#kChannels[i];
     }
 
     // The timing of a moved single channel, or null
     #timingOf(channel)
     {
-        const i = MotionValues.#channelIndex(channel);
+        const i = MotionParams.#channelIndex(channel);
 
         return (i >= 0 && (this.#channels & channel) !== 0) ? this.#timings[i] : null;
     }
 
     // 0 - 3 for kTranslation, kScale, kRotation or kColor; -1 for anything else
-    static #channelIndex(channel) { return MotionValues.#kChannels.indexOf(channel); }
+    static #channelIndex(channel) { return MotionParams.#kChannels.indexOf(channel); }
 
     static #isValid(duration, easing, methodName)
     {
         if (Number.isFinite(duration) === false || duration < 0.0)
         {
-            console.error(`MotionValues.${methodName}: duration must be 0 or more seconds`);
+            console.error(`MotionParams.${methodName}: duration must be 0 or more seconds`);
                 return false;
         }
 
         if (Easing.isValid(easing) === false)
         {
-            console.error(`MotionValues.${methodName}: needs an easing type such as Easing.kLinear`);
+            console.error(`MotionParams.${methodName}: needs an easing type such as Easing.kLinear`);
                 return false;
         }
 

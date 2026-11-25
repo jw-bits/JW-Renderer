@@ -99,9 +99,9 @@ let gBatcher = null; // Everything is drawn through it, once per frame
 let gSparks = null;  // Particles2D for jumps
 
 // Move motion timing, created in loadAssets() and shared by every moving entity's motions (see addMoveMotion())
-let gMoveSlideTiming = null; // MotionValues: translation over MOVE_TIME
-let gMoveLiftTiming = null;  // MotionValues: scale up over half of MOVE_TIME
-let gMoveDropTiming = null;  // MotionValues: scale back down over the other half
+let gMoveSlideTiming = null; // MotionParams: translation over MOVE_TIME
+let gMoveLiftTiming = null;  // MotionParams: scale up over half of MOVE_TIME
+let gMoveDropTiming = null;  // MotionParams: scale back down over the other half
 
 // Title screen animation, created in loadAssets() (see setupTitleAnimation())
 let gTitleBoard = null;   // Material: a 2x2 checker texture, repeated by the title background's UV tiling
@@ -113,7 +113,7 @@ let gTitleBoard = null;   // Material: a 2x2 checker texture, repeated by the ti
         square  The square it's on, or hopping to, { r, c }; row -1 is just below the screen
         easing  The easing last played, or -1 for none yet
         delay   Seconds left before its next hop; 0 while hopping
-        timing  MotionValues: translation over TITLE_HOP_TIME; its easing is set per hop
+        timing  MotionParams: translation over TITLE_HOP_TIME; its easing is set per hop
         hop     MotionAction: one square diagonally; its start and target are set per hop
         entity  Its Entity, holding a centered Rect2D (from appLayout()), or null; its motion "hop" plays hop
 */
@@ -315,9 +315,9 @@ async function loadAssets()
 // The timing of the slide and lift every move plays (see addMoveMotion() and startMove())
 function setupMoveAnimation()
 {
-    gMoveSlideTiming = new MotionValues({ translation: { duration: MOVE_TIME, easing: Easing.kQuadraticInOut } });
-    gMoveLiftTiming = new MotionValues({ scale: { duration: MOVE_TIME / 2.0, easing: Easing.kQuadraticOut } });
-    gMoveDropTiming = new MotionValues({ scale: { duration: MOVE_TIME / 2.0, easing: Easing.kQuadraticIn } });
+    gMoveSlideTiming = new MotionParams({ translation: { duration: MOVE_TIME, easing: Easing.kQuadraticInOut } });
+    gMoveLiftTiming = new MotionParams({ scale: { duration: MOVE_TIME / 2.0, easing: Easing.kQuadraticOut } });
+    gMoveDropTiming = new MotionParams({ scale: { duration: MOVE_TIME / 2.0, easing: Easing.kQuadraticIn } });
 }
 
 /*
@@ -369,7 +369,7 @@ function setupTitleAnimation()
 // A title checker (see gTitleCheckers); its column and rect come from appLayout()
 function makeTitleChecker(color)
 {
-    let timing = new MotionValues({ translation: { duration: TITLE_HOP_TIME } }); // Its easing is set per hop
+    let timing = new MotionParams({ translation: { duration: TITLE_HOP_TIME } }); // Its easing is set per hop
 
     return {
         color: color,
@@ -528,7 +528,7 @@ function hopTitleChecker(checker)
     checker.easing = randomEasing(checker.easing);
 
     checker.timing.setChannel(MotionChannel.kTranslation, TITLE_HOP_TIME, checker.easing);
-    checker.hop.set(new Transform2D(titleSquareCenter(from.c), titleSquareCenter(from.r)),
+    checker.hop.setTransforms(new Transform2D(titleSquareCenter(from.c), titleSquareCenter(from.r)),
                     new Transform2D(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r)));
     checker.entity.getMotion().play("hop");
 }
@@ -1328,7 +1328,7 @@ function startMove(fr, fc, tr, tc, onLanded)
     const entity = gRects.moving[piece]; // The piece as it was, so a man crowned here shows its crown on landing
 
     let motion = entity.getMotion(); // See addMoveMotion()
-    motion.get("slide").set(new Transform2D(pieceX(fc), pieceY(fr)), new Transform2D(pieceX(tc), pieceY(tr)));
+    motion.get("slide").setTransforms(new Transform2D(pieceX(fc), pieceY(fr)), new Transform2D(pieceX(tc), pieceY(tr)));
 
     gMoving = { piece, entity, to: { r: tr, c: tc }, captured, result, onLanded };
 

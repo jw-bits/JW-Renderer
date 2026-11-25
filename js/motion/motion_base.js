@@ -11,7 +11,7 @@
 
     Subclasses provide getDuration(), getChannels() and evaluateAt(). A
     motion holds its own time, so each Entity needs its own motion (they can
-    share MotionValues).
+    share MotionParams).
 */
 class MotionBase
 {

@@ -118,7 +118,8 @@ class IndexBuffer
 /*
     UniformBuffer - The values of one uniform block (see RenderUniformBlocks),
     attached to the block's binding point. Every shader that declares the block
-    reads the same buffer (Shader.load() connects it), so the values are
+    reads the same buffer (Shader.load() points the block at the binding
+    point), so the values are
     uploaded once, not per shader or per draw.
 
     The data is laid out by the block's std140 rules: in floats, a vec2 starts

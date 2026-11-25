@@ -1092,7 +1092,7 @@ function makeHierarchyItem(circleTexture, arrowTexture)
     systemMotion.play("breathe");
 
     // Shared by every moon's pulse; each moon needs its own MotionAction, as it holds the play time
-    const pulseTiming = new MotionValues({ scale: { duration: HIERARCHY_MOON_PULSE_TIME, easing: easing } });
+    const pulseTiming = new MotionParams({ scale: { duration: HIERARCHY_MOON_PULSE_TIME, easing: easing } });
     const pulseSmall = new Transform2D(0, 0, 1.0 - HIERARCHY_MOON_PULSE);
     const pulseBig = new Transform2D(0, 0, 1.0 + HIERARCHY_MOON_PULSE);
 

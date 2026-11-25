@@ -611,9 +611,10 @@ class RenderState
     pushed is clipped, so with a Batcher push and pop inside something
     drawn from the batcher (see submitDrawable()), not around submit().
 
-    The Frame block is created and given the screen mapping when the first
-    shader using it is loaded (uploadBuffer()), so drawing works without a
-    camera or beginFrame(). beginFrame() resets the per-frame state.
+    The Frame block is created and given the screen mapping by WGLV.init()
+    (uploadBuffer()), so drawing works without a camera or beginFrame(), and
+    shaders loaded before any camera read it too. beginFrame() resets the
+    per-frame state.
 
     Surfaces: drawing goes to the canvas or to a RenderTarget (see
     RenderTargets in render_target.js). Each surface has a design area (the
@@ -766,7 +767,7 @@ class ClipSpace
     }
 
     /*
-        The Frame block's buffer provider (see RenderUniformBlocks), called by Shader.load():
+        The Frame block's buffer provider (see RenderUniformBlocks), called by WGLV.init():
         the first time, creates the buffer and sends the active camera's mapping (the
         screen until a camera is set) to the Frame binding point; afterwards returns
         right away. So models draw in screen design units even before any setCamera()
@@ -969,5 +970,5 @@ class ClipSpace
     }
 }
 
-// Every shader declaring the Frame block gets its data on load (see RenderUniformBlocks)
+// The Frame block's buffer is made by WGLV.init(), so every shader declaring it finds it at the binding point (see RenderUniformBlocks)
 RenderUniformBlocks.setBufferProvider(RenderUniformBlocks.kFrame, ClipSpace.uploadBuffer);

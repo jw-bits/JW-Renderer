@@ -138,9 +138,9 @@ class Shader
     // *** Internal Methods ***
 
     /*
-        Points each RenderUniformBlocks block the program declares at its binding point, where
-        its UniformBuffer is, then calls the block's bufferProvider (if registered) so the buffer
-        has its data before anything draws with this shader.
+        Points each RenderUniformBlocks block the program declares at its binding point. Only
+        the program's own setup: the block's UniformBuffer is put at that binding point by its
+        owner (see RenderUniformBlocks.createBuffers()), before or after this shader loads.
     */
     #bindUniformBlocks()
     {
@@ -154,9 +154,6 @@ class Shader
                 continue; // Not declared (or not used) by this program
 
             gl.uniformBlockBinding(this.#programId, index, block.binding);
-
-            if (block.bufferProvider !== null)
-                block.bufferProvider();
         }
     }
 

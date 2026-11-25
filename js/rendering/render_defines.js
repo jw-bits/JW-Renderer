@@ -218,15 +218,20 @@ class RenderUniforms
 /*
     Every uniform block a shader may declare, each with its own binding point.
     A block's values live in one UniformBuffer (buffers.js) that every shader
-    declaring the block reads; Shader.load() connects them by name. Members of
-    a block aren't Material uniforms, so they aren't in RenderUniforms.
+    declaring the block reads. Shader.load() points the shader's blocks at
+    their binding points, and each buffer is put at its binding point by the
+    code that owns it, so neither depends on the other being made first.
+    Members of a block aren't Material uniforms, so they aren't in
+    RenderUniforms.
 
     bufferProvider: the code that owns a block's buffer registers a function
-    with setBufferProvider(). Shader.load() calls it for each block the shader
-    declares, after connecting the block, so the buffer has its data at the
-    binding point before anything draws with the shader. It's called once per
-    shader load, so it must create and upload only the first time and return
-    right away afterwards. null (the default) calls nothing.
+    with setBufferProvider() that creates the buffer at the binding point and
+    uploads its first values. WGLV.init() calls every registered one (through
+    createBuffers()), and setBufferProvider() calls it right away when that
+    has already happened, so the buffer is in place before anything draws,
+    whatever order shaders, cameras and lights are made in. It may be called
+    more than once, so it must create and upload only the first time and
+    return right away afterwards. null (the default) calls nothing.
 
         Frame (binding 0, see ClipSpace in render_utils.js), std140:
             mat3 u_worldToClip   World position (design units) to clip space, through the active camera
@@ -246,6 +251,8 @@ class RenderUniformBlocks
 
     static allBlocks = new Map(); // Name -> { binding, bufferProvider }; bufferProvider is a function or null
 
+    static #isCreated = false; // createBuffers() has run (WGLV is initialized): new providers are called right away
+
     // -1 for a name that isn't listed
     static getBinding(name)
     {
@@ -260,7 +267,11 @@ class RenderUniformBlocks
             return (b !== undefined) ? b.bufferProvider : null;
     }
 
-    // Registers (or with null, removes) the function that sends name's data to its binding point. Returns false if name isn't listed.
+    /*
+        Registers (or with null, removes) the function that sends name's data to its binding
+        point, and calls it right away if createBuffers() has already run (WGLV is initialized).
+        Returns false if name isn't listed or the provider fails.
+    */
     static setBufferProvider(name, bufferProvider)
     {
         const b = RenderUniformBlocks.allBlocks.get(name);
@@ -278,7 +289,31 @@ class RenderUniformBlocks
         }
 
         b.bufferProvider = bufferProvider;
-            return true;
+
+        if (bufferProvider !== null && RenderUniformBlocks.#isCreated === true)
+            return (bufferProvider() !== false);
+
+        return true;
+    }
+
+    /*
+        Calls every registered bufferProvider, so each block's buffer is at its binding
+        point. WGLV.init() calls it; providers already done return right away. Returns
+        false if any fails (the rest are still called).
+    */
+    static createBuffers()
+    {
+        let isOk = true;
+
+        RenderUniformBlocks.#isCreated = true;
+
+        for (const block of RenderUniformBlocks.allBlocks.values())
+        {
+            if (block.bufferProvider !== null && block.bufferProvider() === false)
+                isOk = false;
+        }
+
+        return isOk;
     }
 
     static {

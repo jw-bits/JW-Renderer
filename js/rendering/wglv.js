@@ -118,6 +118,7 @@ class WGLV
         c.addEventListener("webglcontextlost", (e) => WGLV.#onContextLost(e));
         c.addEventListener("webglcontextrestored", () => WGLV.#onContextRestored());
         RenderState.applyDefaults();
+        RenderUniformBlocks.createBuffers(); // Each block's buffer at its binding point, before any shader loads
             return true;
     }
 

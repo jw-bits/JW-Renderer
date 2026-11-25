@@ -25,7 +25,7 @@
         piece.update(dt);
 
     A motion holds its own play time, so give each entity its own motions
-    (they can share MotionValues).
+    (they can share MotionParams).
 */
 class MotionController
 {
