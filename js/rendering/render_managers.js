@@ -8,6 +8,7 @@
         // After WGLV.init()
         FontManager.setDefaultFamily("'Segoe UI', Arial, sans-serif"); // Optional: the default font (sans-serif otherwise)
         const square = await TextureManager.load("./textures/square.png");
+        const atlas = await TextureAtlasManager.loadAtlas("./textures/checkers.json");
         const font = await FontManager.load("./fonts/MyFont-Regular.ttf");
         const shader = ShaderManager.get(Rect2DShaderSource);
         const material = MaterialManager.load(shader, [square]);
@@ -280,10 +281,7 @@ class FontManager
     Requesting the same url (with the same options) again returns the same
     Texture, sharing an in-progress load, so an image is only loaded once.
 
-    Atlases (see TextureAtlas) are kept the same way, one per JSON url.
-    Their AtlasSubTextures are BaseTextures like Texture, so they go wherever one does:
-        const atlas = await TextureManager.loadAtlas("./textures/checkers.json");
-        rect.load(atlas.getSubTexture("checker_king"), 64, 64);
+    Atlases are kept by TextureAtlasManager (below).
 */
 class TextureManager
 {
@@ -291,7 +289,6 @@ class TextureManager
                                            255, 255, 255, 255,   255, 255, 255, 255]); // 2 x 2, pure white
 
     static #textures = new Map(); // Key -> Texture
-    static #atlases = new Map();  // Key -> TextureAtlas
     static #whiteTexture = null;  // Made the first time it's asked for
 
     // Pure white; also what failed loads return. Shared: don't unload it.
@@ -372,27 +369,71 @@ class TextureManager
         }
     }
 
+    // Unloads every texture except the white texture (atlases are TextureAtlasManager's)
+    static unloadAll()
+    {
+        for (const texture of TextureManager.#textures.values())
+            texture.unload();
+
+        TextureManager.#textures.clear();
+    }
+
+    // *** Internal Methods ***
+
+    static #key(url, flipY, useMipmaps)
+    {
+        return `${url}|${flipY ? "flip" : "noflip"}|${useMipmaps ? "mips" : "nomips"}`;
+    }
+}
+
+/*
+    TextureAtlasManager - Keeps every TextureAtlas, one per url, so an atlas is
+    only loaded once and is shared by everything drawing from it. Use it after
+    WGLV.init().
+
+    JSON atlases (see TextureAtlas): one TextureAtlas per JSON url (and mipmap
+    option). Their AtlasSubTextures are BaseTextures like Texture, so they go
+    wherever one does:
+        const atlas = await TextureAtlasManager.loadAtlas("./textures/checkers.json");
+        rect.load(atlas.getSubTexture("checker_king"), 64, 64);
+
+    Spine atlases: a .atlas file can have several page images, and a
+    TextureAtlas is one page, so loadSpineAtlas() loads one TextureAtlas per
+    page and keeps them together under the .atlas file's url. Regions are
+    found across the pages by name, as Spine does:
+        const pages = await TextureAtlasManager.loadSpineAtlas("assets/atlas1.atlas");
+        const eye = TextureAtlasManager.findSubTexture("assets/atlas1.atlas", "alien/eye");
+
+    Requesting the same url again returns the same atlas (or pages), sharing
+    an in-progress load. A failed load logs a console.error and resolves to
+    null (there's no default atlas); nothing is kept, so a later request
+    tries again.
+*/
+class TextureAtlasManager
+{
+    static #atlases = new Map();      // Key -> TextureAtlas (JSON atlases)
+    static #spineAtlases = new Map(); // .atlas url -> { pages: TextureAtlas[] (null while loading), promise }
+
     /*
         Loads a TextureAtlas: the JSON at atlasUrl and the image beside it. Resolves
-        to the loaded atlas, or null on failure (there's no default atlas).
-        Requesting the same url again returns the same atlas, sharing a load.
+        to the loaded atlas, or null on failure.
     */
     static async loadAtlas(atlasUrl, useMipmaps = true)
     {
         if (typeof atlasUrl !== "string" || atlasUrl.length === 0)
         {
-            console.error("TextureManager.loadAtlas() needs an atlas JSON url");
+            console.error("TextureAtlasManager.loadAtlas() needs an atlas JSON url");
                 return null;
         }
 
-        const key = TextureManager.#key(atlasUrl, true, useMipmaps);
-        let atlas = TextureManager.#atlases.get(key);
+        const key = TextureAtlasManager.#key(atlasUrl, useMipmaps);
+        let atlas = TextureAtlasManager.#atlases.get(key);
         let ok;
 
         if (atlas === undefined)
         {
             atlas = new TextureAtlas(useMipmaps);
-            TextureManager.#atlases.set(key, atlas); // Stored before loading, so a second request shares this load
+            TextureAtlasManager.#atlases.set(key, atlas); // Stored before loading, so a second request shares this load
             ok = await atlas.load(atlasUrl);
         }
         else
@@ -402,58 +443,172 @@ class TextureManager
 
         if (ok === false)
         {
-            if (TextureManager.#atlases.get(key) === atlas)
-                TextureManager.#atlases.delete(key); // Don't keep failed atlases; a later request tries again
+            if (TextureAtlasManager.#atlases.get(key) === atlas)
+                TextureAtlasManager.#atlases.delete(key); // Don't keep failed atlases; a later request tries again
 
-            console.error(`TextureManager couldn't load the atlas ${atlasUrl}`);
+            console.error(`TextureAtlasManager couldn't load the atlas ${atlasUrl}`);
                 return null;
         }
 
         return atlas;
     }
 
-    // The TextureAtlas for a url, or null if it isn't loaded or loading. It may still be loading; check isLoaded().
+    // The TextureAtlas for a JSON url, or null if it isn't loaded or loading. It may still be loading; check isLoaded().
     static getAtlas(atlasUrl, useMipmaps = true)
     {
-        return TextureManager.#atlases.get(TextureManager.#key(atlasUrl, true, useMipmaps)) ?? null;
+        return TextureAtlasManager.#atlases.get(TextureAtlasManager.#key(atlasUrl, useMipmaps)) ?? null;
     }
 
     static hasAtlas(atlasUrl, useMipmaps = true)
     {
-        return TextureManager.#atlases.has(TextureManager.#key(atlasUrl, true, useMipmaps));
+        return TextureAtlasManager.#atlases.has(TextureAtlasManager.#key(atlasUrl, useMipmaps));
     }
 
-    // Unloads an atlas; its AtlasSubTextures stop being loaded
+    // Unloads a JSON atlas; its AtlasSubTextures stop being loaded
     static unloadAtlas(atlasUrl, useMipmaps = true)
     {
-        const key = TextureManager.#key(atlasUrl, true, useMipmaps);
-        const atlas = TextureManager.#atlases.get(key);
+        const key = TextureAtlasManager.#key(atlasUrl, useMipmaps);
+        const atlas = TextureAtlasManager.#atlases.get(key);
 
         if (atlas !== undefined)
         {
             atlas.unload();
-            TextureManager.#atlases.delete(key);
+            TextureAtlasManager.#atlases.delete(key);
         }
     }
 
-    // Unloads every texture and atlas except the white texture
+    /*
+        Loads a Spine .atlas file and every page image it names (from its folder), one
+        TextureAtlas per page. Resolves to the pages in file order (read-only array), or
+        null if the file or any page can't be loaded (nothing is kept).
+    */
+    static async loadSpineAtlas(atlasUrl)
+    {
+        if (typeof atlasUrl !== "string" || atlasUrl.length === 0)
+        {
+            console.error("TextureAtlasManager.loadSpineAtlas() needs a .atlas file's url");
+                return null;
+        }
+
+        let entry = TextureAtlasManager.#spineAtlases.get(atlasUrl);
+
+        if (entry === undefined)
+        {
+            entry = { pages: null, promise: null };
+            entry.promise = TextureAtlasManager.#loadSpinePages(atlasUrl, entry);
+            TextureAtlasManager.#spineAtlases.set(atlasUrl, entry); // Stored before loading, so a second request shares this load
+        }
+
+        return await entry.promise;
+    }
+
+    // A loaded Spine atlas's pages (read-only array of TextureAtlas, in file order), or null if it isn't loaded (or still loading)
+    static getSpinePages(atlasUrl) { return TextureAtlasManager.#spineAtlases.get(atlasUrl)?.pages ?? null; }
+
+    static hasSpineAtlas(atlasUrl) { return TextureAtlasManager.#spineAtlases.has(atlasUrl); }
+
+    // The first AtlasSubTexture named name on a loaded Spine atlas's pages, in page order (as Spine's findRegion()), or null
+    static findSubTexture(atlasUrl, name)
+    {
+        const pages = TextureAtlasManager.getSpinePages(atlasUrl);
+
+        if (pages === null)
+            return null;
+
+        for (const page of pages)
+        {
+            const s = page.getSubTexture(name);
+
+            if (s !== null)
+                return s;
+        }
+
+        return null;
+    }
+
+    // Unloads a Spine atlas's pages; their AtlasSubTextures stop being loaded
+    static unloadSpineAtlas(atlasUrl)
+    {
+        const entry = TextureAtlasManager.#spineAtlases.get(atlasUrl);
+
+        if (entry === undefined)
+            return;
+
+        TextureAtlasManager.#spineAtlases.delete(atlasUrl);
+
+        for (const page of entry.pages ?? [])
+            page.unload();
+    }
+
+    // Unloads every atlas, JSON and Spine
     static unloadAll()
     {
-        for (const texture of TextureManager.#textures.values())
-            texture.unload();
-
-        for (const atlas of TextureManager.#atlases.values())
+        for (const atlas of TextureAtlasManager.#atlases.values())
             atlas.unload();
 
-        TextureManager.#textures.clear();
-        TextureManager.#atlases.clear();
+        for (const url of Array.from(TextureAtlasManager.#spineAtlases.keys()))
+            TextureAtlasManager.unloadSpineAtlas(url);
+
+        TextureAtlasManager.#atlases.clear();
     }
 
     // *** Internal Methods ***
 
-    static #key(url, flipY, useMipmaps)
+    static #key(url, useMipmaps)
     {
-        return `${url}|${flipY ? "flip" : "noflip"}|${useMipmaps ? "mips" : "nomips"}`;
+        return `${url}|${useMipmaps ? "mips" : "nomips"}`;
+    }
+
+    // Fetches and parses the .atlas, then loads its pages together; the pages, or null (forgetting the entry) on failure
+    static async #loadSpinePages(atlasUrl, entry)
+    {
+        let pages = [];
+        let failure = null;
+
+        try
+        {
+            const response = await fetch(atlasUrl);
+
+            if (response.ok === false)
+                throw new Error(`HTTP ${response.status}`);
+
+            const parsed = TextureAtlas.parseSpineAtlas(await response.text());
+
+            if (parsed === null)
+            {
+                failure = "it isn't a valid .atlas file";
+            }
+            else
+            {
+                pages = parsed.map(() => new TextureAtlas());
+                const results = await Promise.all(parsed.map((page, i) => pages[i].loadSpineAtlas(atlasUrl, page)));
+
+                if (results.includes(false) === true)
+                    failure = "a page image couldn't be loaded";
+            }
+        }
+        catch (error)
+        {
+            failure = `couldn't load the file: ${error.message}`;
+        }
+
+        if (TextureAtlasManager.#spineAtlases.get(atlasUrl) !== entry)
+            failure = failure ?? "it was unloaded while loading";
+
+        if (failure !== null)
+        {
+            for (const page of pages)
+                page.unload();
+
+            if (TextureAtlasManager.#spineAtlases.get(atlasUrl) === entry)
+                TextureAtlasManager.#spineAtlases.delete(atlasUrl); // Don't keep failed atlases; a later request tries again
+
+            console.error(`TextureAtlasManager couldn't load the Spine atlas ${atlasUrl}: ${failure}`);
+                return null;
+        }
+
+        entry.pages = Object.freeze(pages);
+            return entry.pages;
     }
 }
 

@@ -484,8 +484,13 @@ class RenderState
                 break;
 
             case BlendMode.kMultiply:
+                // color: src * dst + dst * (1 - srcA). With a premultiplied src (rgb * a) that's
+                // dst * lerp(1, rgb, a): transparent texels change nothing, soft edges fade out.
+                // A straight-alpha src brightens where it's partly see-through (white at a 0.5
+                // gives dst * 1.5), so the shader or texture must give premultiplied color.
+                // alpha: dst alpha is kept; multiplying it would cut holes in a RenderTarget.
                 gl.enable(gl.BLEND);
-                gl.blendFuncSeparate(gl.DST_COLOR, gl.ZERO, gl.ZERO, gl.ONE);
+                gl.blendFuncSeparate(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
                 break;
 
             case BlendMode.kNone:

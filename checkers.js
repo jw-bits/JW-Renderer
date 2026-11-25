@@ -181,6 +181,8 @@ const Layers = {
 let gPrevTS = 0.0; // The last frame's requestAnimationFrame() time, in milliseconds
 
 let gTextures = {};
+let gAtlasSampler = null;      // The checkers atlas's sampler: NEAREST and CLAMP_TO_EDGE, so sub-textures don't bleed into their neighbours (see loadAssets())
+let gAtlasPieceSampler = null; // The pieces' sampler: LINEAR and CLAMP_TO_EDGE, so their round edges stay smooth when drawn small
 let gIsReady = false;
 
 let gScreen = GameScreen.kTitle;
@@ -279,13 +281,21 @@ async function loadAssets()
     const names = Object.keys(files);
     const [textures, atlas, titleFont] = await Promise.all([
         Promise.all(names.map((name) => TextureManager.load(files[name]))),
-        TextureManager.loadAtlas(ATLAS_URL),
+        TextureAtlasManager.loadAtlas(ATLAS_URL, false), // No mipmaps: smaller levels would blend neighbouring sub-textures
         FontManager.load(TITLE_FONT_URL),
         AudioManager.loadSFX(SFX_CLICK, "./audio/click.wav"),
         AudioManager.loadSFX(SFX_JUMP_LAND, "./audio/jumpland.wav")
     ]);
 
     names.forEach((name, i) => { gTextures[name] = textures[i]; });
+
+    gAtlasSampler = new Sampler();
+    gAtlasSampler.setWrap(WGLV.context.CLAMP_TO_EDGE, WGLV.context.CLAMP_TO_EDGE);
+    gAtlasSampler.setFilter(WGLV.context.NEAREST, WGLV.context.NEAREST);
+
+    gAtlasPieceSampler = new Sampler();
+    gAtlasPieceSampler.setWrap(WGLV.context.CLAMP_TO_EDGE, WGLV.context.CLAMP_TO_EDGE);
+    gAtlasPieceSampler.setFilter(WGLV.context.LINEAR, WGLV.context.LINEAR);
 
     // A failed atlas, or a name it doesn't have, falls back to the white texture like a failed image
     for (const name of Object.keys(atlasTextures))
@@ -558,10 +568,16 @@ function randomEasing(exclude)
     One shared Material per texture, built on Rect2D's default shader, so every
     rect using a texture lands in the same batch (and Rect2Ds draw instanced).
     Falls back to the texture itself (a per-rect material) if it can't be made.
+    The checkers atlas's pieces use gAtlasPieceSampler, its other sub-textures
+    gAtlasSampler; anything else the default.
 */
 function materialFor(texture)
 {
-    return MaterialManager.load(Rect2D.getDefaultShader(), [texture]) ?? texture;
+    const isAtlas = (texture instanceof AtlasSubTexture && Object.values(gTextures).includes(texture));
+    const isPiece = (texture === gTextures.piece || texture === gTextures.king);
+    const sampler = (isAtlas === false) ? null : ((isPiece === true) ? gAtlasPieceSampler : gAtlasSampler);
+    const samplers = (sampler !== null) ? [sampler] : undefined;
+    return MaterialManager.load(Rect2D.getDefaultShader(), [texture], samplers) ?? texture;
 }
 
 function appOnAssetsLoaded()

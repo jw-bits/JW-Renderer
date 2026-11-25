@@ -10,6 +10,13 @@
     slot, an Entity hierarchy (a sun, planets and moons, each carried by its
     parent), with a small metrics window.
 
+    Spine (page 4, a page of its own): eight of the Spine sample skeletons
+    (tools/Spine/demos/assets), each loaded with SpineSkeletonData.load(),
+    animated with SpineAnimation.apply() and drawn by SpineSkeletonDebug as
+    lines: bones in red, region quads in blue, mesh hulls in orange, paths,
+    bounding boxes and clipping polygons in green (see js/spine). Their images
+    come with Phase 3 of docs/spine_plan.md.
+
     Render targets (render_target.js, post_effects.js): pages change with a
     ScreenTransition (a wipe, circle, dissolve, fade or wipe up, in turn)
     from a capture of the old page.
@@ -167,6 +174,22 @@ const HIERARCHY_ROCK = 0.2;               // The root turns this many radians ei
 const HIERARCHY_ROCK_TIME = 6.3;          // ...taking this many seconds each way
 const HIERARCHY_BREATHE = 0.84;           // The root's scale swings between this and 1...
 const HIERARCHY_BREATHE_TIME = 2.9;       // ...taking this many seconds each way
+// Spine (page 4): each sample skeleton as SpineSkeletonDebug lines (bones, region quads, mesh hulls), animated.
+// hold: the bone kept where the setup pose has it (the root if not given), so one that travels plays on the spot.
+// hide: an attachment left out (the tank's 7 ground tiles span 7,200 units, scrolling under it as it drives).
+const SPINE_ASSETS = "./tools/Spine/demos/assets/";
+const SPINE_JSON = SPINE_ASSETS + "demos.json";   // Holds every sample skeleton, by name
+const SPINE_ITEMS = [{ name: "dragon", atlas: "atlas1", animation: "flying", tests: "regions only" },
+                     { name: "raptor", atlas: "atlas1", animation: "walk", tests: "IK, weighted meshes" },
+                     { name: "spineboy", atlas: "atlas1", animation: "run", tests: "IK, transform, clipping" },
+                     { name: "owl", atlas: "atlas2", animation: "idle", tests: "meshes, deform" },
+                     { name: "tank", atlas: "atlas2", animation: "drive", tests: "145 slots, path", hold: "tankRoot", hide: "tank/ground" },
+                     { name: "stretchyman", atlas: "atlas2", animation: "idle", tests: "paths, IK stretch" },
+                     { name: "vine", atlas: "atlas2", animation: "animation", tests: "path constraint" },
+                     { name: "heroes", atlas: "heroes", animation: "run", tests: "a skin, trimmed regions", skin: 1 }];
+const SPINE_VIEW = new Vector2(CELL_W - 80, CELL_H - 100); // Each skeleton's setup pose is fitted into this, centered in its slot
+const SPINE_LINE_WIDTH = 1.5;
+
 const TRANSITION_SECONDS = 0.7;
 const TRANSITION_SOFTNESS = 0.15;
 const TRANSITION_TYPES = [ScreenTransition.kWipeLeft, ScreenTransition.kCircle, ScreenTransition.kDissolve,
@@ -177,7 +200,7 @@ const Layers = {
     kShapes: 1,    // Rect2D, RoundedRect2D, NinePatch2D, Sprite
     kText: 2,      // Text2D, TextGlyphs2D
     kEffects: 3,   // The text effects
-    kParticles: 4,
+    kParticles: 4, // And the Spine skeletons' debug lines
     kLabels: 5,    // The item labels and the metrics window, drawn after counting stops so they aren't measured
     kHudPanel: 6,
     kHudText: 7
@@ -350,8 +373,12 @@ async function loadAssets()
         TextureManager.load("./textures/ux_check.png")
     ]);
 
+    // Spine skeletons (page 4); a failed one is left out (its error is logged)
+    const spineData = await Promise.all(SPINE_ITEMS.map((s) => SpineSkeletonData.load(SPINE_JSON, s.name, SPINE_ASSETS + s.atlas + ".atlas")));
+
     gScene = { textures: { rect: rectTex, circle: circleTex, ninePatch: ninePatchTex, particle: particleTex,
-                           brick: brickTex, brickNormals: brickNormalTex, check: checkTex } };
+                           brick: brickTex, brickNormals: brickNormalTex, check: checkTex },
+               spineData: spineData };
 }
 
 /*
@@ -782,27 +809,56 @@ function buildScene()
 
     items.push(makeHierarchyItem(t.circle, t.rect));
 
+    // *** Spine: page 4 is theirs ***
+
+    const spineDebug = new SpineSkeletonDebug();
+
+    if (spineDebug.load() === false)
+        console.error("Couldn't load the Spine debug lines");
+
+    spineDebug.setLineWidth(SPINE_LINE_WIDTH);
+
+    let firstSpine = true;
+
+    SPINE_ITEMS.forEach((s, i) => {
+        const data = gScene.spineData[i];
+
+        if (data === null)
+            return; // Already reported
+
+        let spineItem = makeSpineItem(s, data, spineDebug);
+        spineItem.startsPage = firstSpine; // Spine starts a page of its own
+        firstSpine = false;
+        items.push(spineItem);
+    });
+
     // *** Pages and labels ***
 
     const labelAtlas = new TextAtlas(font, items.map((item) => item.label).join(""), LABEL_FONT_SIZE);
+    let position = 0; // Items placed so far, counting the slots left empty before an item that starts a page
 
     for (let i = 0; i < items.length; ++i)
     {
         let item = items[i];
-        const slot = 1 + (i % ITEMS_PER_PAGE); // Slot 0 is the HUD's
+
+        if (item.startsPage === true && (position % ITEMS_PER_PAGE) !== 0)
+            position += ITEMS_PER_PAGE - (position % ITEMS_PER_PAGE); // On to the next page
+
+        const slot = 1 + (position % ITEMS_PER_PAGE); // Slot 0 is the HUD's
         const x = (CELL_W * (slot % GRID_COLS)) + (CELL_W / 2.0);
         const cellBottom = DESIGN_HEIGHT - (CELL_H * (Math.floor(slot / GRID_COLS) + 1));
 
-        item.page = Math.floor(i / ITEMS_PER_PAGE);
+        item.page = Math.floor(position / ITEMS_PER_PAGE);
         item.place(x, cellBottom + (CELL_H / 2.0) + ITEM_RAISE);
 
         item.labelText = new TextGlyphs2D(labelAtlas); // Drawn in Colors.kLabel
         item.labelText.setAlignment(Alignment.kMiddleCenter);
         item.labelText.setText(item.label);
         item.labelAt = new Transform2D(x, cellBottom + LABEL_Y);
+        ++position;
     }
 
-    gPages.count = Math.ceil(items.length / ITEMS_PER_PAGE);
+    gPages.count = Math.ceil(position / ITEMS_PER_PAGE);
 
     gScene.items = items;
     gScene.lights = lights;
@@ -1265,6 +1321,100 @@ function makeCachedItem()
                  cache.update(drawCells); // Draws only when it needs to
                  cache.submit(gBatcher, Layers.kShapes);
              } };
+}
+
+/*
+    One Spine sample skeleton (see SPINE_ITEMS), drawn as SpineSkeletonDebug lines, its animation
+    looping (SpineAnimation.apply() from the setup pose each frame). Its held bone (s.hold, or the
+    root) stays where the setup pose has it, so one that travels (the tank) plays on the spot, and
+    it's scaled so everything it reaches over the whole animation fits SPINE_VIEW.
+*/
+function makeSpineItem(s, data, debug)
+{
+    let skeleton = new SpineSkeleton(data);
+    const animation = data.findAnimation(s.animation);
+    const root = (s.hold !== undefined) ? (skeleton.findBone(s.hold) ?? skeleton.getRootBone()) : skeleton.getRootBone();
+    let time = 0.0;
+
+    if (s.skin !== undefined)
+    {
+        skeleton.setSkin(data.skins[s.skin]);
+        skeleton.setSlotsToSetupPose();
+    }
+
+    if (animation === null)
+        console.error(`Spine ${s.name} has no animation "${s.animation}"; showing its setup pose`);
+
+    // The slots showing the hidden attachment, if any
+    const hidden = (s.hide !== undefined) ? skeleton.slots.filter((slot) => slot.getAttachment()?.name === s.hide) : [];
+
+    // The pose at seconds, the held bone in place and the hidden attachment off
+    const poseAt = (seconds, lastSeconds) => {
+        if (animation !== null)
+            animation.apply(skeleton, lastSeconds, seconds, true, null, 1.0, SpineMixBlend.setup, SpineMixDirection.mixIn);
+
+        root.x = root.data.x;
+        root.y = root.data.y;
+
+        for (const slot of hidden)
+            slot.setAttachment(null);
+
+        skeleton.updateWorldTransform();
+    };
+
+    // The bounds over the whole animation (sampled), at scale 1 with the root at the origin
+    const fitBounds = () => {
+        let min = new Vector2(Infinity, Infinity);
+        let max = new Vector2(-Infinity, -Infinity);
+        let offset = new SpineVector2();
+        let size = new SpineVector2();
+        const samples = (animation !== null) ? 12 : 1;
+
+        for (let i = 0; i < samples; ++i)
+        {
+            skeleton.setToSetupPose();
+            poseAt((animation !== null) ? (animation.duration * i) / samples : 0.0, 0.0);
+            skeleton.getBounds(offset, size, []);
+
+            if (Number.isFinite(offset.x) === true && size.x > 0.0)
+            {
+                min.set(Math.min(min.x, offset.x), Math.min(min.y, offset.y));
+                max.set(Math.max(max.x, offset.x + size.x), Math.max(max.y, offset.y + size.y));
+            }
+        }
+
+        skeleton.setToSetupPose();
+        return (min.x <= max.x) ? { min, max } : null;
+    };
+
+    const bounds = fitBounds();
+    const label = `Spine ${s.name} - ${s.animation}: ${s.tests}`;
+
+    return { label: label,
+             place: (x, y) => {
+                 // Scaled so the whole animation fits SPINE_VIEW, its bounds centered on (x, y)
+                 if (bounds === null)
+                 {
+                     skeleton.x = x;
+                     skeleton.y = y;
+                     return;
+                 }
+
+                 const w = bounds.max.x - bounds.min.x;
+                 const h = bounds.max.y - bounds.min.y;
+                 const scale = Math.min(SPINE_VIEW.x / w, SPINE_VIEW.y / h);
+
+                 skeleton.scaleX = scale;
+                 skeleton.scaleY = scale;
+                 skeleton.x = x - (((bounds.min.x + bounds.max.x) / 2.0) * scale);
+                 skeleton.y = y - (((bounds.min.y + bounds.max.y) / 2.0) * scale);
+             },
+             update: (dt) => {
+                 const last = time;
+                 time += dt;
+                 poseAt(time, last);
+             },
+             submit: () => debug.submit(gBatcher, skeleton, Layers.kParticles) };
 }
 
 // The page transition (see turnPage())

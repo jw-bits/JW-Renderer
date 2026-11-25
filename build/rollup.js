@@ -80,6 +80,15 @@ const kFiles = [
     "js/motion/motion_chain.js",
     "js/motion/motion_controller.js",
 
+    "js/spine/spine_defines.js",
+    "js/spine/spine_utils.js",
+    "js/spine/spine_data.js",
+    "js/spine/spine_attachments.js",
+    "js/spine/spine_animation.js",
+    "js/spine/spine_json.js",
+    "js/spine/spine_skeleton.js",
+    "js/spine/spine_debug.js",
+
     "js/ux/text_effects.js",
     "js/ux/label.js",
     "js/ux/toggle.js",

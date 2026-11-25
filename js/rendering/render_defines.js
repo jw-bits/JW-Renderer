@@ -334,7 +334,9 @@ class RenderUniformBlocks
                         texture (see above) drawn back over the screen.
         kAdditive       Adds color * alpha, brightening (glows, sparks); alpha is left alone.
         kMultiply       Multiplies what's there by the color, darkening; white changes
-                        nothing, so transparent parts should be white. Alpha is left alone.
+                        nothing, and transparent parts change nothing. The color must be
+                        premultiplied (a PMA texture, or a shader that outputs rgb * a),
+                        or partly see-through parts brighten. Alpha is left alone.
         kNone           Replaces what's there, alpha included (blending off).
 */
 class BlendMode

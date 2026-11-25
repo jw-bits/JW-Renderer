@@ -21,7 +21,8 @@
 
     Samplers and textures belong to the caller; one can be shared by many Materials.
     A texture can be an AtlasSubTexture of a TextureAtlas: it binds the atlas, and
-    models draw only its part (see Model2D.getUVRect()).
+    models draw only its part (see Model2D.getUVRect()). A Spine region packed
+    rotated isn't turned back by the models yet; load() reports one.
 
     Blend mode: how its draws combine with what's there (see BlendMode),
     BlendMode.kAlpha unless setBlendMode() says otherwise. bind() sets it,
@@ -70,7 +71,15 @@ class Material
             if (Array.isArray(textureArray) && textureArray.length <= 4)
             {
                 for (let i = 0; i < textureArray.length; ++i)
-                    this.#textures.push(textureArray[i]);
+                {
+                    const t = textureArray[i];
+
+                    // Only Spine draws rotated atlas regions for now; anything else shows them on their side
+                    if (t instanceof AtlasSubTexture && t.getRotation() !== 0)
+                        console.error(`Material.load(): "${t.getName()}" is packed rotated ${t.getRotation()} degrees in its atlas; it will draw unrotated`);
+
+                    this.#textures.push(t);
+                }
             }
             else
                 return false;
