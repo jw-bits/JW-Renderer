@@ -72,6 +72,15 @@
     Blend modes: each Material's (see BlendMode); models with different
     modes never share an instanced draw.
 
+    Instance data: render() first writes every instanced model's values, on
+    every layer, into one buffer and uploads it in a single call; each group
+    then draws its own part of it (InstancedQuadMesh.render(count, first)).
+
+    Binding: render() remembers the shader, textures and samplers it bound
+    (BatchBinder, below) and skips binding them again, so groups sharing
+    an atlas or shader cost no binds. getBindsSent() and getBindsSkipped()
+    count them for the last render().
+
     CachedLayer (below) draws a batch once into a RenderTarget and shows it
     each frame as one textured rect.
 */
@@ -107,6 +116,7 @@ class Batcher
     #litShaders;
 
     #drawCalls;     // Draw calls made by the last render()
+    #binder;        // BatchBinder: skips binds that would change nothing
 
     constructor()
     {
@@ -142,6 +152,7 @@ class Batcher
         this.#instCapacity = 0;
 
         this.#drawCalls = 0;
+        this.#binder = new BatchBinder();
 
         if (this.#setupInstancing() === false)
             console.error("Batcher couldn't set up instanced drawing; Rect2Ds will be drawn one at a time");
@@ -330,12 +341,22 @@ class Batcher
     {
         this.#drawCalls = 0;
 
+        // Anything may have bound since the last render(); the binder starts knowing nothing
+        let binder = this.#binder;
+        binder.reset();
+        binder.resetCounts();
+
         const before = ClipSpace.getCamera(); // Put back afterwards
+
+        this.#uploadInstances(); // Every layer's instanced values, in one upload
 
         for (let l = 0; l < Batcher.kLayerCount; ++l)
         {
             for (const r of this.#postBegins[l])
+            {
                 r.isRunning = (this.#hasAnything(r.first, r.last) === true && r.chain.begin() === true);
+                binder.reset(); // The chain may have bound its own
+            }
 
             if (this.#layers[l].length > 0 || this.#drawables[l].length > 0)
             {
@@ -345,6 +366,7 @@ class Batcher
                 for (const d of this.#drawables[l])
                 {
                     d.render();
+                    binder.reset(); // It binds its own
                     ++this.#drawCalls; // Counted as one, though a drawable may draw more or nothing
                 }
             }
@@ -352,7 +374,10 @@ class Batcher
             for (const r of this.#postEnds[l])
             {
                 if (r.isRunning === true)
+                {
                     r.chain.end();
+                    binder.reset(); // Its effects bind their own
+                }
 
                 r.isRunning = false;
             }
@@ -383,6 +408,10 @@ class Batcher
 
     // Draw calls the last render() made
     getDrawCallCount() { return this.#drawCalls; }
+
+    // GL bind calls the last render() sent (shaders, active units, textures, samplers, sampler uniforms), and the binds it skipped as they'd change nothing
+    getBindsSent() { return this.#binder.getSentCount(); }
+    getBindsSkipped() { return this.#binder.getSkippedCount(); }
 
     // Frees the GPU objects; the batcher can't be used afterwards
     unload()
@@ -421,14 +450,78 @@ class Batcher
         return false;
     }
 
-    // Draws one layer's models, grouped by Material; lit lights the instanced groups
+    /*
+        Sorts each layer into its groups, writes every instanced entry's values into
+        #instData (each group's run starting at its first entry's instFirst), and
+        uploads them all at once.
+    */
+    #uploadInstances()
+    {
+        let total = 0; // Stays 0 without the instanced shader: nothing is instanced
+
+        for (const list of this.#layers)
+        {
+            // Stable sort: groups in order of first submission, submission order kept inside each group
+            list.sort((a, b) => a.group - b.group);
+
+            for (const e of list)
+            {
+                if (e.instanced === true)
+                    ++total;
+            }
+        }
+
+        if (total === 0)
+            return;
+
+        this.#reserve(total);
+
+        let d = this.#instData;
+        let o = 0;
+        let first = 0;
+
+        for (const list of this.#layers)
+        {
+            for (let i = 0; i < list.length; ++i)
+            {
+                const e = list[i];
+
+                if (e.instanced === false)
+                    continue;
+
+                if (i === 0 || list[i - 1].group !== e.group)
+                    e.instFirst = first; // A group's first entry: where its run starts
+
+                const m = e.model;
+                const t = e.transform;
+
+                d[o++] = t.getX();
+                d[o++] = t.getY();
+                d[o++] = m.getWidth() / 2.0;
+                d[o++] = m.getHeight() / 2.0;
+                d[o++] = t.getScaleX();
+                d[o++] = t.getScaleY();
+                d[o++] = t.getRotation();
+                d[o++] = e.color.x;
+                d[o++] = e.color.y;
+                d[o++] = e.color.z;
+                d[o++] = e.color.w;
+                d[o++] = e.uvRect.getX();
+                d[o++] = e.uvRect.getY();
+                d[o++] = e.uvRect.getWidth();
+                d[o++] = e.uvRect.getHeight();
+                ++first;
+            }
+        }
+
+        this.#instMesh.updateInstanceData(d, 0, o);
+    }
+
+    // Draws one layer's models (sorted into groups by #uploadInstances()); lit lights the instanced groups
     #renderModels(list, lit)
     {
         if (list.length === 0)
             return;
-
-        // Stable sort: groups in order of first submission, submission order kept inside each group
-        list.sort((a, b) => a.group - b.group);
 
         let i = 0;
 
@@ -455,7 +548,7 @@ class Batcher
         if (this.#poolUsed === this.#pool.length)
         {
             this.#pool.push({
-                model: null, material: null, group: 0, instanced: false,
+                model: null, material: null, group: 0, instanced: false, instFirst: 0,
                 transform: new Transform2D(), color: new Vector4(), uvRect: new UVRect()
             });
         }
@@ -463,10 +556,10 @@ class Batcher
         return this.#pool[this.#poolUsed++];
     }
 
-    // Binds the Material once, then draws each model with its captured values
+    // Binds the Material once (skipping what's already bound), then draws each model with its captured values
     #drawEach(list, start, end)
     {
-        list[start].material.bind();
+        this.#binder.bindMaterial(list[start].material, true);
 
         for (let i = start; i < end; ++i)
         {
@@ -476,40 +569,9 @@ class Batcher
         }
     }
 
-    // Draws quads sharing textures and samplers in one instanced call; lit uses a lit shader
+    // Draws quads sharing textures and samplers in one instanced call, from the values #uploadInstances() sent; lit uses a lit shader
     #drawInstanced(list, start, end, lit)
     {
-        const count = end - start;
-        const stride = Batcher.#kFloatsPerInstance;
-
-        this.#reserve(count);
-
-        let d = this.#instData;
-        let o = 0;
-
-        for (let i = start; i < end; ++i)
-        {
-            const e = list[i];
-            const m = e.model;
-            const t = e.transform;
-
-            d[o++] = t.getX();
-            d[o++] = t.getY();
-            d[o++] = m.getWidth() / 2.0;
-            d[o++] = m.getHeight() / 2.0;
-            d[o++] = t.getScaleX();
-            d[o++] = t.getScaleY();
-            d[o++] = t.getRotation();
-            d[o++] = e.color.x;
-            d[o++] = e.color.y;
-            d[o++] = e.color.z;
-            d[o++] = e.color.w;
-            d[o++] = e.uvRect.getX();
-            d[o++] = e.uvRect.getY();
-            d[o++] = e.uvRect.getWidth();
-            d[o++] = e.uvRect.getHeight();
-        }
-
         // Any Material in the group has the same textures and samplers; bind just those, then the instanced shader
         const material = list[start].material;
         let shader = this.#instShader;
@@ -522,11 +584,10 @@ class Batcher
                 shader = litShader;
         }
 
-        material.bind(false, true);
-        shader.bind(); // Positions reach the screen through the Frame block (ClipSpace)
+        this.#binder.bindMaterial(material, false);
+        this.#binder.bindShader(shader); // Positions reach the screen through the Frame block (ClipSpace)
 
-        this.#instMesh.updateInstanceData(d, 0, count * stride);
-        this.#instMesh.render(count);
+        this.#instMesh.render(end - start, list[start].instFirst);
 
         ++this.#drawCalls;
     }
@@ -564,8 +625,8 @@ class Batcher
             }
             else
             {
-                // Texture units never change; uniform values stay with the program
-                shader.bind();
+                // Texture units never change; uniform values stay with the program. Through the binder, as this runs mid-render().
+                this.#binder.bindShader(shader);
                 gl.uniform1i(shader.getUniform("u_tex0"), 0);
                 gl.uniform1i(shader.getUniform("u_tex1"), 1); // null location (no normal map) is ignored
 
@@ -602,6 +663,133 @@ class Batcher
         this.#instShader = shader;
         this.#reserve(Batcher.#kStartCapacity);
             return true;
+    }
+}
+
+/*
+    BatchBinder - Batcher's record of the shader, textures and samplers it
+    bound during a render(), so binding the same ones again sends nothing to
+    the GL. Each texture unit (0 - 3) is tracked by what it really binds
+    (an AtlasSubTexture binds its atlas's Texture), so models using different
+    parts of one atlas, or different Materials with the same textures, share
+    the bind.
+
+    Anything else that binds (a drawable, a post chain) leaves the record
+    wrong, so Batcher calls reset() at the start of render() and after each
+    of those. Uniforms are left to the Materials; sampler uniforms are
+    program state, so each Material's are pointed at their units once per
+    shader (Material.setTextureUnits()).
+
+    Counts the binds it sent and the ones it skipped (see Batcher.getBindsSent()).
+*/
+class BatchBinder
+{
+    static #kUnitCount = 4;
+
+    #shader;      // The Shader last bound, or null if unknown
+    #activeUnit;  // The texture unit last made active, or -1 if unknown
+    #textures;    // Per unit: what was last bound (BaseTexture.getTexture()), or null if unknown
+    #samplers;    // Per unit: the Sampler last bound, or null if unknown
+    #unitsSetFor; // Material -> the Shader its sampler uniforms were last pointed at their units in
+    #sent;        // GL calls sent since resetCounts()
+    #skipped;     // Binds skipped since resetCounts(), as they'd change nothing
+
+    constructor()
+    {
+        this.#textures = new Array(BatchBinder.#kUnitCount).fill(null);
+        this.#samplers = new Array(BatchBinder.#kUnitCount).fill(null);
+        this.#unitsSetFor = new WeakMap();
+        this.reset();
+        this.resetCounts();
+    }
+
+    // Forgets what's bound; the next binds are all sent
+    reset()
+    {
+        this.#shader = null;
+        this.#activeUnit = -1;
+        this.#textures.fill(null);
+        this.#samplers.fill(null);
+    }
+
+    resetCounts()
+    {
+        this.#sent = 0;
+        this.#skipped = 0;
+    }
+
+    getSentCount() { return this.#sent; }
+    getSkippedCount() { return this.#skipped; }
+
+    bindShader(shader)
+    {
+        if (shader === this.#shader)
+        {
+            ++this.#skipped;
+                return;
+        }
+
+        shader.bind();
+        this.#shader = shader;
+        ++this.#sent;
+    }
+
+    // Sets material's blend mode and binds each texture with its sampler; withShader binds its shader too
+    bindMaterial(material, withShader)
+    {
+        RenderState.setBlendMode(material.getBlendMode());
+
+        if (withShader === true)
+        {
+            const shader = material.getShader();
+            this.bindShader(shader);
+
+            if (this.#unitsSetFor.get(material) !== shader)
+            {
+                material.setTextureUnits();
+                this.#unitsSetFor.set(material, shader);
+                ++this.#sent;
+            }
+        }
+
+        const count = Math.min(material.getTextureCount(), BatchBinder.#kUnitCount);
+
+        for (let unit = 0; unit < count; ++unit)
+            this.#bindUnit(unit, material.getTexture(unit), material.getUnitSampler(unit));
+    }
+
+    // *** Internal Methods ***
+
+    #bindUnit(unit, texture, sampler)
+    {
+        const bound = texture.getTexture(); // What texture.bind() binds
+
+        if (bound !== this.#textures[unit])
+        {
+            if (unit !== this.#activeUnit)
+            {
+                const gl = WGLV.context;
+
+                gl.activeTexture(gl.TEXTURE0 + unit);
+                this.#activeUnit = unit;
+                ++this.#sent;
+            }
+
+            texture.bind();
+            this.#textures[unit] = bound;
+            ++this.#sent;
+        }
+        else
+            ++this.#skipped;
+
+        if (sampler !== this.#samplers[unit])
+        {
+            sampler.bind(unit);
+            this.#samplers[unit] = sampler;
+            ++this.#sent;
+        }
+        else
+            ++this.#skipped;
     }
 }
 

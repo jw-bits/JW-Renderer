@@ -34,6 +34,18 @@
 
     Links only: an Entity doesn't own its children. Unloading a model leaves
     it in the hierarchy, and removing a parent doesn't unload its children.
+
+    Motion: an entity can have a MotionController (js/motion), made with
+    enableMotion(). update(dt) updates it, if there is one, then each child's
+    update(dt), unless setUpdatesChildren(false). Call update() on the roots
+    only, or children with motion move twice a frame.
+
+        let motion = rect.enableMotion();
+        motion.add("pulse", pulse, MotionPlayStyle.kPingPongLoop);
+        motion.play("pulse");
+
+        // Each frame
+        root.update(dt);                      // rect too, if it's under root
 */
 class Entity
 {
@@ -52,6 +64,8 @@ class Entity
     #worldVersion;       // Goes up whenever the world transform changes
     #builtLocalVersion;  // The #localVersion the world transform was last worked out for
     #builtParentVersion; // The parent's world version it was last worked out for
+    #motion;             // MotionController or null (see enableMotion())
+    #updatesChildren;    // update() also updates the children
 
     constructor(_name = "")
     {
@@ -64,6 +78,8 @@ class Entity
         this.#worldVersion = 0;
         this.#builtLocalVersion = 0;
         this.#builtParentVersion = -1;
+        this.#motion = null;
+        this.#updatesChildren = true;
     }
 
     // Returns false (keeping the old name) if name isn't a string
@@ -285,6 +301,44 @@ class Entity
 
     // World transforms worked out since the page loaded; take the difference between two calls for a frame's
     static getWorldBuildCount() { return Entity.#worldBuilds; }
+
+    // *** Motion and Updating ***
+
+    // The entity's MotionController, made the first time this is called
+    enableMotion()
+    {
+        if (this.#motion === null)
+            this.#motion = new MotionController(this);
+
+        return this.#motion;
+    }
+
+    // Drops the MotionController, leaving the entity where its motions put it
+    disableMotion() { this.#motion = null; }
+
+    // The MotionController, or null without one
+    getMotion() { return this.#motion; }
+
+    // Whether update() also updates the children (true by default)
+    setUpdatesChildren(updatesChildren) { this.#updatesChildren = (updatesChildren === true); }
+    getUpdatesChildren() { return this.#updatesChildren; }
+
+    /*
+        Moves the entity's motions dt seconds on (if it has a MotionController),
+        then updates each child, unless setUpdatesChildren(false). Subclasses
+        that override it call super.update(dt) first.
+    */
+    update(dt)
+    {
+        if (this.#motion !== null)
+            this.#motion.update(dt);
+
+        if (this.#updatesChildren === true)
+        {
+            for (const child of this.#children)
+                child.update(dt);
+        }
+    }
 
     // *** Subclass Methods ***
 

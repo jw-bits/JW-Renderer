@@ -174,6 +174,21 @@ class UVRect
     }
 }
 
+/*
+    Shapes - StaticMeshes of common shapes, with positions and UVs. Call
+    bindAttribs() on a mesh before drawing it; Shapes doesn't.
+
+    Each shape comes two ways, and the name says which space it's in:
+        makeQuad(), makeRoundedRect(), makeNinePatch()
+            Positions in design units (see WGLV)
+        makeUnitQuad(), makeUnitRoundedRect(), makeUnitNinePatch()
+            Positions in 0..1 of the shape's bounds: what Model2D's shaders take,
+            scaling them by the model's size (u_vec0). Built in design units
+            first, so a shape whose look depends on its size (rounded corners,
+            nine-patch borders) still takes that size.
+
+    UVs are the same either way.
+*/
 class Shapes
 {
     /*
@@ -182,22 +197,125 @@ class Shapes
         |       |
         0 ----- 1
     */
-    // (x, y) is the point the quad is aligned on. Returns null if align isn't an Alignment.
+    // In design units: (x, y) is the point the quad is aligned on. Returns null if align isn't an Alignment.
     static makeQuad(x, y, z, w, h, align = Alignment.kBottomLeft)
     {
         if (Alignment.isValid(align) === false)
             return null;
 
-        let lx = x + Alignment.offsetX(align, w);
-        let by = y + Alignment.offsetY(align, h);
-        let rx = lx + w;
-        let ty = by + h;
+        return Shapes.#makeMesh(Shapes.#quadData(x + Alignment.offsetX(align, w), y + Alignment.offsetY(align, h), z, w, h));
+    }
+
+    // The (0, 0) - (1, 1) quad, for Model2D's shaders
+    static makeUnitQuad()
+    {
+        return Shapes.#makeMesh(Shapes.#quadData(0.0, 0.0, 0.0, 1.0, 1.0));
+    }
+
+    /*
+        In design units: a rounded rectangle with its bottom-left corner at (x, y),
+        built as a triangle fan: one center vertex plus the perimeter, where each
+        corner is an arc of (segments + 1) vertices. radius is clamped to half the
+        shortest side. UVs map the bounds to 0..1.
+    */
+    static makeRoundedRect(x, y, z, w, h, radius, segments = 8)
+    {
+        return Shapes.#makeMesh(Shapes.#roundedRectData(x, y, z, w, h, radius, segments));
+    }
+
+    /*
+        makeRoundedRect() for Model2D's shaders: w x h design units (the corners are
+        round at that size), with positions in 0..1 of it. Returns null if the size
+        isn't above 0.
+    */
+    static makeUnitRoundedRect(w, h, radius, segments = 8)
+    {
+        if (Shapes.#isValidSize(w, h, "makeUnitRoundedRect") === false)
+            return null;
+
+        let d = Shapes.#roundedRectData(0.0, 0.0, 0.0, w, h, radius, segments);
+        Shapes.#toUnit(d.pos, w, h);
+            return Shapes.#makeMesh(d);
+    }
+
+    /*
+        In design units: a nine-slice mesh, a 4x4 grid of vertices making 3x3 quads.
+
+        xs / ys are the 4 vertex positions along each axis (left to right,
+        bottom to top). us / vs are the 4 matching texture coordinates.
+
+          12 -- 13 -- 14 -- 15
+           | 7  |  8  |  9  |
+           8 --- 9 -- 10 -- 11
+           | 4  |  5  |  6  |
+           4 --- 5 --- 6 --- 7
+           | 1  |  2  |  3  |
+           0 --- 1 --- 2 --- 3
+    */
+    static makeNinePatch(z, xs, ys, us, vs)
+    {
+        return Shapes.#makeMesh(Shapes.#ninePatchData(z, xs, ys, us, vs));
+    }
+
+    /*
+        makeNinePatch() for Model2D's shaders: xs / ys are in design units, from 0 to
+        w / h (the borders keep their size in them), and the positions end up in 0..1
+        of w x h. Returns null if the size isn't above 0.
+    */
+    static makeUnitNinePatch(w, h, xs, ys, us, vs)
+    {
+        if (Shapes.#isValidSize(w, h, "makeUnitNinePatch") === false)
+            return null;
+
+        let d = Shapes.#ninePatchData(0.0, xs, ys, us, vs);
+        Shapes.#toUnit(d.pos, w, h);
+            return Shapes.#makeMesh(d);
+    }
+
+    // *** Internal Methods ***
+
+    // A StaticMesh from { pos, uvs, indices }
+    static #makeMesh(d)
+    {
+        let mesh = new StaticMesh();
+        mesh.setVertexData(RenderAttributes.kPosition, d.pos);
+        mesh.setVertexData(RenderAttributes.kUV0, d.uvs);
+        mesh.setIndexData(d.indices);
+            return mesh;
+    }
+
+    // Design-unit positions (x, y, z per vertex) of a shape at the origin, divided by its size: 0..1 of its bounds
+    static #toUnit(pos, w, h)
+    {
+        for (let i = 0; i < pos.length; i += 3)
+        {
+            pos[i] /= w;
+            pos[i + 1] /= h;
+        }
+    }
+
+    static #isValidSize(w, h, method)
+    {
+        if (!(w > 0) || !(h > 0) || Number.isFinite(w) === false || Number.isFinite(h) === false)
+        {
+            console.error(`Shapes.${method}() needs a width and height above 0`);
+                return false;
+        }
+
+        return true;
+    }
+
+    // A quad with its bottom-left corner at (x, y)
+    static #quadData(x, y, z, w, h)
+    {
+        const rx = x + w;
+        const ty = y + h;
 
         let pos = new Float32Array([
-            lx, by, z,
-            rx, by, z,
+            x,  y,  z,
+            rx, y,  z,
             rx, ty, z,
-            lx, ty, z
+            x,  ty, z
         ]);
 
         let uvs = new Float32Array([
@@ -212,19 +330,11 @@ class Shapes
             2, 3, 0
         ]);
 
-        let mesh = new StaticMesh();
-        mesh.setVertexData(RenderAttributes.kPosition, pos);
-        mesh.setVertexData(RenderAttributes.kUV0, uvs);
-        mesh.setIndexData(indices);
-        return mesh;
+        return { pos, uvs, indices };
     }
 
-    /*
-        Rounded rectangle with its bottom-left corner at (x, y), built as a
-        triangle fan: one center vertex plus the perimeter, where each corner
-        is an arc of (segments + 1) vertices. UVs map the bounds to 0..1.
-    */
-    static makeRoundedRect(x, y, z, w, h, radius, segments = 8)
+    // See makeRoundedRect()
+    static #roundedRectData(x, y, z, w, h, radius, segments)
     {
         const r = Math.max(0, Math.min(radius, w / 2.0, h / 2.0));
         const seg = Math.max(1, Math.floor(segments));
@@ -276,29 +386,11 @@ class Shapes
             indices[(i * 3) + 2] = 1 + ((i + 1) % perimCount);
         }
 
-        let mesh = new StaticMesh();
-        mesh.setVertexData(RenderAttributes.kPosition, pos);
-        mesh.setVertexData(RenderAttributes.kUV0, uvs);
-        mesh.setIndexData(indices);
-        return mesh;
+        return { pos, uvs, indices };
     }
 
-    /*
-        Nine-slice mesh with its bottom-left corner at (x, y): a 4x4 grid of
-        vertices making 3x3 quads.
-
-        xs / ys are the 4 vertex positions along each axis (left to right,
-        bottom to top). us / vs are the 4 matching texture coordinates.
-
-          12 -- 13 -- 14 -- 15
-           | 7  |  8  |  9  |
-           8 --- 9 -- 10 -- 11
-           | 4  |  5  |  6  |
-           4 --- 5 --- 6 --- 7
-           | 1  |  2  |  3  |
-           0 --- 1 --- 2 --- 3
-    */
-    static makeNinePatch(z, xs, ys, us, vs)
+    // See makeNinePatch()
+    static #ninePatchData(z, xs, ys, us, vs)
     {
         let pos = new Float32Array(16 * 3);
         let uvs = new Float32Array(16 * 2);
@@ -333,11 +425,7 @@ class Shapes
             }
         }
 
-        let mesh = new StaticMesh();
-        mesh.setVertexData(RenderAttributes.kPosition, pos);
-        mesh.setVertexData(RenderAttributes.kUV0, uvs);
-        mesh.setIndexData(indices);
-        return mesh;
+        return { pos, uvs, indices };
     }
 }
 

@@ -322,9 +322,10 @@ class Camera2D extends Entity
 
     getTraumaDecay() { return this.#traumaDecay; }
 
-    // Follows the target, keeps inside the world bounds, then shakes. Call once a frame.
+    // Plays its motions (see Entity.update()), follows the target, keeps inside the world bounds, then shakes. Call once a frame.
     update(dt)
     {
+        super.update(dt);
         this.#updateFollow(dt);
 
         if (this.getParent() === null)

@@ -32,6 +32,7 @@ const BOT_THINK_DELAY = 0.6;    // Seconds the bot "thinks" before moving
 const BOT_STEP_DELAY = 0.35;    // Seconds between each hop of the bot's move (after the piece lands)
 
 // A moving piece slides to its square while lifted: scaled up to MOVE_LIFT_SCALE by halfway, back to 1 as it lands
+const MAX_DT = 0.1;             // Seconds; longer frames (e.g. a hidden tab) are clamped
 const MOVE_TIME = 0.35;         // Seconds per hop
 const MOVE_LIFT_SCALE = 1.2;
 
@@ -97,11 +98,10 @@ const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
 let gBatcher = null; // Everything is drawn through it, once per frame
 let gSparks = null;  // Particles2D for jumps
 
-// Move animation, created in loadAssets(): one slide and one lift, shared by every move
-let gMoveSlide = null;   // AnimAction from square to square; its start and target are set per move
-let gMoveLift = null;    // AnimSequence: up to MOVE_LIFT_SCALE, then back to 1
-let gSlidePlayer = null; // AnimPlayers on the moving piece's rect; they drive different channels
-let gLiftPlayer = null;
+// Move motion timing, created in loadAssets() and shared by every moving rect's motions (see addMoveMotion())
+let gMoveSlideTiming = null; // MotionValues: translation over MOVE_TIME
+let gMoveLiftTiming = null;  // MotionValues: scale up over half of MOVE_TIME
+let gMoveDropTiming = null;  // MotionValues: scale back down over the other half
 
 // Title screen animation, created in loadAssets() (see setupTitleAnimation())
 let gTitleBoard = null;   // Material: a 2x2 checker texture, repeated by the title background's UV tiling
@@ -113,9 +113,9 @@ let gTitleBoard = null;   // Material: a 2x2 checker texture, repeated by the ti
         square  The square it's on, or hopping to, { r, c }; row -1 is just below the screen
         easing  The easing last played, or -1 for none yet
         delay   Seconds left before its next hop; 0 while hopping
-        hop     AnimAction: one square diagonally; its start, target and easing are set per hop
-        player  AnimPlayer on its rect
-        rect    Its Rect2D (from appLayout()), or null
+        timing  MotionValues: translation over TITLE_HOP_TIME; its easing is set per hop
+        hop     MotionAction: one square diagonally; its start and target are set per hop
+        rect    Its Rect2D (from appLayout()), or null; its motion "hop" plays hop
 */
 let gTitleCheckers = [];
 
@@ -178,8 +178,7 @@ const Layers = {
 
 // *** Globals ***
 
-let prevTS = Date.now();
-let dt = 0.0;
+let gPrevTS = 0.0; // The last frame's requestAnimationFrame() time, in milliseconds
 
 let gTextures = {};
 let gIsReady = false;
@@ -304,24 +303,29 @@ async function loadAssets()
     setupTitleAnimation();
 }
 
-// The slide and lift every move plays (see startMove())
+// The timing of the slide and lift every move plays (see addMoveMotion() and startMove())
 function setupMoveAnimation()
 {
-    gMoveSlide = new AnimAction(); // Set up per move in startMove()
+    gMoveSlideTiming = new MotionValues({ translation: { duration: MOVE_TIME, easing: Easing.kQuadraticInOut } });
+    gMoveLiftTiming = new MotionValues({ scale: { duration: MOVE_TIME / 2.0, easing: Easing.kQuadraticOut } });
+    gMoveDropTiming = new MotionValues({ scale: { duration: MOVE_TIME / 2.0, easing: Easing.kQuadraticIn } });
+}
 
-    let liftUp = new AnimAction();
-    liftUp.setScaleStart(1.0, 1.0);
-    liftUp.setScale(MOVE_LIFT_SCALE, MOVE_LIFT_SCALE, MOVE_TIME / 2.0, Easing.kQuadraticOut);
+/*
+    Gives a moving rect its motions: "lift", up to MOVE_LIFT_SCALE and back
+    to 1, and "slide", from square to square (its start and target are set
+    per move in startMove()). The lift is added first, so it's back to scale
+    1 when the slide lands and calls landMove().
+*/
+function addMoveMotion(rect)
+{
+    const flat = new Transform2D();
+    const lifted = new Transform2D(0, 0, MOVE_LIFT_SCALE);
+    let motion = rect.enableMotion();
 
-    let putDown = new AnimAction(); // Starts where liftUp left off
-    putDown.setScale(1.0, 1.0, MOVE_TIME / 2.0, Easing.kQuadraticIn);
-
-    gMoveLift = new AnimSequence([liftUp, putDown]);
-
-    gSlidePlayer = new AnimPlayer();
-    gSlidePlayer.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) landMove(); });
-
-    gLiftPlayer = new AnimPlayer();
+    motion.add("lift", new MotionChain([new MotionAction(flat, lifted, gMoveLiftTiming), new MotionAction(lifted, flat, gMoveDropTiming)]));
+    motion.add("slide", new MotionAction(null, null, gMoveSlideTiming));
+    motion.setEventCallback((controller, name, event) => { if (name === "slide" && event === MotionEvent.kCompleted) landMove(); });
 }
 
 /*
@@ -356,20 +360,27 @@ function setupTitleAnimation()
 // A title checker (see gTitleCheckers); its column and rect come from appLayout()
 function makeTitleChecker(color)
 {
-    let checker = {
+    let timing = new MotionValues({ translation: { duration: TITLE_HOP_TIME } }); // Its easing is set per hop
+
+    return {
         color: color,
         column: TITLE_PATH_COLUMN,
         square: { r: -1, c: TITLE_PATH_COLUMN + 1 },
         easing: -1,
         delay: 0.0,
-        hop: new AnimAction(), // Set up per hop in hopTitleChecker()
-        player: new AnimPlayer(),
+        timing: timing,
+        hop: new MotionAction(null, null, timing), // Its start and target are set per hop in hopTitleChecker()
         rect: null
     };
+}
 
-    // Landing starts the wait before the next hop
-    checker.player.setEventCallback((player, event) => { if (event === AnimEvent.kCompleted) checker.delay = TITLE_HOP_DELAY; });
-        return checker;
+// Gives a title checker's new rect its "hop" motion; landing starts the wait before the next hop
+function addTitleHopMotion(checker)
+{
+    let motion = checker.rect.enableMotion();
+
+    motion.add("hop", checker.hop);
+    motion.setEventCallback((controller, name, event) => { if (event === MotionEvent.kCompleted) checker.delay = TITLE_HOP_DELAY; });
 }
 
 /*
@@ -474,7 +485,7 @@ function updateTitleChecker(checker, dt)
 {
     if (checker.delay <= 0.0)
     {
-        checker.player.update(dt); // Hopping; landing starts the wait (see makeTitleChecker())
+        checker.rect?.update(dt); // Hopping; landing starts the wait (see addTitleHopMotion())
             return;
     }
 
@@ -504,9 +515,10 @@ function hopTitleChecker(checker)
     checker.square = titleSquareOnRow(checker.column, from.r + 1);
     checker.easing = randomEasing(checker.easing);
 
-    checker.hop.setTranslationStart(titleSquareCenter(from.c), titleSquareCenter(from.r));
-    checker.hop.setTranslation(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r), TITLE_HOP_TIME, checker.easing);
-    checker.player.play(checker.rect, checker.hop);
+    checker.timing.setChannel(MotionChannel.kTranslation, TITLE_HOP_TIME, checker.easing);
+    checker.hop.set(new Transform2D(titleSquareCenter(from.c), titleSquareCenter(from.r)),
+                    new Transform2D(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r)));
+    checker.rect.getMotion().play("hop");
 }
 
 // A zig-zag's square on row r: column on even rows, one right of it on odd ones, so with an even column it's always a dark square
@@ -549,14 +561,16 @@ function appOnAssetsLoaded()
     // Started once the game can react, so nothing queues up while loading
     InputManager.init();
     InputManager.addListener(gInputListener);
-    appMain();
+
+    gPrevTS = performance.now(); // The same clock as requestAnimationFrame()'s time
+    requestAnimationFrame(appMain);
 }
 
-function appMain()
+// ts: requestAnimationFrame()'s time, in milliseconds
+function appMain(ts)
 {
-    let now = Date.now();
-    dt = (now - prevTS) * MathDefines.kSecondsPerMs;
-    prevTS = now;
+    const dt = MathUtil.clamp((ts - gPrevTS) * MathDefines.kSecondsPerMs, 0.0, MAX_DT);
+    gPrevTS = ts;
 
     appUpdate(dt);
     appRender();
@@ -573,9 +587,7 @@ function appUpdate(dt)
         gGameTime += dt;
         updateTimeText();
 
-        // Lift first, so it's back to scale 1 when the slide lands and calls landMove()
-        gLiftPlayer.update(dt);
-        gSlidePlayer.update(dt);
+        gMoving?.rect.update(dt); // Its lift and slide (see addMoveMotion()); landing calls landMove()
 
         updateBot(dt);
     }
@@ -659,6 +671,9 @@ function appLayout()
     gRects.moving[BLACK] = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kBlack);
     gRects.moving[BLACK_KING] = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kBlackKing);
 
+    for (const rect of Object.values(gRects.moving))
+        addMoveMotion(rect);
+
     gRects.overlay = makeRect(gTextures.square, w, h, Colors.kOverlay);
     gRects.overlay.setPos(0, 0);
 
@@ -691,6 +706,7 @@ function appLayout()
         checker.square = titleSquareOnRow(checker.column, checker.square.r); // The black one's column may have moved
         checker.rect = makeRect(gTextures.piece, titlePieceSize, titlePieceSize, checker.color);
         checker.rect.setPos(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r), Alignment.kMiddleCenter);
+        addTitleHopMotion(checker);
     }
 
     // Game screen
@@ -1204,9 +1220,11 @@ function resetGame()
     gBotPlan = null;
     gGameTime = 0.0;
     gMoving = null;
-    gSlidePlayer?.stop();
-    gLiftPlayer?.stop();
     gSparks?.clear();
+
+    for (const rect of Object.values(gRects.moving ?? {}))
+        rect.getMotion()?.stopAll();
+
     updateStatusText();
     updateTimeText();
 }
@@ -1292,16 +1310,16 @@ function startMove(fr, fc, tr, tc, onLanded)
     const result = applyStep(gBoard, fr, fc, tr, tc);
     const rect = gRects.moving[piece]; // The piece as it was, so a man crowned here shows its crown on landing
 
-    gMoveSlide.setTranslationStart(pieceX(fc), pieceY(fr));
-    gMoveSlide.setTranslation(pieceX(tc), pieceY(tr), MOVE_TIME, Easing.kQuadraticInOut);
+    let motion = rect.getMotion(); // See addMoveMotion()
+    motion.get("slide").set(new Transform2D(pieceX(fc), pieceY(fr)), new Transform2D(pieceX(tc), pieceY(tr)));
 
     gMoving = { piece, rect, to: { r: tr, c: tc }, captured, result, onLanded };
 
-    gLiftPlayer.play(rect, gMoveLift, AnimPlayMode.kOnce);
-    gSlidePlayer.play(rect, gMoveSlide, AnimPlayMode.kOnce);
+    motion.play("lift");
+    motion.play("slide");
 }
 
-// The slide finished (gSlidePlayer's callback): the piece is on its square, so the turn carries on
+// The slide finished (the moving rect's motion callback): the piece is on its square, so the turn carries on
 function landMove()
 {
     const move = gMoving;

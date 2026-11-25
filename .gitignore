@@ -1,3 +1,6 @@
 # Tools directory and anything it contains
 tools/*
 
+
+# Roll-up output (build/rollup.js)
+dist/

@@ -167,6 +167,12 @@ class StaticMesh
         mesh.updateInstanceData(data, 0, count * 8);          // Changes part of it
         shader.bind(); ...uniforms...
         mesh.render(count);
+
+    Several draws can share one upload: render(count, firstInstance) draws
+    instances firstInstance up, so a buffer filled once with every group's
+    values (Batcher does) is drawn a group at a time. WebGL 2 has no base
+    instance, so a new firstInstance re-points the instance attributes (a few
+    calls on the VAO, no data sent).
 */
 class InstancedQuadMesh
 {
@@ -174,6 +180,9 @@ class InstancedQuadMesh
     #quadBuffer;
     #indexBuffer;
     #instBuffer;
+    #attribs;       // [InstancedAttributes name, offset in floats], from load()
+    #strideBytes;
+    #firstInstance; // Where the instance attributes point now
 
     constructor()
     {
@@ -181,6 +190,9 @@ class InstancedQuadMesh
         this.#quadBuffer = null;
         this.#indexBuffer = null;
         this.#instBuffer = null;
+        this.#attribs = [];
+        this.#strideBytes = 0;
+        this.#firstInstance = 0;
     }
 
     load(corners, floatsPerInstance, attribs)
@@ -225,16 +237,15 @@ class InstancedQuadMesh
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array([0, 1, 2,  2, 3, 0]), gl.STATIC_DRAW);
 
         // Per-instance values, interleaved
-        const bytes = 4;
-        const strideBytes = floatsPerInstance * bytes;
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
+        this.#attribs = attribs.map(([name, offset]) => [name, offset]);
+        this.#strideBytes = floatsPerInstance * 4;
+        this.#firstInstance = 0;
+        this.#pointInstanceAttribs();
 
-        for (const [name, offset] of attribs)
+        for (const [name] of this.#attribs)
         {
             const location = InstancedAttributes.getLocation(name);
-            const size = InstancedAttributes.componentCount(name);
 
-            gl.vertexAttribPointer(location, size, gl.FLOAT, false, strideBytes, offset * bytes);
             gl.enableVertexAttribArray(location);
             gl.vertexAttribDivisor(location, 1);
         }
@@ -259,14 +270,21 @@ class InstancedQuadMesh
         gl.bufferSubData(gl.ARRAY_BUFFER, firstFloat * 4, data, firstFloat, floatCount);
     }
 
-    // Draws instanceCount quads; bind the shader and set its uniforms first
-    render(instanceCount)
+    // Draws instanceCount quads, from instance firstInstance of the buffer; bind the shader and set its uniforms first
+    render(instanceCount, firstInstance = 0)
     {
         if (this.#vao === null || instanceCount <= 0)
             return;
 
         const gl = WGLV.context;
         gl.bindVertexArray(this.#vao);
+
+        if (firstInstance !== this.#firstInstance)
+        {
+            this.#firstInstance = firstInstance;
+            this.#pointInstanceAttribs();
+        }
+
         gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_BYTE, 0, instanceCount);
         gl.bindVertexArray(null);
     }
@@ -286,5 +304,22 @@ class InstancedQuadMesh
         this.#quadBuffer = null;
         this.#indexBuffer = null;
         this.#instBuffer = null;
+        this.#attribs = [];
+        this.#strideBytes = 0;
+        this.#firstInstance = 0;
+    }
+
+    // *** Internal Methods ***
+
+    // Points each instance attribute at #firstInstance's values; the VAO must be bound
+    #pointInstanceAttribs()
+    {
+        const gl = WGLV.context;
+        const base = this.#firstInstance * this.#strideBytes;
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.#instBuffer);
+
+        for (const [name, offset] of this.#attribs)
+            gl.vertexAttribPointer(InstancedAttributes.getLocation(name), InstancedAttributes.componentCount(name), gl.FLOAT, false, this.#strideBytes, base + (offset * 4));
     }
 }

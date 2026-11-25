@@ -1,0 +1,21 @@
+{
+    // Roll-up js: joins js/ into dist/jw-renderer.js and dist/jw-renderer.min.js (see build/rollup.js).
+    // Runs on the Node built into VS Code (${execPath} with ELECTRON_RUN_AS_NODE), so nothing else is needed.
+    // Terminal > Run Build Task (Ctrl+Shift+B).
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Roll-up js",
+            "type": "process",
+            "command": "${execPath}",
+            "args": ["${workspaceFolder}/build/rollup.js"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "ELECTRON_RUN_AS_NODE": "1" }
+            },
+            "group": { "kind": "build", "isDefault": true },
+            "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+            "problemMatcher": []
+        }
+    ]
+}

@@ -17,6 +17,13 @@
     A subclass's load() builds the mesh, calls its bindAttribs(), then hands
     both to the base with the "_" setters below (for subclasses only).
 
+    Meshes are in 0..1 of the model's rect, built with Shapes' makeUnit...()
+    methods: the shaders scale them by its width and height (u_vec0), so a
+    size change needs no new quad. Rect2D,
+    Sprite and Text2D each share one static unit quad across all their
+    models (_setMesh(quad, true): never freed by a model). TextGlyphs2D is
+    the exception: its own shader takes its glyph quads in design units.
+
     Position: setPos(x, y, align) places an anchor point; align says which part
     of the model sits on it (bottom-left by default). The model keeps its
     alignment when its size changes, e.g. centered text stays centered.
@@ -66,6 +73,7 @@ class Model2D extends Entity
     #width;
     #height;
     #mesh;
+    #ownsMesh;    // False for a class's shared quad: unload() leaves it alone
     #color;
     #isLoaded;
     #isListening;   // For raster scale changes
@@ -81,6 +89,7 @@ class Model2D extends Entity
         this.#width = 0;
         this.#height = 0;
         this.#mesh = null;
+        this.#ownsMesh = false;
         this.#color = new Vector4(1, 1, 1, 1);
         this.#isLoaded = false;
         this.#isListening = false;
@@ -217,17 +226,16 @@ class Model2D extends Entity
         this.#mesh.render();
     }
 
-    // Frees the mesh and stops listening; the material and texture belong to the caller. load() can be called again afterwards.
+    // Frees its own mesh (not a shared quad) and stops listening; the material and texture belong to the caller. load() can be called again afterwards.
     unload()
     {
         this.listenForRasterScale(false);
 
-        if (this.#mesh !== null)
-        {
+        if (this.#mesh !== null && this.#ownsMesh === true)
             this.#mesh.unload();
-            this.#mesh = null;
-        }
 
+        this.#mesh = null;
+        this.#ownsMesh = false;
         this.#material = null;
         this.#isLoaded = false;
     }
@@ -244,13 +252,19 @@ class Model2D extends Entity
 
     _setMaterial(material) { this.#material = material; }
 
-    // bindAttribs() must already have been called on the mesh. A previous, different mesh is unloaded.
-    _setMesh(mesh)
+    /*
+        mesh is in 0..1 of the rect (see the top of this file), and bindAttribs() must
+        already have been called on it. isShared is true for a mesh other models use
+        too (a class's static quad), which this model never unloads. A previous,
+        different mesh of its own is unloaded.
+    */
+    _setMesh(mesh, isShared = false)
     {
-        if (this.#mesh !== null && this.#mesh !== mesh)
+        if (this.#mesh !== null && this.#mesh !== mesh && this.#ownsMesh === true)
             this.#mesh.unload();
 
         this.#mesh = mesh;
+        this.#ownsMesh = (isShared === false);
     }
 
     _setLoaded(isLoaded) { this.#isLoaded = isLoaded; }
@@ -331,9 +345,14 @@ class Model2D extends Entity
 
     An AtlasSubTexture (see TextureAtlas) can't tile or offset: REPEAT would wrap the
     whole atlas. It's drawn once, and setting a tile or offset logs an error.
+
+    Every Rect2D draws the same unit quad, made the first time one loads and
+    kept for the page's life; setSize() only changes the size uploaded with it.
 */
 class Rect2D extends Model2D
 {
+    static #kQuad = null; // Shared unit quad (see #getQuad())
+
     #uvRect; // (x, y) is the UV offset, (width, height) the UV tile
 
     constructor()
@@ -385,15 +404,9 @@ class Rect2D extends Model2D
                 return false;
         }
 
-        let mesh = Shapes.makeQuad(0, 0, 0, w, h, Alignment.kBottomLeft);
-
-        if (mesh == null)
-            return false;
-
-        mesh.bindAttribs();
         this._setSize(w, h);
         this._setMaterial(material);
-        this._setMesh(mesh);
+        this._setMesh(Rect2D.#getQuad(), true);
         this._setLoaded(true);
         this.#checkSubTextureUVs("load");
             return true;
@@ -401,8 +414,8 @@ class Rect2D extends Model2D
 
     /*
         Changes the size in design units, keeping the anchor and alignment from setPos()
-        (a centered rect stays centered). Rebuilds the quad. Returns false if not loaded
-        or the size isn't above 0.
+        (a centered rect stays centered). Cheap: the quad is shared and scaled when drawn.
+        Returns false if not loaded or the size isn't above 0.
     */
     setSize(width, height)
     {
@@ -418,16 +431,6 @@ class Rect2D extends Model2D
                 return false;
         }
 
-        if (width === this.getWidth() && height === this.getHeight())
-            return true;
-
-        let mesh = Shapes.makeQuad(0, 0, 0, width, height, Alignment.kBottomLeft);
-
-        if (mesh == null)
-            return false;
-
-        mesh.bindAttribs();
-        this._setMesh(mesh); // Frees the old one
         this._setSize(width, height);
             return true;
     }
@@ -449,6 +452,19 @@ class Rect2D extends Model2D
     }
 
     // *** Internal Methods ***
+
+    // The unit quad every Rect2D draws, made the first time
+    static #getQuad()
+    {
+        if (Rect2D.#kQuad === null)
+        {
+            let quad = Shapes.makeUnitQuad();
+            quad.bindAttribs();
+            Rect2D.#kQuad = quad;
+        }
+
+        return Rect2D.#kQuad;
+    }
 
     // Reports a tile or offset set on an AtlasSubTexture, which can't use them (see the top of Rect2D)
     #checkSubTextureUVs(methodName)
@@ -503,7 +519,7 @@ class RoundedRect2D extends Model2D
         else
             this.#radius = Math.min(w, h) * 0.25;
 
-        let mesh = Shapes.makeRoundedRect(0, 0, 0, w, h, this.#radius, _segments);
+        let mesh = Shapes.makeUnitRoundedRect(w, h, this.#radius, _segments);
 
         if (mesh == null)
             return false;
@@ -543,7 +559,7 @@ class RoundedRect2D extends Model2D
         if (width === this.getWidth() && height === this.getHeight() && r === this.#radius)
             return true;
 
-        let mesh = Shapes.makeRoundedRect(0, 0, 0, width, height, r, this.#segments);
+        let mesh = Shapes.makeUnitRoundedRect(width, height, r, this.#segments);
 
         if (mesh == null)
             return false;
@@ -606,6 +622,12 @@ class NinePatch2D extends Model2D
         const w = _width ?? tex.getWidth();
         const h = _height ?? tex.getHeight();
 
+        if (!(w > 0) || !(h > 0))
+        {
+            console.error("NinePatch2D.load() needs a width and height above 0");
+                return false;
+        }
+
         if (_centerUV !== undefined)
             this.#centerUV.set(_centerUV.getX(), _centerUV.getY(), _centerUV.getWidth(), _centerUV.getHeight());
         else
@@ -648,7 +670,7 @@ class NinePatch2D extends Model2D
         const us = [0, c.getLeft(), c.getRight(), 1];
         const vs = [0, c.getBottom(), c.getTop(), 1];
 
-        return Shapes.makeNinePatch(0, xs, ys, us, vs);
+        return Shapes.makeUnitNinePatch(width, height, xs, ys, us, vs);
     }
 
     static #fitScale(borderTotal, size)
@@ -701,6 +723,8 @@ class NinePatch2D extends Model2D
 */
 class Text2D extends Model2D
 {
+    static #kQuad = null; // Unit quad shared by every Text2D, made the first time one is drawn
+
     #text;
     #font;
     #fontSize;
@@ -830,7 +854,7 @@ class Text2D extends Model2D
             this.#rasterize();
     }
 
-    // Frees the mesh, texture and material, and stops listening. setText() loads it again.
+    // Frees the texture and material, and stops listening (the quad is shared). setText() loads it again.
     unload()
     {
         super.unload();
@@ -902,29 +926,31 @@ class Text2D extends Model2D
                 return false;
         }
 
-        // Design units; the quad only needs rebuilding when its size changes
+        // Design units; the shared quad is scaled to them when drawn
         const w = c.width / scale;
         const h = c.height / scale;
 
         if (this.isLoaded() === false || w !== this.getWidth() || h !== this.getHeight())
-        {
-            let mesh = Shapes.makeQuad(0, 0, 0, w, h, Alignment.kBottomLeft);
-
-            if (mesh == null)
-            {
-                console.error("Text2D couldn't build its quad for: " + this.#text);
-                    return false;
-            }
-
-            mesh.bindAttribs();
-            this._setMesh(mesh); // Frees the old one
             this._setSize(w, h); // Keeps the anchor and alignment from setPos()
-        }
 
+        this._setMesh(Text2D.#getQuad(), true);
         this._setMaterial(this.#material);
         this._setLoaded(true);
         this.listenForRasterScale(true);
             return true;
+    }
+
+    // The unit quad every Text2D draws, made the first time
+    static #getQuad()
+    {
+        if (Text2D.#kQuad === null)
+        {
+            let quad = Shapes.makeUnitQuad();
+            quad.bindAttribs();
+            Text2D.#kQuad = quad;
+        }
+
+        return Text2D.#kQuad;
     }
 
     // Copies color into target; returns true if it changed

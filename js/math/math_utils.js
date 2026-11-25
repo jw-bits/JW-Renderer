@@ -39,6 +39,12 @@ class MathUtil
         return Math.min(1.0, Math.max(0.0, v));
     }
 
+    // v held between min and max
+    static clamp(v, min, max)
+    {
+        return Math.min(max, Math.max(min, v));
+    }
+
     /*
         Smooth 1D gradient noise, -1 to 1: a wavy line through x that's 0 at every
         whole number and changes direction about once per unit. The same x and seed

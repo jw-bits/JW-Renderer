@@ -37,8 +37,8 @@
     Lit layers: Batcher.setLayerLit(layer, true) lights every
     instanced model (Rect2D, Sprite, Text2D) on that layer, still batched.
     They keep their usual Materials; a Material with a second texture uses
-    it as the normal map there. apply() uploads to the batcher's lit shaders
-    too, so this is usually all that's needed:
+    it as the normal map there. Every lit shader, the batcher's included,
+    reads the same Lights uniform block, so this is usually all that's needed:
 
         batcher.setLayerLit(0, true);
         let wall = new Material();
@@ -189,28 +189,40 @@ class DirectionalLight extends BaseLight
 
 /*
     LightSet - An ambient color and up to kMaxLights lights, for the lit
-    shaders. Uniform values stay with a shader program, so apply() uploads
-    them once per frame (after the lights move, before drawing), not once per
-    model.
+    shaders.
+
+    Every lit shader reads its lights from one Lights uniform block (see
+    RenderUniformBlocks), held in a single UniformBuffer shared by all of
+    them. apply() writes this set into it: one upload per frame (after the
+    lights move, before drawing) whatever the number of lit shaders, and a
+    shader built later reads it too. Any shader declaring the block (see
+    LightingSharedSource) gets the lights without being told about them.
+
+    There is one Lights block, so the last LightSet applied lights everything
+    drawn after it. Until the first apply() it's all zeros: lit models draw
+    black.
 
     getShader() and getNormalMapShader() are the lit shaders (built the first
-    time they're asked for); build Materials for lit models on them. apply()
-    uploads to whichever of them have been built, and to any other Shader
-    passed in that declares the same uniforms (see LightingSharedSource).
+    time they're asked for); build Materials for lit models on them.
 
     The ambient color is used as is (its intensity is always 1). The enabled
-    lights with an intensity above 0 are uploaded into the first slots, and u_ambient's w is how many
-    there are, so the shaders skip the empty slots.
+    lights with an intensity above 0 go into the first slots, and u_ambient's w
+    is how many there are, so the shaders skip the empty slots.
 */
 class LightSet
 {
-    static kMaxLights = 4; // The lit shaders' u_lightPos0 - 3 / u_lightColor0 - 3
+    static kMaxLights = 4; // The Lights block's u_lightPos[4] / u_lightColor[4]
 
-    static #kLocations = new WeakMap(); // Shader -> its lighting uniform locations, looked up once
+    // The Lights block, std140 (see RenderUniformBlocks): u_ambient, then 4 positions, then 4 colors
+    static #kFloatCount = 36;
+    static #kPosFloat = 4;
+    static #kColorFloat = 20;
+
+    static #buffer = null; // UniformBuffer, made on first use
+    static #data = new Float32Array(LightSet.#kFloatCount);
 
     // Scratch for apply()
     static #kPos = new Vector4();
-    static #kColor = new Vector4();
 
     #lights;
     #ambient;  // Vector4, (r, g, b, lightCount); apply() sets the count, 1 until then
@@ -265,31 +277,67 @@ class LightSet
     getCount() { return this.#lights.length; }
 
     /*
-        Uploads the ambient and the lights to the lit shaders built so far, and
-        to the Shaders in extraShaders (an array, or null). Enabled lights with
-        intensity > 0 fill the first slots and their count goes in u_ambient's w; the rest upload
-        as off. Leaves the last shader bound.
+        Writes the ambient and the lights into the Lights block, in one upload that
+        every lit shader reads. Enabled lights with intensity > 0 fill the first
+        slots and their count goes in u_ambient's w; the rest are zeros. Binds no
+        shader. Returns false if the block's buffer couldn't be made.
     */
-    apply(extraShaders = null)
+    apply()
     {
-        // Only the lit shaders built so far; one built later gets the lights from the next apply()
-        let shaders = [];
+        if (LightSet.#ensureBuffer() === false)
+            return false;
 
-        for (const source of [LitRect2DShaderSource, LitNormalMapRect2DShaderSource,
-                              LitRect2DInstancedShaderSource, LitNormalMapRect2DInstancedShaderSource])
+        let d = LightSet.#data;
+        const pos = LightSet.#kPos;
+        let count = 0;
+
+        d.fill(0.0);
+
+        for (const light of this.#lights)
         {
-            if (ShaderManager.has(source) === true)
-                shaders.push(ShaderManager.get(source));
+            if (light.isEnabled() === false || light.getIntensity() <= 0.0)
+                continue; // It would add nothing
+
+            const c = light.getColor();
+            const p = LightSet.#kPosFloat + (count * 4);
+            const k = LightSet.#kColorFloat + (count * 4);
+
+            light.getShaderPosition(pos);
+            d[p] = pos.x;
+            d[p + 1] = pos.y;
+            d[p + 2] = pos.z;
+            d[p + 3] = pos.w;
+            d[k] = c.x;
+            d[k + 1] = c.y;
+            d[k + 2] = c.z;
+            d[k + 3] = light.getIntensity();
+            ++count;
         }
 
-        if (Array.isArray(extraShaders) === true)
-            shaders.push(...extraShaders);
+        const a = this.#ambient;
+        a.w = count; // 0: the shaders use the ambient only
+        d[0] = a.x;
+        d[1] = a.y;
+        d[2] = a.z;
+        d[3] = a.w;
 
-        for (const shader of shaders)
-        {
-            if (shader !== null && shader !== undefined)
-                this.#upload(shader);
-        }
+        return LightSet.#buffer.update(d);
+    }
+
+    /*
+        The Lights block's buffer provider (see RenderUniformBlocks), called by Shader.load()
+        for each shader declaring it: the first time, creates the buffer (all zeros until
+        apply()) at the block's binding point; afterwards returns right away.
+    */
+    static uploadBuffer() { return LightSet.#ensureBuffer(); }
+
+    // Frees the Lights block's buffer; the next apply() or lit shader load makes it again
+    static unload()
+    {
+        if (LightSet.#buffer !== null)
+            LightSet.#buffer.unload();
+
+        LightSet.#buffer = null;
     }
 
     // The lit shader with one texture (null if it can't be built)
@@ -304,63 +352,27 @@ class LightSet
 
     // *** Internal Methods ***
 
-    #upload(shader)
+    // Makes the Lights block's buffer the first time; false if it can't be
+    static #ensureBuffer()
     {
-        const gl = WGLV.context;
-        const loc = LightSet.#getLocations(shader);
-        const pos = LightSet.#kPos;
-        const color = LightSet.#kColor;
-        const a = this.#ambient;
+        if (LightSet.#buffer !== null)
+            return true;
 
-        shader.bind();
-
-        // Enabled lights with intensity > 0, packed into the first slots; the rest would add nothing
-        let count = 0;
-
-        for (const light of this.#lights)
+        if (WGLV.context === null)
         {
-            if (light.isEnabled() === false || light.getIntensity() <= 0.0)
-                continue;
-
-            const c = light.getColor();
-            light.getShaderPosition(pos);
-            color.set(c.x, c.y, c.z, light.getIntensity());
-
-            gl.uniform4f(loc.positions[count], pos.x, pos.y, pos.z, pos.w);
-            gl.uniform4f(loc.colors[count], color.x, color.y, color.z, color.w);
-            ++count;
+            console.error("LightSet needs WGLV.init() first");
+                return false;
         }
 
-        // The rest off
-        for (let i = count; i < LightSet.kMaxLights; ++i)
-        {
-            gl.uniform4f(loc.positions[i], 0.0, 0.0, 0.0, 0.0);
-            gl.uniform4f(loc.colors[i], 0.0, 0.0, 0.0, 0.0);
-        }
+        let buffer = new UniformBuffer();
 
-        a.w = count; // 0: the shaders use the ambient only
-        gl.uniform4f(loc.ambient, a.x, a.y, a.z, a.w);
-    }
+        if (buffer.load(RenderUniformBlocks.kLights, LightSet.#kFloatCount) === false)
+            return false;
 
-    // A shader's lighting uniform locations (null for any it doesn't use; GL ignores those)
-    static #getLocations(shader)
-    {
-        let loc = LightSet.#kLocations.get(shader);
-
-        if (loc === undefined)
-        {
-            const names = [RenderUniforms.kLightPos0, RenderUniforms.kLightPos1, RenderUniforms.kLightPos2, RenderUniforms.kLightPos3];
-            const colorNames = [RenderUniforms.kLightColor0, RenderUniforms.kLightColor1, RenderUniforms.kLightColor2, RenderUniforms.kLightColor3];
-
-            loc = {
-                ambient: shader.getUniform(RenderUniforms.kAmbient),
-                positions: names.map((n) => shader.getUniform(n)),
-                colors: colorNames.map((n) => shader.getUniform(n))
-            };
-
-            LightSet.#kLocations.set(shader, loc);
-        }
-
-        return loc;
+        LightSet.#buffer = buffer;
+            return true;
     }
 }
+
+// Every shader declaring the Lights block finds its buffer at the binding point (see RenderUniformBlocks)
+RenderUniformBlocks.setBufferProvider(RenderUniformBlocks.kLights, LightSet.uploadBuffer);

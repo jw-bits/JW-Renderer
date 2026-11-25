@@ -207,10 +207,7 @@ class Material
         if (bindShader === true)
         {
             this.#shader.bind();
-
-            // Point the shader's samplers at their units; needs the shader bound
-            for (const u of this.#textureUnits)
-                WGLV.context.uniform1i(u.location, u.value);
+            this.setTextureUnits();
         }
 
         if (bindTextures === true)
@@ -251,6 +248,31 @@ class Material
 
     // The texture in a unit (0 - 3), or null if there isn't one
     getTexture(index = 0) { return this.#textures[index] ?? null; }
+
+    // Textures it has, in units 0 up
+    getTextureCount() { return this.#textures.length; }
+
+    // The Sampler bind() uses for a unit with a texture: its own, or the shared default; null without a texture
+    getUnitSampler(unit)
+    {
+        const t = this.#textures[unit];
+
+        if (t === undefined)
+            return null;
+
+        return this.#samplers[unit] ?? Material.#getDefaultSampler(t.hasMipmaps());
+    }
+
+    /*
+        Points the shader's sampler uniforms at their texture units (u_tex0 at 0
+        ...). The shader must be bound. bind() does this; a program keeps the
+        values, so Batcher does it once per Material and shader.
+    */
+    setTextureUnits()
+    {
+        for (const u of this.#textureUnits)
+            WGLV.context.uniform1i(u.location, u.value);
+    }
 
     // *** Internal Methods ***
 
@@ -295,11 +317,8 @@ class Material
             default: console.error("Only 4 texture units supported"); break;
         }
 
-        let t = this.#textures[textureIndex];
-        t.bind();
-
-        const sampler = this.#samplers[textureIndex] ?? Material.#getDefaultSampler(t.hasMipmaps());
-        sampler.bind(textureIndex);
+        this.#textures[textureIndex].bind();
+        this.getUnitSampler(textureIndex).bind(textureIndex);
     }
 
     // The textures, samplers and blend mode part of a key; byAtlas counts each AtlasSubTexture as its atlas's Texture

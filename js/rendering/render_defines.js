@@ -159,17 +159,6 @@ class RenderUniforms
     static kVector6 = "u_vec6"; // (X, Y, Z, W) as floats
     static kVector7 = "u_vec7"; // (X, Y, Z, W) as floats
 
-    // Lighting (see LightSet in lighting.js), 4-component
-    static kAmbient = "u_ambient";         // (R, G, B, light count)
-    static kLightPos0 = "u_lightPos0";     // (X, Y, Z, W): a point light's position and range (W > 0), or the direction toward a directional light (W = 0)
-    static kLightPos1 = "u_lightPos1";
-    static kLightPos2 = "u_lightPos2";
-    static kLightPos3 = "u_lightPos3";
-    static kLightColor0 = "u_lightColor0"; // (R, G, B, intensity); intensity 0 is off
-    static kLightColor1 = "u_lightColor1";
-    static kLightColor2 = "u_lightColor2";
-    static kLightColor3 = "u_lightColor3";
-
     // Matrix
     static kModel = "u_model"; // World 
     static kView = "u_view"; // Camera 
@@ -218,15 +207,6 @@ class RenderUniforms
         this.allUniforms.set(RenderUniforms.kVector5, 4);
         this.allUniforms.set(RenderUniforms.kVector6, 4);
         this.allUniforms.set(RenderUniforms.kVector7, 4);
-        this.allUniforms.set(RenderUniforms.kAmbient, 4);
-        this.allUniforms.set(RenderUniforms.kLightPos0, 4);
-        this.allUniforms.set(RenderUniforms.kLightPos1, 4);
-        this.allUniforms.set(RenderUniforms.kLightPos2, 4);
-        this.allUniforms.set(RenderUniforms.kLightPos3, 4);
-        this.allUniforms.set(RenderUniforms.kLightColor0, 4);
-        this.allUniforms.set(RenderUniforms.kLightColor1, 4);
-        this.allUniforms.set(RenderUniforms.kLightColor2, 4);
-        this.allUniforms.set(RenderUniforms.kLightColor3, 4);
         this.allUniforms.set(RenderUniforms.kModel, 16);
         this.allUniforms.set(RenderUniforms.kView, 16);
         this.allUniforms.set(RenderUniforms.kProjection, 16);
@@ -252,10 +232,17 @@ class RenderUniforms
             mat3 u_worldToClip   World position (design units) to clip space, through the active camera
                                  and onto the surface being drawn (the canvas or a RenderTarget)
             vec2 u_res           The size of that surface's design area (the design resolution on the canvas)
+
+        Lights (binding 1, see LightSet in lighting.js), std140, 36 floats:
+            vec4 u_ambient          (r, g, b, light count); count 0 - 4 lights the first that many slots
+            vec4 u_lightPos[4]      A point light's (x, y, z, range), range > 0, or the
+                                    direction toward a directional light (x, y, z, 0)
+            vec4 u_lightColor[4]    (r, g, b, intensity)
 */
 class RenderUniformBlocks
 {
     static kFrame = "Frame";
+    static kLights = "Lights";
 
     static allBlocks = new Map(); // Name -> { binding, bufferProvider }; bufferProvider is a function or null
 
@@ -296,6 +283,7 @@ class RenderUniformBlocks
 
     static {
         RenderUniformBlocks.allBlocks.set(RenderUniformBlocks.kFrame, { binding: 0, bufferProvider: null });
+        RenderUniformBlocks.allBlocks.set(RenderUniformBlocks.kLights, { binding: 1, bufferProvider: null });
     }
 }
 

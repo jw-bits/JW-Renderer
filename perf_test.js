@@ -42,10 +42,13 @@
         Draw calls     GL draw calls (post effect passes included)
         State changes  GL state calls RenderState sent (blend mode and scissor); the ones it
                        skipped because nothing changed aren't counted
-        Targets        RenderTargets loaded and their GPU memory, and how many are RenderTargetPool's
+        Binds          The scene batcher's shader, texture and sampler GL calls sent, and the
+                       binds it skipped because they were already bound (see BatchBinder)
+        Targets      RenderTargets loaded and their GPU memory, and how many are RenderTargetPool's
 
     The counts come from wrapping, from here, the GL
-    context's draw calls, Material.prototype.bind and Model2D.prototype.draw.
+    context's draw calls, Material.prototype.bind, BatchBinder.prototype.bindMaterial
+    and Model2D.prototype.draw; Binds comes from the batcher itself.
 
     Overdraw: the context is created with a stencil buffer. Twice a second the
     scene is drawn one extra time with every fragment incrementing the
@@ -93,7 +96,7 @@ const HUD_FONT = "Consolas, 'Courier New', monospace"; // Monospaced, so the lab
 const HUD_FONT_SIZE = 16.5;
 const HUD_MARGIN = 10.5;         // From the view's top-left corner
 const HUD_PADDING = 7.5;         // Around the text, inside the panel
-const HUD_LABELS = ["Page", "FPS", "Vertices", "Materials", "Rectangles", "Overdraw", "Draw calls", "State changes", "Targets", "Keys"];
+const HUD_LABELS = ["Page", "FPS", "Vertices", "Materials", "Rectangles", "Overdraw", "Draw calls", "State changes", "Binds", "Targets", "Keys"];
 const OVERDRAW_SAMPLE_MS = 500;  // How often overdraw is measured
 const MAX_DT = 0.1;              // Seconds; longer frames (e.g. a hidden tab) are clamped
 
@@ -157,7 +160,13 @@ const HIERARCHY_PLANETS = [{ radius: 50, size: 34, speed: 1.1 },   // Each plane
                            { radius: 120, size: 30, speed: 0.45 }];
 const HIERARCHY_MOON_SIZE = 16;
 const HIERARCHY_MOON_SPEED = 3.0;         // Times its planet's
-const HIERARCHY_MOON_PULSE = 0.2;         // Each moon's scale swings this far either side of 1
+const HIERARCHY_MOON_PULSE = 0.2;         // Each moon's scale swings this far either side of 1 (a MotionAction)...
+const HIERARCHY_MOON_PULSE_TIME = 1.25;   // ...taking this many seconds each way; each moon starts this much later than the one before:
+const HIERARCHY_MOON_PULSE_STAGGER = 0.8;
+const HIERARCHY_ROCK = 0.2;               // The root turns this many radians either side of 0...
+const HIERARCHY_ROCK_TIME = 6.3;          // ...taking this many seconds each way
+const HIERARCHY_BREATHE = 0.84;           // The root's scale swings between this and 1...
+const HIERARCHY_BREATHE_TIME = 2.9;       // ...taking this many seconds each way
 const TRANSITION_SECONDS = 0.7;
 const TRANSITION_SOFTNESS = 0.15;
 const TRANSITION_TYPES = [ScreenTransition.kWipeLeft, ScreenTransition.kCircle, ScreenTransition.kDissolve,
@@ -208,7 +217,7 @@ let gBatcher = null; // The managers (TextureManager, FontManager, ShaderManager
 let gScene = null;
 
 let gIsReady = false;
-let gPrevTS = 0.0;
+let gFrameTS = 0.0;     // This frame's requestAnimationFrame() time in milliseconds (the last frame's until appMain() sets it)
 let gEaseHold = 0.0;    // Seconds the ease holds its end before playing again
 
 // Which page is shown; it changes every PAGE_SECONDS unless paused (space). isTurning: change at the end of this frame.
@@ -234,7 +243,7 @@ let gStats = {
     stateStart: 0,          // RenderState.getChangeCount() when counting began
 
     // The last finished frame
-    last: { vertices: 0, rects: 0, drawCalls: 0, materials: 0, stateChanges: 0 },
+    last: { vertices: 0, rects: 0, drawCalls: 0, materials: 0, stateChanges: 0, bindsSent: 0, bindsSkipped: 0 },
 
     // FPS over a window of frames
     fpsFrames: 0,
@@ -314,8 +323,8 @@ function appSetup()
         gIsReady = true;
     });
 
-    gPrevTS = performance.now();
-    gStats.fpsStart = gPrevTS;
+    gFrameTS = performance.now(); // The same clock as requestAnimationFrame()'s time
+    gStats.fpsStart = gFrameTS;
     requestAnimationFrame(appMain);
 }
 
@@ -1032,14 +1041,31 @@ function makePostItem(label, effect, format, update, draw)
     points out). Each moon (a plain rect) has a pivot that's a child of its
     planet, so it follows the planet, turning as it circles and pulsing its
     own scale. The root breathes and rocks, carrying everything under it.
+
+    The pulse, rock and breathe are motions (MotionControllers) ping-ponging
+    forever; the root's update(dt) plays its own and, through its children,
+    the moons'. The root's two motions move different channels at once.
 */
 function makeHierarchyItem(circleTexture, arrowTexture)
 {
     const white = TextureManager.getWhiteTexture();
+    const easing = Easing.kSineInOut;
     let system = new Entity("system");
     let pivots = [];  // { entity, speed, start }
     let models = [];
-    let moons = [];
+
+    let systemMotion = system.enableMotion();
+    systemMotion.add("rock", new MotionAction(new Transform2D(0, 0, 1, 1, -HIERARCHY_ROCK), new Transform2D(0, 0, 1, 1, HIERARCHY_ROCK),
+                                              { rotation: { duration: HIERARCHY_ROCK_TIME, easing: easing } }), MotionPlayStyle.kPingPongLoop);
+    systemMotion.add("breathe", new MotionAction(new Transform2D(0, 0, 1.0), new Transform2D(0, 0, HIERARCHY_BREATHE),
+                                                 { scale: { duration: HIERARCHY_BREATHE_TIME, easing: easing } }), MotionPlayStyle.kPingPongLoop);
+    systemMotion.play("rock");
+    systemMotion.play("breathe");
+
+    // Shared by every moon's pulse; each moon needs its own MotionAction, as it holds the play time
+    const pulseTiming = new MotionValues({ scale: { duration: HIERARCHY_MOON_PULSE_TIME, easing: easing } });
+    const pulseSmall = new Transform2D(0, 0, 1.0 - HIERARCHY_MOON_PULSE);
+    const pulseBig = new Transform2D(0, 0, 1.0 + HIERARCHY_MOON_PULSE);
 
     let sun = new Rect2D();
     sun.setName("sun");
@@ -1078,20 +1104,20 @@ function makeHierarchyItem(circleTexture, arrowTexture)
         moon.setPos((p.size / 2.0) + HIERARCHY_MOON_SIZE, 0, Alignment.kMiddleCenter);
         moonOrbit.addChild(moon);
         models.push(moon);
-        moons.push(moon);
+
+        let moonMotion = moon.enableMotion();
+        moonMotion.add("pulse", new MotionAction(pulseSmall, pulseBig, pulseTiming), MotionPlayStyle.kPingPongLoop);
+        moonMotion.play("pulse");
+        moon.update(i * HIERARCHY_MOON_PULSE_STAGGER); // Out of step with the others
     }
 
     return { label: `Entity - ${models.length} models, parented 3 deep`,
              place: (x, y) => system.setPosition(x, y),
              update: (dt, time) => {
-                 system.setRotation(0.2 * Math.sin(time * 0.5));
-                 system.setScale(0.92 + (0.08 * Math.sin(time * 1.1)));
-
                  for (const pivot of pivots)
                      pivot.entity.setRotation(pivot.start + (time * pivot.speed));
 
-                 for (let i = 0; i < moons.length; ++i)
-                     moons[i].setScale(1.0 + (HIERARCHY_MOON_PULSE * Math.sin((time * 2.5) + (i * 2.0))));
+                 system.update(dt); // Its rock and breathe, and through its children each moon's pulse
              },
              submit: () => {
                  for (const m of models)
@@ -1302,21 +1328,33 @@ function makeSpriteStrip()
 
 // *** Frame ***
 
+// ts: requestAnimationFrame()'s time, in milliseconds
 function appMain(ts)
 {
-    const dt = Math.min(MAX_DT, Math.max(0.0, (ts - gPrevTS) / 1000.0));
-    gPrevTS = ts;
+    const dt = MathUtil.clamp((ts - gFrameTS) * MathDefines.kSecondsPerMs, 0.0, MAX_DT);
+    gFrameTS = ts;
 
+    appUpdate(dt);
+    appRender();
+    requestAnimationFrame(appMain);
+}
+
+function appUpdate(dt)
+{
     InputManager.update(); // This frame's taps, before anything reads them (the Toggles)
 
     if (gIsReady === true)
-    {
-        appUpdate(dt);
+        updateScene(dt);
+}
 
-        if (gStats.isOverdrawOn === true && ts >= gStats.nextOverdraw)
+function appRender()
+{
+    if (gIsReady === true)
+    {
+        if (gStats.isOverdrawOn === true && gFrameTS >= gStats.nextOverdraw)
         {
             measureOverdraw();
-            gStats.nextOverdraw = ts + OVERDRAW_SAMPLE_MS;
+            gStats.nextOverdraw = gFrameTS + OVERDRAW_SAMPLE_MS;
         }
 
         WGLV.beginFrame();
@@ -1332,13 +1370,14 @@ function appMain(ts)
         ClipSpace.beginFrame();
     }
 
-    updateFPS(ts);
-    updateHud(ts);
+    // After counting, so they show this frame's numbers
+    updateFPS(gFrameTS);
+    updateHud(gFrameTS);
     drawHud(); // Labels and HUD after counting, so the metrics are the test items' alone
-    requestAnimationFrame(appMain);
 }
 
-function appUpdate(dt)
+// Moves the pages, the transition and every test item dt seconds on
+function updateScene(dt)
 {
     const s = gScene;
     s.time += dt;
@@ -1379,7 +1418,7 @@ function randomRange(min, max) { return min + (Math.random() * (max - min)); }
 
 // *** Metrics ***
 
-// Wraps the GL draw calls, Material.bind() and Model2D.draw() to count what each frame draws
+// Wraps the GL draw calls, Material.bind(), BatchBinder.bindMaterial() and Model2D.draw() to count what each frame draws
 function installHooks()
 {
     const gl = WGLV.context;
@@ -1419,6 +1458,17 @@ function installHooks()
             gStats.materials.add(this);
 
         return materialBind.apply(this, args);
+    };
+
+    // The batcher binds Materials through its BatchBinder, not Material.bind()
+    const binderBind = BatchBinder.prototype.bindMaterial;
+
+    BatchBinder.prototype.bindMaterial = function(material, withShader)
+    {
+        if (gStats.isCounting === true)
+            gStats.materials.add(material);
+
+        return binderBind.call(this, material, withShader);
     };
 
     // Sprite.draw() calls super.draw(), which comes here too
@@ -1483,6 +1533,8 @@ function endCounting()
     gStats.last.rects = gStats.rects;
     gStats.last.drawCalls = gStats.drawCalls;
     gStats.last.stateChanges = RenderState.getChangeCount() - gStats.stateStart;
+    gStats.last.bindsSent = gBatcher.getBindsSent(); // The scene's render(), just done
+    gStats.last.bindsSkipped = gBatcher.getBindsSkipped();
     gStats.last.materials = gStats.materials.size;
     gStats.materials.clear(); // Don't keep Materials alive
 }
@@ -1539,6 +1591,7 @@ function updateHud(ts)
         overdraw,
         String(l.drawCalls),
         String(l.stateChanges),
+        `${l.bindsSent} sent, ${l.bindsSkipped} skipped`,
         `${RenderTarget.getCount()} (${(RenderTarget.getTotalMemoryBytes() / 1048576).toFixed(1)} MB), ${RenderTargetPool.getCount()} pooled`,
         "Space pause, O overdraw"
     ];

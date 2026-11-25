@@ -102,6 +102,7 @@ class SpriteSequence
 class Sprite extends Model2D
 {
     static #kUVScratch = new Vector4();   // For uploading u_vec1
+    static #kQuad = null;                 // Unit quad shared by every Sprite, made the first time one loads
 
     #uvRect;         // The frame drawn now, within the texture (or AtlasSubTexture)
     #atlasUVRect;    // #uvRect mapped into the atlas, when the texture is an AtlasSubTexture (see getUVRect())
@@ -171,15 +172,9 @@ class Sprite extends Model2D
 
         const w = _width ?? (tex.getWidth() / cols);
         const h = _height ?? (tex.getHeight() / rows);
-        let mesh = Shapes.makeQuad(0, 0, 0, w, h, Alignment.kBottomLeft);
-
-        if (mesh == null)
-            return false;
-
-        mesh.bindAttribs();
         this._setSize(w, h);
         this._setMaterial(material);
-        this._setMesh(mesh);
+        this._setMesh(Sprite.#getQuad(), true);
         this._setLoaded(true);
 
         this.#gridRows = rows;
@@ -392,11 +387,14 @@ class Sprite extends Model2D
     getFrameHeight() { return this.#uvRect.getHeight() * (this.getMaterial()?.getTexture(0)?.getHeight() ?? 0); }
 
     /*
-        Advances the current sequence by dt seconds (times the speed). At most one
-        event is reported per update, even if dt spans several cycles.
+        Plays its motions (see Entity.update()), then advances the current sequence
+        by dt seconds (times the speed). At most one event is reported per update,
+        even if dt spans several cycles.
     */
     update(dt)
     {
+        super.update(dt);
+
         if (this.#isPlaying === false || this.#sequence === null)
             return;
 
@@ -462,7 +460,7 @@ class Sprite extends Model2D
         super.draw(transform, color);
     }
 
-    // Frees the mesh and forgets its sequences; the texture belongs to the caller
+    // Forgets its material and sequences (the quad is shared); the texture belongs to the caller
     unload()
     {
         super.unload();
@@ -510,6 +508,19 @@ class Sprite extends Model2D
     }
 
     // *** Static Internal Helpers ***
+
+    // The unit quad every Sprite draws, made the first time
+    static #getQuad()
+    {
+        if (Sprite.#kQuad === null)
+        {
+            let quad = Shapes.makeUnitQuad();
+            quad.bindAttribs();
+            Sprite.#kQuad = quad;
+        }
+
+        return Sprite.#kQuad;
+    }
 
     // True if rows x cols is a grid (whole numbers of at least 1); otherwise a console.error naming method
     static #isValidGrid(rows, cols, method)

@@ -50,7 +50,8 @@ const Rect2DShaderSource = {
         out vec2 v_uv0;
 
         void main() {
-            vec2 ssPos = (a_pos.xy - u_vec0.zw) * u_scale.xy;
+            // a_pos is in 0..1 of the rect (see Model2D): to its size, centered, then scaled
+            vec2 ssPos = (((a_pos.xy * 2.0) - 1.0) * u_vec0.zw) * u_scale.xy;
 
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
@@ -81,8 +82,9 @@ const Rect2DShaderSource = {
 
 /*
     Per-pixel lighting for Rect2D, RoundedRect2D and NinePatch2D (they share
-    Rect2D's vertex inputs and uniforms). The lights come from a LightSet
-    (lighting.js), which uploads them once per frame.
+    Rect2D's vertex inputs and uniforms). The lights come from the Lights
+    uniform block (see RenderUniformBlocks), which a LightSet (lighting.js)
+    uploads once per frame for every lit shader.
 
     The world lies on the z = 0 plane, in design units, +Y up (lighting is in
     world space, before the camera, so lights move with the world): lights at
@@ -90,11 +92,11 @@ const Rect2DShaderSource = {
     (x, y, 0) with a surface normal of (0, 0, 1), facing the viewer, or the
     normal map's (LitNormalMapRect2DShaderSource).
 
-        u_ambient       (r, g, b, lightCount); the color is used as is, lightCount (0 - 4,
-                        1 by default) is how many of slots 0 - 3 are lit; 0 is ambient only
-        u_lightPosN     Point light: (x, y, z, range), range > 0, falling off to nothing at range
-                        Directional light: (direction toward the light, normalized, 0)
-        u_lightColorN   (r, g, b, intensity); intensity 0 is off
+        u_ambient        (r, g, b, lightCount); the color is used as is, lightCount (0 - 4)
+                         is how many of slots 0 - 3 are lit; 0 is ambient only
+        u_lightPos[i]    Point light: (x, y, z, range), range > 0, falling off to nothing at range
+                         Directional light: (direction toward the light, normalized, 0)
+        u_lightColor[i]  (r, g, b, intensity)
 
     Lighting is ambient plus Lambert diffuse, multiplied with the texture,
     then with u_color. Alpha is the texture's times u_color's.
@@ -124,7 +126,8 @@ const LightingSharedSource = {
         flat out vec4 v_rotFlip;
 
         void main() {
-            vec2 ssPos = (a_pos.xy - u_vec0.zw) * u_scale.xy;
+            // a_pos is in 0..1 of the rect (see Model2D): to its size, centered, then scaled
+            vec2 ssPos = (((a_pos.xy * 2.0) - 1.0) * u_vec0.zw) * u_scale.xy;
 
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
@@ -141,17 +144,13 @@ const LightingSharedSource = {
         }
     `,
 
-    // Fragment shader code shared by both lit shaders: the uniforms and lightAll()
+    // Fragment shader code shared by the lit shaders: the Lights block and lightAll()
     FS: `
-        uniform vec4 u_ambient;
-        uniform vec4 u_lightPos0;
-        uniform vec4 u_lightPos1;
-        uniform vec4 u_lightPos2;
-        uniform vec4 u_lightPos3;
-        uniform vec4 u_lightColor0;
-        uniform vec4 u_lightColor1;
-        uniform vec4 u_lightColor2;
-        uniform vec4 u_lightColor3;
+        layout(std140) uniform Lights {
+            vec4 u_ambient;       // (r, g, b, lightCount)
+            vec4 u_lightPos[4];   // LightSet.kMaxLights
+            vec4 u_lightColor[4];
+        };
 
         // One light's diffuse at surface point p with unit normal n; LightSet only uploads lights with intensity > 0
         vec3 lightOne(vec4 lightPos, vec4 lightColor, vec3 p, vec3 n) {
@@ -177,10 +176,12 @@ const LightingSharedSource = {
             int count = int(u_ambient.w + 0.5);
             vec3 c = u_ambient.rgb;
 
-            if (count >= 1) c += lightOne(u_lightPos0, u_lightColor0, p, n);
-            if (count >= 2) c += lightOne(u_lightPos1, u_lightColor1, p, n);
-            if (count >= 3) c += lightOne(u_lightPos2, u_lightColor2, p, n);
-            if (count >= 4) c += lightOne(u_lightPos3, u_lightColor3, p, n);
+            for (int i = 0; i < 4; ++i) {
+                if (i >= count)
+                    break;
+
+                c += lightOne(u_lightPos[i], u_lightColor[i], p, n);
+            }
 
             return c;
         }
@@ -247,7 +248,8 @@ const LitNormalMapRect2DShaderSource = {
 /*
     TextGlyphs2D: Rect2D's shader plus a color per vertex (a_color, the
     glyph's color from TextGlyphs2D.setGlyphColors(); white when not set),
-    multiplied with u_color, so each glyph can have its own tint.
+    multiplied with u_color, so each glyph can have its own tint. Unlike
+    Rect2D's, a_pos is in design units: the glyph quads are laid out in them.
 */
 const TextGlyphs2DShaderSource = {
     name: "TextGlyphs2D",
@@ -323,7 +325,8 @@ const SpriteShaderSource = {
         out vec2 v_uv0;
 
         void main() {
-            vec2 ssPos = (a_pos.xy - u_vec0.zw) * u_scale.xy;
+            // a_pos is in 0..1 of the rect (see Model2D): to its size, centered, then scaled
+            vec2 ssPos = (((a_pos.xy * 2.0) - 1.0) * u_vec0.zw) * u_scale.xy;
 
             float sa = sin(u_scale.z);
             float ca = cos(u_scale.z);
@@ -403,7 +406,7 @@ const Rect2DInstancedShaderSource = {
     Lit instanced Rect2D: Rect2DInstancedShaderSource lit like
     LitRect2DShaderSource, for Batcher's lit layers. Same instance
     attributes and locations, so it draws with the same mesh. The lights come
-    from a LightSet (lighting.js).
+    from the Lights block (a LightSet, lighting.js).
 */
 const LitRect2DInstancedShaderSource = {
     name: "LitRect2DInstanced",
