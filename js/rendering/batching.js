@@ -19,22 +19,22 @@
 
     Usage:
         let batcher = new Batcher(); // After WGLV.init()
+        let t = new Transform2D();
 
         // Each frame
-        batcher.submit(boardRect, 0);
-        piece.setPos(x, y);
-        batcher.submit(piece, 2);  // The same model can be submitted again...
-        piece.setPos(x2, y2);
-        batcher.submit(piece, 2);  // ...with different values each time
-        batcher.submit(label, 5);  // A Text2D
-        batcher.render();          // Draws everything and empties the batcher
+        batcher.submit(boardRect, boardTransform, 0);
+        batcher.submit(piece, t.setPosition(x, y), 2);   // The same model can be submitted again...
+        batcher.submit(piece, t.setPosition(x2, y2), 2); // ...at another place each time
+        batcher.submit(label, labelTransform, 5);        // A Text2D
+        entity.submit(batcher, 3);                       // An Entity's model, and its children's
+        batcher.render();                                // Draws everything and empties the batcher
 
-    submit() captures the model's transform (position, scale, rotation, with its
-    parents' applied: see Model2D.getDrawTransform()), color and UV rect (a
+    submit() captures the transform (the model's anchor: see
+    Model2D.getDrawTransform()), the color (white unless one is given) and the UV rect (a
     Sprite's frame) at that moment, so one model can be drawn many times per
-    frame (like a board square).
-    Its size, mesh and Material are read when it's drawn, so don't unload or
-    reload a model between submit() and render().
+    frame (like a board square), and the transform can be reused straight
+    away. Its size, mesh and Material are read when it's drawn, so don't
+    unload or reload a model between submit() and render().
 
     Anything else that draws itself (e.g. Particles2D) can go on a layer with
     submitDrawable(obj, layer): obj.render() is called after that layer's
@@ -159,10 +159,14 @@ class Batcher
     }
 
     /*
-        Queues a Model2D (including Text2D) for the next render(), on a layer from 0
-        (back) to 7 (front). Returns false if it isn't loaded or the layer isn't valid.
+        Queues a Model2D (including Text2D) for the next render(), drawn at transform
+        (a Transform2D, copied: its position is the model's anchor), on a layer from
+        0 (back) to 7 (front). material draws it instead of its own (see
+        Model2D.render()), or null for its own; color (a Vector4, copied) tints it,
+        white by default. Returns false if it isn't loaded, or the transform, layer
+        or material isn't valid.
     */
-    submit(model, layer = 0)
+    submit(model, transform, layer = 0, material = null, color = Vector4.kWhite)
     {
         if (Number.isInteger(layer) === false || layer < Batcher.kMinLayer || layer > Batcher.kMaxLayer)
         {
@@ -176,11 +180,23 @@ class Batcher
                 return false;
         }
 
+        if ((transform instanceof Transform2D) === false)
+        {
+            console.error("Batcher.submit() needs a Transform2D to draw the model at");
+                return false;
+        }
+
         if (model.isLoaded() === false)
             return false; // e.g. a Text2D before its text is set
 
-        const material = model.getMaterial();
-        const instanced = (this.#instShader !== null && model.canInstance() === true);
+        if (material !== null && ((material instanceof Material) === false || material.isLoaded() === false))
+        {
+            console.error("Batcher.submit() needs a loaded Material, or null for the model's own");
+                return false;
+        }
+
+        material = material ?? model.getMaterial();
+        const instanced = (this.#instShader !== null && model.canInstance(material) === true);
         const key = instanced ? material.getTextureKey() : material; // Strings and Materials never collide as Map keys
         let groups = this.#groups[layer];
         let group = groups.get(key);
@@ -197,9 +213,9 @@ class Batcher
         e.group = group;
         e.instanced = instanced;
         e.uvRect.copy(model.getUVRect());
-        model.getDrawTransform(e.transform); // In the world, from the bottom-left corner, not the anchor (see Model2D.draw())
+        model.getDrawTransform(transform, e.transform); // From the bottom-left corner, not the anchor (see Model2D.draw())
 
-        const c = model.getColor();
+        const c = color ?? Vector4.kWhite;
         e.color.set(c.x, c.y, c.z, c.w);
 
         this.#layers[layer].push(e);
@@ -564,7 +580,7 @@ class Batcher
         for (let i = start; i < end; ++i)
         {
             const e = list[i];
-            e.model.draw(e.transform, e.color, e.uvRect);
+            e.model.draw(e.transform, e.color, e.uvRect, e.material);
             ++this.#drawCalls;
         }
     }
@@ -819,7 +835,9 @@ class CachedLayer
 {
     #target;
     #rect;        // Rect2D showing the target's texture
-    #area;        // Vector4: x, y, width, height in design units
+    #transform;   // Where the rect is drawn: the area's bottom-left corner
+    #color;       // Vector4 the rect is drawn with (see setColor())
+    #area;       // Vector4: x, y, width, height in design units
     #isDirty;
     #drawnScale;  // The view scale it was last drawn at
     #drawnVersion;
@@ -828,6 +846,8 @@ class CachedLayer
     {
         this.#target = new RenderTarget();
         this.#rect = new Rect2D();
+        this.#transform = new Transform2D();
+        this.#color = new Vector4(1, 1, 1, 1);
         this.#area = new Vector4();
         this.#isDirty = true;
         this.#drawnScale = 0.0;
@@ -864,7 +884,7 @@ class CachedLayer
                 return false;
         }
 
-        this.#rect.setPos(x, y);
+        this.#transform.setPosition(x, y);
         this.#isDirty = true;
             return true;
     }
@@ -906,11 +926,15 @@ class CachedLayer
     }
 
     // Queues the layer on a batcher layer (one instanced quad)
-    submit(batcher, layer) { return batcher.submit(this.#rect, layer); }
+    submit(batcher, layer) { return batcher.submit(this.#rect, this.#transform, layer, null, this.#color); }
 
-    render() { this.#rect.render(); }
+    render() { this.#rect.render(this.#transform, null, this.#color); }
 
-    // The Rect2D showing it (e.g. to tint or fade it with setColor()); don't load it again
+    // Tints or fades it when drawn (a Vector4, copied; premultiplied, so (a, a, a, a) fades it); white by default
+    setColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
+    getColor() { return this.#color; } // Read-only; change it with setColor()
+
+    // The Rect2D showing it; don't load it again
     getRect2D() { return this.#rect; }
     getTarget() { return this.#target; }
 

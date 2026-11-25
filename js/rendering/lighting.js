@@ -69,12 +69,6 @@ class BaseLight
         this.#isEnabled = true;
     }
 
-    // Design units; negative z is behind the 2D view, positive in front
-    setPosition(x, y, z) { this.#position.set(x, y, z); }
-
-    // (r, g, b) 0 - 1, copied from a Vector3 (or a Vector4; its w is ignored)
-    setColor(color) { this.#color.set(color.x, color.y, color.z); }
-
     setIntensity(intensity)
     {
         if (Number.isFinite(intensity) === false || intensity < 0.0)
@@ -86,16 +80,17 @@ class BaseLight
         this.#intensity = intensity;
             return true;
     }
-
+    
+    setPosition(x, y, z) { this.#position.set(x, y, z); } // Design units; negative z is behind the 2D view, positive in front
+    setColor(color) { this.#color.set(color.x, color.y, color.z); } // (r, g, b) 0 - 1, copied from a Vector3 (or a Vector4; its w is ignored)
     setEnabled(enabled) { this.#isEnabled = (enabled === true); }
 
+    getShaderPosition(out) { return out; } // The light's u_lightPosN value, written into out (a Vector4) and returned; used by LightSet
     getPosition() { return this.#position; } // Read-only; change it with setPosition()
     getColor() { return this.#color; }       // Read-only; change it with setColor()
     getIntensity() { return this.#intensity; }
-    isEnabled() { return this.#isEnabled; }
 
-    // The light's u_lightPosN value, written into out (a Vector4) and returned; used by LightSet
-    getShaderPosition(out) { return out; }
+    isEnabled() { return this.#isEnabled; }
 }
 
 /*
@@ -233,11 +228,6 @@ class LightSet
         this.#ambient = new Vector4(0.2, 0.2, 0.2, 1.0);
     }
 
-    // color is (r, g, b) 0 - 1 (a Vector3, or a Vector4 with w ignored), copied and used as is
-    setAmbient(color) { this.#ambient.set(color.x, color.y, color.z, this.#ambient.w); }
-
-    getAmbient() { return this.#ambient; } // Read-only (w is the light count); change it with setAmbient()
-
     // Returns false if it isn't a light, it's already in the set, or the set is full
     add(light)
     {
@@ -273,6 +263,10 @@ class LightSet
 
     clear() { this.#lights.length = 0; }
 
+    // color is (r, g, b) 0 - 1 (a Vector3, or a Vector4 with w ignored), copied and used as is
+    setAmbient(color) { this.#ambient.set(color.x, color.y, color.z, this.#ambient.w); }
+
+    getAmbient() { return this.#ambient; } // Read-only (w is the light count); change it with setAmbient()
     getLights() { return this.#lights; } // Read-only; change them with add(), remove() and clear()
     getCount() { return this.#lights.length; }
 

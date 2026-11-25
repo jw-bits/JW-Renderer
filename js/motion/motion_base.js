@@ -15,6 +15,8 @@
 */
 class MotionBase
 {
+    static #kColor = new Vector4(); // Scratch for applyChannels()
+
     #time;       // Seconds in, 0 to getDuration()
     #isReversed; // True while heading back to the start
 
@@ -32,7 +34,7 @@ class MotionBase
     // The MotionChannel flags it moves
     getChannels() { return MotionChannel.kNone; }
 
-    // Writes the moved channels seconds in into out (a Transform2D) and returns it; other channels are left as they are
+    // Writes the moved channels seconds in into out (a MotionState) and returns it; other channels are left as they are
     evaluateAt(seconds, out) { return out; }
 
     // *** Playing ***
@@ -100,19 +102,35 @@ class MotionBase
     // True at the end it's heading for: the target going forward, the start going back
     isAtEnd() { return (this.#isReversed === true) ? (this.#time <= 0.0) : (this.#time >= this.getDuration()); }
 
-    // Writes the moved channels at the current time into out (a Transform2D) and returns it
+    // Writes the moved channels at the current time into out (a MotionState) and returns it
     evaluate(out) { return this.evaluateAt(this.#time, out); }
 
-    // Writes the MotionChannel parts in channels of transform to entity's local transform; a model keeps its alignment
-    static applyChannels(transform, entity, channels = MotionChannel.kAll)
+    /*
+        Writes the MotionChannel parts in channels of state (a MotionState) to entity:
+        its local transform, and its color (Entity.setColor(), each part clamped to
+        0 - 1, as Back and Elastic easings overshoot). Entities sharing a model each
+        keep their own color.
+    */
+    static applyChannels(state, entity, channels = MotionChannel.kAll)
     {
+        const t = state.transform;
+
         if ((channels & MotionChannel.kTranslation) !== 0)
-            entity.setPosition(transform.getX(), transform.getY());
+            entity.setPosition(t.getX(), t.getY());
 
         if ((channels & MotionChannel.kScale) !== 0)
-            entity.setScale(transform.getScaleX(), transform.getScaleY());
+            entity.setScale(t.getScaleX(), t.getScaleY());
 
         if ((channels & MotionChannel.kRotation) !== 0)
-            entity.setRotation(transform.getRotation());
+            entity.setRotation(t.getRotation());
+
+        if ((channels & MotionChannel.kColor) !== 0)
+        {
+            const c = state.color;
+            let clamped = MotionBase.#kColor;
+
+            clamped.set(MathUtil.clamp01(c.x), MathUtil.clamp01(c.y), MathUtil.clamp01(c.z), MathUtil.clamp01(c.w));
+            entity.setColor(clamped); // Copied
+        }
     }
 }

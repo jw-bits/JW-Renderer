@@ -628,7 +628,7 @@ class RenderState
         ClipSpace.beginFrame(); // No clip rects, no camera
 
         ClipSpace.pushClipRect(100, 200, 400, 80);
-        model.render();
+        model.render(transform);
         ClipSpace.popClipRect();
 */
 class ClipSpace

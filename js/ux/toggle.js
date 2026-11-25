@@ -42,7 +42,6 @@ class Toggle
 
     static #kKnobInset = 0.1;  // Gap around the knob, as a fraction of the track's height
     static #kSegments = 16;    // Triangles per rounded corner, so the knob is a smooth circle
-    static #kScratch = new Vector4();
 
     #material;     // The white texture on Rect2D's shader, shared by the shapes so they draw in order
     #outline;      // RoundedRect2D; loaded only while the outline is on
@@ -50,6 +49,13 @@ class Toggle
     #knob;         // RoundedRect2D, a circle
     #onText;       // TextGlyphs2D, or null without text
     #offText;
+
+    // Where each part is drawn: the shapes by their bottom-left corners, the texts by their centers
+    #outlineTransform;
+    #trackTransform;
+    #knobTransform;
+    #onTextTransform;
+    #offTextTransform;
 
     #width;        // Design units, outline included
     #height;
@@ -75,6 +81,13 @@ class Toggle
     #textOn;
     #textOff;
 
+    // The colors drawn now, blended by how far the knob is across (see #layout()), Vector4s
+    #outlineNow;
+    #trackNow;
+    #knobNow;
+    #onTextNow;
+    #offTextNow;
+
     #isLoaded;
 
     constructor()
@@ -85,6 +98,12 @@ class Toggle
         this.#knob = new RoundedRect2D();
         this.#onText = null;
         this.#offText = null;
+
+        this.#outlineTransform = new Transform2D();
+        this.#trackTransform = new Transform2D();
+        this.#knobTransform = new Transform2D();
+        this.#onTextTransform = new Transform2D();
+        this.#offTextTransform = new Transform2D();
 
         this.#width = 0;
         this.#height = 0;
@@ -108,6 +127,12 @@ class Toggle
         this.#outlineOff = new Vector4(0.0, 0.0, 0.0, 1.0);
         this.#textOn = new Vector4(1.0, 1.0, 1.0, 1.0);
         this.#textOff = new Vector4(0.0, 0.0, 0.0, 1.0);
+
+        this.#outlineNow = new Vector4();
+        this.#trackNow = new Vector4();
+        this.#knobNow = new Vector4();
+        this.#onTextNow = new Vector4();
+        this.#offTextNow = new Vector4();
 
         this.#isLoaded = false;
     }
@@ -287,6 +312,8 @@ class Toggle
 
         this.#onText = new TextGlyphs2D(textAtlas);
         this.#offText = new TextGlyphs2D(textAtlas);
+        this.#onText.setAlignment(Alignment.kMiddleCenter);
+        this.#offText.setAlignment(Alignment.kMiddleCenter);
 
         // An empty string has no glyphs to draw; leave that one unloaded
         if ((onText !== "" && this.#onText.setText(onText) === false) ||
@@ -348,11 +375,17 @@ class Toggle
         if (this.#isLoaded === false)
             return false;
 
-        for (const shape of this.#getShapes())
-            batcher.submit(shape, layer);
+        if (this.#outline.isLoaded() === true)
+            batcher.submit(this.#outline, this.#outlineTransform, layer, null, this.#outlineNow);
 
-        for (const text of this.#getVisibleTexts())
-            batcher.submit(text, textLayer);
+        batcher.submit(this.#track, this.#trackTransform, layer, null, this.#trackNow);
+        batcher.submit(this.#knob, this.#knobTransform, layer, null, this.#knobNow);
+
+        if (this.#isOnTextVisible() === true)
+            batcher.submit(this.#onText, this.#onTextTransform, textLayer, null, this.#onTextNow);
+
+        if (this.#isOffTextVisible() === true)
+            batcher.submit(this.#offText, this.#offTextTransform, textLayer, null, this.#offTextNow);
 
         return true;
     }
@@ -363,11 +396,17 @@ class Toggle
         if (this.#isLoaded === false)
             return;
 
-        for (const shape of this.#getShapes())
-            shape.render();
+        if (this.#outline.isLoaded() === true)
+            this.#outline.render(this.#outlineTransform, null, this.#outlineNow);
 
-        for (const text of this.#getVisibleTexts())
-            text.render();
+        this.#track.render(this.#trackTransform, null, this.#trackNow);
+        this.#knob.render(this.#knobTransform, null, this.#knobNow);
+
+        if (this.#isOnTextVisible() === true)
+            this.#onText.render(this.#onTextTransform, null, this.#onTextNow);
+
+        if (this.#isOffTextVisible() === true)
+            this.#offText.render(this.#offTextTransform, null, this.#offTextNow);
     }
 
     isLoaded() { return this.#isLoaded; }
@@ -438,22 +477,18 @@ class Toggle
             return this.#knob.load(m, d, d, d / 2.0, seg);
     }
 
-    // Places every part and sets its color, from the position, the outline and how far the knob is across
+    // Places every part and works out its color now, from the position, the outline and how far the knob is across
     #layout()
     {
         if (this.#isLoaded === false)
             return;
 
-        const c = Toggle.#kScratch;
         const e = Easing.ease(Easing.kSineInOut, this.#amount);
         const x = this.getX();
         const y = this.getY();
 
-        if (this.#outline.isLoaded() === true)
-        {
-            this.#outline.setPos(x, y);
-            this.#outline.setColor(Toggle.#lerp(c, this.#outlineOff, this.#outlineOn, e));
-        }
+        this.#outlineTransform.setPosition(x, y);
+        Toggle.#lerp(this.#outlineNow, this.#outlineOff, this.#outlineOn, e);
 
         // The track, inside the outline
         const t = this.#outlineWidth;
@@ -462,52 +497,30 @@ class Toggle
         const tw = this.#width - (t * 2.0);
         const th = this.#height - (t * 2.0);
 
-        this.#track.setPos(tx, ty);
-        this.#track.setColor(Toggle.#lerp(c, this.#trackOff, this.#trackOn, e));
+        this.#trackTransform.setPosition(tx, ty);
+        Toggle.#lerp(this.#trackNow, this.#trackOff, this.#trackOn, e);
 
         // The knob, from the left end (off) to the right end (on)
         const inset = th * Toggle.#kKnobInset;
         const d = this.#knob.getWidth();
 
-        this.#knob.setPos(tx + inset + ((tw - (inset * 2.0) - d) * e), ty + inset);
-        this.#knob.setColor(Toggle.#lerp(c, this.#knobOff, this.#knobOn, e));
+        this.#knobTransform.setPosition(tx + inset + ((tw - (inset * 2.0) - d) * e), ty + inset);
+        Toggle.#lerp(this.#knobNow, this.#knobOff, this.#knobOn, e);
 
         // The text, centered in the space the knob leaves: on the left when on, the right when off
         const space = tw - inset - d;
         const cy = ty + (th / 2.0);
 
-        if (this.#onText !== null)
-        {
-            this.#onText.setPos(tx + (space / 2.0), cy, Alignment.kMiddleCenter);
-            this.#onText.setColor(Toggle.#faded(c, this.#textOn, e));
-        }
+        this.#onTextTransform.setPosition(tx + (space / 2.0), cy);
+        Toggle.#faded(this.#onTextNow, this.#textOn, e);
 
-        if (this.#offText !== null)
-        {
-            this.#offText.setPos(tx + inset + d + (space / 2.0), cy, Alignment.kMiddleCenter);
-            this.#offText.setColor(Toggle.#faded(c, this.#textOff, 1.0 - e));
-        }
+        this.#offTextTransform.setPosition(tx + inset + d + (space / 2.0), cy);
+        Toggle.#faded(this.#offTextNow, this.#textOff, 1.0 - e);
     }
 
-    // The shapes to draw, back to front
-    #getShapes()
-    {
-        return (this.#outline.isLoaded() === true) ? [this.#outline, this.#track, this.#knob] : [this.#track, this.#knob];
-    }
-
-    // The texts that can be seen now: the on text fades in as the knob crosses, the off text out
-    #getVisibleTexts()
-    {
-        let texts = [];
-
-        if (this.#onText !== null && this.#onText.isLoaded() === true && this.#amount > 0.0)
-            texts.push(this.#onText);
-
-        if (this.#offText !== null && this.#offText.isLoaded() === true && this.#amount < 1.0)
-            texts.push(this.#offText);
-
-        return texts;
-    }
+    // Whether each text can be seen now: the on text fades in as the knob crosses, the off text out
+    #isOnTextVisible() { return (this.#onText !== null && this.#onText.isLoaded() === true && this.#amount > 0.0); }
+    #isOffTextVisible() { return (this.#offText !== null && this.#offText.isLoaded() === true && this.#amount < 1.0); }
 
     #unloadText()
     {

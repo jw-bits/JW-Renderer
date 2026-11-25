@@ -98,7 +98,7 @@ const TITLE_FONT_URL = "./fonts/JimNightshade-Regular.ttf";
 let gBatcher = null; // Everything is drawn through it, once per frame
 let gSparks = null;  // Particles2D for jumps
 
-// Move motion timing, created in loadAssets() and shared by every moving rect's motions (see addMoveMotion())
+// Move motion timing, created in loadAssets() and shared by every moving entity's motions (see addMoveMotion())
 let gMoveSlideTiming = null; // MotionValues: translation over MOVE_TIME
 let gMoveLiftTiming = null;  // MotionValues: scale up over half of MOVE_TIME
 let gMoveDropTiming = null;  // MotionValues: scale back down over the other half
@@ -115,7 +115,7 @@ let gTitleBoard = null;   // Material: a 2x2 checker texture, repeated by the ti
         delay   Seconds left before its next hop; 0 while hopping
         timing  MotionValues: translation over TITLE_HOP_TIME; its easing is set per hop
         hop     MotionAction: one square diagonally; its start and target are set per hop
-        rect    Its Rect2D (from appLayout()), or null; its motion "hop" plays hop
+        entity  Its Entity, holding a centered Rect2D (from appLayout()), or null; its motion "hop" plays hop
 */
 let gTitleCheckers = [];
 
@@ -191,9 +191,18 @@ const gInputListener = { onInputEvent: (e) => onInputEvent(e) };
 
 // Layout, in design units (WGLV's fixed design resolution), so it's built once
 let gLayout = { w: 0, h: 0, sq: 0, boardX: 0, boardY: 0, titleSq: 0 }; // titleSq: the title background's square size
+
+/*
+    gRects holds the shared Rect2Ds drawn at many places a frame (squares,
+    pieces, highlights, hints: see submitAt()), and Entities for the ones
+    that stay put or move by motion (the border, overlay, title board and
+    moving pieces). gTexts are Entities holding a Text2D or TextGlyphs2D.
+*/
 let gRects = {};
 let gTexts = {};
 let gButtons = {};
+
+let gPlace = new Transform2D(); // Scratch for submitAt(); the batcher copies it
 
 // Game state
 let gBoard = [];
@@ -208,9 +217,9 @@ let gGameTime = 0.0;        // Seconds played this game; paused while the menu i
 
 /*
     The hop being animated, or null. The board already holds the result; until
-    the piece lands, its destination square draws the moving rect instead, and
+    the piece lands, its destination square draws the moving entity instead, and
     a captured piece stays drawn where it was.
-        { piece, rect, to: {r, c}, captured: {r, c, piece} or null, result, onLanded(result) }
+        { piece, entity, to: {r, c}, captured: {r, c, piece} or null, result, onLanded(result) }
 */
 let gMoving = null;
 
@@ -312,16 +321,16 @@ function setupMoveAnimation()
 }
 
 /*
-    Gives a moving rect its motions: "lift", up to MOVE_LIFT_SCALE and back
-    to 1, and "slide", from square to square (its start and target are set
-    per move in startMove()). The lift is added first, so it's back to scale
-    1 when the slide lands and calls landMove().
+    Gives a moving piece's Entity its motions: "lift", up to MOVE_LIFT_SCALE
+    and back to 1, and "slide", from square to square (its start and target
+    are set per move in startMove()). The lift is added first, so it's back
+    to scale 1 when the slide lands and calls landMove().
 */
-function addMoveMotion(rect)
+function addMoveMotion(entity)
 {
     const flat = new Transform2D();
     const lifted = new Transform2D(0, 0, MOVE_LIFT_SCALE);
-    let motion = rect.enableMotion();
+    let motion = entity.addMotion();
 
     motion.add("lift", new MotionChain([new MotionAction(flat, lifted, gMoveLiftTiming), new MotionAction(lifted, flat, gMoveDropTiming)]));
     motion.add("slide", new MotionAction(null, null, gMoveSlideTiming));
@@ -370,14 +379,14 @@ function makeTitleChecker(color)
         delay: 0.0,
         timing: timing,
         hop: new MotionAction(null, null, timing), // Its start and target are set per hop in hopTitleChecker()
-        rect: null
+        entity: null
     };
 }
 
-// Gives a title checker's new rect its "hop" motion; landing starts the wait before the next hop
+// Gives a title checker's new entity its "hop" motion; landing starts the wait before the next hop
 function addTitleHopMotion(checker)
 {
-    let motion = checker.rect.enableMotion();
+    let motion = checker.entity.addMotion();
 
     motion.add("hop", checker.hop);
     motion.setEventCallback((controller, name, event) => { if (event === MotionEvent.kCompleted) checker.delay = TITLE_HOP_DELAY; });
@@ -392,10 +401,10 @@ function addTitleHopMotion(checker)
 */
 function startTitleEffect(step)
 {
-    const title = gTexts.title;
-
-    if (title === undefined)
+    if (gTexts.title === undefined)
         return;
+
+    const title = gTexts.title.getModel(); // The TextGlyphs2D; the effect draws it where its Entity is
 
     const unit = Math.min(gLayout.w, gLayout.h);
     const next = () => startTitleEffect((step + 1) % TITLE_EFFECT_STEPS.length);
@@ -452,6 +461,9 @@ function startTitleEffect(step)
             gTitleEffect.fadeOut(TITLE_FADE_TIME, next);
             break;
     }
+
+    gTitleEffect.setTransform(gTexts.title.getWorldTransform());
+    gTitleEffect.setTextColor(gTexts.title.getColor());
 }
 
 // Advances the title effect, and moves on once a held step's time is up
@@ -485,7 +497,7 @@ function updateTitleChecker(checker, dt)
 {
     if (checker.delay <= 0.0)
     {
-        checker.rect?.update(dt); // Hopping; landing starts the wait (see addTitleHopMotion())
+        checker.entity?.update(dt); // Hopping; landing starts the wait (see addTitleHopMotion())
             return;
     }
 
@@ -501,9 +513,9 @@ function updateTitleChecker(checker, dt)
 // Hops a title checker diagonally up a square, with a random easing other than its last one; off the top, it starts again below the bottom
 function hopTitleChecker(checker)
 {
-    if (checker.rect === null)
+    if (checker.entity === null)
     {
-        console.error("hopTitleChecker() needs the title checker's rect from appLayout()");
+        console.error("hopTitleChecker() needs the title checker's entity from appLayout()");
             return;
     }
 
@@ -518,7 +530,7 @@ function hopTitleChecker(checker)
     checker.timing.setChannel(MotionChannel.kTranslation, TITLE_HOP_TIME, checker.easing);
     checker.hop.set(new Transform2D(titleSquareCenter(from.c), titleSquareCenter(from.r)),
                     new Transform2D(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r)));
-    checker.rect.getMotion().play("hop");
+    checker.entity.getMotion().play("hop");
 }
 
 // A zig-zag's square on row r: column on even rows, one right of it on odd ones, so with an even column it's always a dark square
@@ -587,7 +599,7 @@ function appUpdate(dt)
         gGameTime += dt;
         updateTimeText();
 
-        gMoving?.rect.update(dt); // Its lift and slide (see addMoveMotion()); landing calls landMove()
+        gMoving?.entity.update(dt); // Its lift and slide (see addMoveMotion()); landing calls landMove()
 
         updateBot(dt);
     }
@@ -626,7 +638,7 @@ function appLayout()
 
     // Free the old text textures before building new ones
     for (const key in gTexts)
-        gTexts[key].unload();
+        gTexts[key].getModel().unload();
 
     for (const key in gButtons)
         gButtons[key].unload();
@@ -651,39 +663,32 @@ function appLayout()
     gSparks.setGravity(0, -SPARK_GRAVITY * sq);
 
     // makeRect() shares one Material per texture, so the board is one batch
-    gRects.border = makeRect(gTextures.square, boardPx + (border * 2), boardPx + (border * 2), Colors.kBorder);
-    gRects.border.setPos(boardX - border, boardY - border);
+    gRects.border = makeEntity(makeRect(gTextures.square, boardPx + (border * 2), boardPx + (border * 2)), boardX - border, boardY - border, Colors.kBorder);
 
-    gRects.lightSquare = makeRect(gTextures.square, sq, sq, Colors.kLightSquare);
-    gRects.darkSquare = makeRect(gTextures.square, sq, sq, Colors.kDarkSquare);
-    gRects.highlight = makeRect(gTextures.square, sq, sq, Colors.kSelected);
+    // One white rect per shape; the color is given each time it's drawn
+    gRects.square = makeRect(gTextures.square, sq, sq);
+    gRects.man = makeRect(gTextures.piece, pieceSize, pieceSize);
+    gRects.king = makeRect(gTextures.king, pieceSize, pieceSize);
+    gRects.hint = makeRect(gTextures.ring, hintSize, hintSize);
 
-    gRects.redMan = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kRed);
-    gRects.redKing = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kRedKing);
-    gRects.blackMan = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kBlack);
-    gRects.blackKing = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kBlackKing);
-    gRects.hint = makeRect(gTextures.ring, hintSize, hintSize, Colors.kHint);
-
-    // The piece in motion gets its own rect, so the animation can scale it without touching the shared ones
+    // The piece in motion is an Entity with motion, drawing the shared piece rects in its own color; its own scale lifts it
     gRects.moving = {};
-    gRects.moving[RED] = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kRed);
-    gRects.moving[RED_KING] = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kRedKing);
-    gRects.moving[BLACK] = makeRect(gTextures.piece, pieceSize, pieceSize, Colors.kBlack);
-    gRects.moving[BLACK_KING] = makeRect(gTextures.king, pieceSize, pieceSize, Colors.kBlackKing);
 
-    for (const rect of Object.values(gRects.moving))
-        addMoveMotion(rect);
+    for (const p of [RED, RED_KING, BLACK, BLACK_KING])
+    {
+        gRects.moving[p] = makeEntity(pieceRect(p), 0, 0, pieceColor(p));
+        addMoveMotion(gRects.moving[p]);
+    }
 
-    gRects.overlay = makeRect(gTextures.square, w, h, Colors.kOverlay);
-    gRects.overlay.setPos(0, 0);
+    gRects.overlay = makeEntity(makeRect(gTextures.square, w, h), 0, 0, Colors.kOverlay);
 
     // Title screen
     // The title is built from glyphs so the text effects can run on it (see startTitleEffect())
     gTitleAtlas = new TextAtlas(gTitleFont, "CHECKERS", Math.max(8, Math.round(unit * 0.15)), "normal");
-    gTexts.title = new TextGlyphs2D(gTitleAtlas);
-    gTexts.title.setColor(Colors.kTitle);
-    gTexts.title.setPos(Math.round(w / 2), Math.round(h * 0.70), Alignment.kMiddleCenter);
-    gTexts.title.setText("CHECKERS");
+    let title = new TextGlyphs2D(gTitleAtlas);
+    title.setAlignment(Alignment.kMiddleCenter);
+    title.setText("CHECKERS");
+    gTexts.title = makeEntity(title, Math.round(w / 2), Math.round(h * 0.70), Colors.kTitle); // Drawn by gTitleEffect, at this entity's place and color
     gTitleEffect = null; // The old one was on the old title; startTitleEffect(0) below makes the first
     gTexts.subtitle = makeText("You play Red against the computer", unit * 0.035, "normal", Colors.kTextDim, w / 2, h * 0.57);
     gButtons.start = new Button("Start Game", w / 2, h * 0.42, unit * 0.38, unit * 0.10, unit * 0.045, unit * 0.035);
@@ -691,10 +696,10 @@ function appLayout()
 
     // The title board fills the screen from the bottom-left; each tile of its texture is 2 x 2 squares
     const titleSq = gLayout.titleSq;
-    gRects.titleBoard = new Rect2D();
-    gRects.titleBoard.load(gTitleBoard ?? gTextures.square, w, h);
-    gRects.titleBoard.setUVTile(w / (titleSq * 2), h / (titleSq * 2));
-    gRects.titleBoard.setPos(0, 0);
+    let titleBoard = new Rect2D();
+    titleBoard.load(gTitleBoard ?? gTextures.square, w, h);
+    titleBoard.setUVTile(w / (titleSq * 2), h / (titleSq * 2));
+    gRects.titleBoard = makeEntity(titleBoard, 0, 0);
 
     // The checkers: red up the left, black up the right. Centered, as the hops move their centers from square to square (see hopTitleChecker()).
     const titlePieceSize = Math.floor(titleSq * 0.86);
@@ -704,15 +709,16 @@ function appLayout()
         let checker = gTitleCheckers[i];
         checker.column = (i === 0) ? TITLE_PATH_COLUMN : rightTitlePathColumn(w);
         checker.square = titleSquareOnRow(checker.column, checker.square.r); // The black one's column may have moved
-        checker.rect = makeRect(gTextures.piece, titlePieceSize, titlePieceSize, checker.color);
-        checker.rect.setPos(titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r), Alignment.kMiddleCenter);
+        let piece = makeRect(gTextures.piece, titlePieceSize, titlePieceSize);
+        piece.setAlignment(Alignment.kMiddleCenter);
+        checker.entity = makeEntity(piece, titleSquareCenter(checker.square.c), titleSquareCenter(checker.square.r), checker.color);
         addTitleHopMotion(checker);
     }
 
     // Game screen
     const boardTop = boardY + boardPx + border;
     gTexts.status = makeText("", unit * 0.04, "bold", Vector4.kWhite, w / 2, boardTop + ((h - boardTop) / 2));
-    gTexts.status.setRasterizedTextColor(Colors.kText); // Drawn in its color, untinted, so its shadow keeps its own color
+    gTexts.status.getModel().setRasterizedTextColor(Colors.kText); // Drawn in its color, untinted, so its shadow keeps its own color
     const menuW = unit * 0.16;
     const menuH = unit * 0.06;
     const margin = Math.round(unit * 0.03);
@@ -720,9 +726,9 @@ function appLayout()
 
     // The time changes every second, so it's built from a TextAtlas's glyphs instead of drawing a new Text2D each time
     gTimeAtlas = new TextAtlas(gUIFont, "0123456789:", Math.max(8, Math.round(unit * 0.04)), "bold");
-    gTexts.time = new TextGlyphs2D(gTimeAtlas);
-    gTexts.time.setColor(Colors.kText);
-    gTexts.time.setPos(Math.round(w - margin), Math.round(h - margin - (menuH / 2)), Alignment.kMiddleRight);
+    let time = new TextGlyphs2D(gTimeAtlas);
+    time.setAlignment(Alignment.kMiddleRight);
+    gTexts.time = makeEntity(time, Math.round(w - margin), Math.round(h - margin - (menuH / 2)), Colors.kText);
 
     // Menu screen
     gTexts.menuTitle = makeText("MENU", unit * 0.10, "bold", Colors.kTitle, w / 2, h * 0.66);
@@ -741,7 +747,7 @@ function appLayout()
     updateTimeText();
     updateGameOverText();
 
-    // The checkers are new rects, so start them hopping again
+    // The checkers are new entities, so start them hopping again
     for (const checker of gTitleCheckers)
     {
         checker.delay = 0.0;
@@ -751,35 +757,64 @@ function appLayout()
     startTitleEffect(0); // The title is new too: start its effects from the first
 }
 
-function makeRect(texture, w, h, color)
+function makeRect(texture, w, h)
 {
     let r = new Rect2D();
     r.load(materialFor(texture), Math.round(w), Math.round(h));
-    r.setColor(color);
     return r;
 }
 
-function makeRoundedRect(texture, w, h, radius, color)
+function makeRoundedRect(texture, w, h, radius)
 {
     let r = new RoundedRect2D();
     r.load(materialFor(texture), Math.round(w), Math.round(h), radius);
-    r.setColor(color);
     return r;
 }
 
+// An Entity at (x, y) holding model, drawn by its anchor (see Model2D.setAlignment()) in color
+function makeEntity(model, x, y, color = Vector4.kWhite)
+{
+    let e = new Entity();
+    e.setModel(model);
+    e.setPosition(x, y);
+    e.setColor(color);
+    return e;
+}
+
+// Queues model on a layer with its anchor at (x, y) in color: for the shared rects drawn at many places a frame
+function submitAt(model, x, y, layer, color)
+{
+    gBatcher.submit(model, gPlace.setPosition(x, y), layer, null, color);
+}
+
+// The shared rect and color piece p (not EMPTY) is drawn with
+function pieceRect(p) { return (p === RED_KING || p === BLACK_KING) ? gRects.king : gRects.man; }
+
+function pieceColor(p)
+{
+    switch (p)
+    {
+        case RED: return Colors.kRed;
+        case RED_KING: return Colors.kRedKing;
+        case BLACK: return Colors.kBlack;
+        default: return Colors.kBlackKing;
+    }
+}
+
+// An Entity holding a Text2D, its align part on (x, y)
 function makeText(text, fontSize, weight, color, x, y, align = Alignment.kMiddleCenter, font = gUIFont)
 {
     let t = new Text2D(font, Math.max(8, Math.round(fontSize)), weight);
-    t.setColor(color);
-    t.setPos(Math.round(x), Math.round(y), align);
+    t.setAlignment(align);
     t.setText(text);
-    return t;
+    return makeEntity(t, Math.round(x), Math.round(y), color);
 }
 
 class Button
 {
     #bg;
-    #label;
+    #bgTransform; // The background's bottom-left corner
+    #label;       // Entity holding the label's Text2D, centered
     #x;
     #y;
     #w;
@@ -794,10 +829,10 @@ class Button
         this.#y = Math.round(_cy - (this.#h / 2));
 
         if (_cornerRadius > 0)
-            this.#bg = makeRoundedRect(gTextures.square, this.#w, this.#h, _cornerRadius, Colors.kButton);
+            this.#bg = makeRoundedRect(gTextures.square, this.#w, this.#h, _cornerRadius);
         else
-            this.#bg = makeRect(gTextures.square, this.#w, this.#h, Colors.kButton);
-        this.#bg.setPos(this.#x, this.#y);
+            this.#bg = makeRect(gTextures.square, this.#w, this.#h);
+        this.#bgTransform = new Transform2D(this.#x, this.#y);
         this.#label = makeText(_text, _fontSize, "bold", Colors.kText, _cx, _cy);
     }
 
@@ -811,14 +846,13 @@ class Button
     {
         const p = InputManager.getPosition();
         const hover = (isActive === true) && InputManager.hasPosition() && this.contains(p.x, p.y);
-        this.#bg.setColor(hover ? Colors.kButtonHover : Colors.kButton);
-        gBatcher.submit(this.#bg, backLayer);
-        gBatcher.submit(this.#label, textLayer);
+        gBatcher.submit(this.#bg, this.#bgTransform, backLayer, null, hover ? Colors.kButtonHover : Colors.kButton);
+        this.#label.submit(gBatcher, textLayer);
     }
 
     unload()
     {
-        this.#label.unload();
+        this.#label.getModel().unload();
     }
 }
 
@@ -837,31 +871,30 @@ function renderScreen(screen, isActive)
 
 function renderTitle(isActive)
 {
-    gBatcher.submit(gRects.titleBoard, Layers.kBoard);
+    gRects.titleBoard.submit(gBatcher, Layers.kBoard);
 
     for (const checker of gTitleCheckers)
-        gBatcher.submit(checker.rect, Layers.kPieces);
+        checker.entity.submit(gBatcher, Layers.kPieces);
 
     gTitleEffect.submit(gBatcher, Layers.kUIText); // The title, with its current effect
-    gBatcher.submit(gTexts.subtitle, Layers.kUIText);
+    gTexts.subtitle.submit(gBatcher, Layers.kUIText);
     gButtons.start.render(isActive);
-    gBatcher.submit(gTexts.titleHint, Layers.kUIText);
+    gTexts.titleHint.submit(gBatcher, Layers.kUIText);
 }
 
 function renderGame(isActive)
 {
     const sq = gLayout.sq;
 
-    gBatcher.submit(gRects.border, Layers.kBoard);
+    gRects.border.submit(gBatcher, Layers.kBoard);
 
     // Squares (submitted after the border, with the same material, so they draw on top of it)
     for (let r = 0; r < BOARD_SIZE; r++)
     {
         for (let c = 0; c < BOARD_SIZE; c++)
         {
-            let rect = ((r + c) % 2 === 0) ? gRects.lightSquare : gRects.darkSquare;
-            rect.setPos(squareX(c), squareY(r));
-            gBatcher.submit(rect, Layers.kBoard);
+            const color = ((r + c) % 2 === 0) ? Colors.kLightSquare : Colors.kDarkSquare;
+            submitAt(gRects.square, squareX(c), squareY(r), Layers.kBoard, color);
         }
     }
 
@@ -884,7 +917,7 @@ function renderGame(isActive)
     if (gSelected !== null)
         renderHighlight(gSelected.r, gSelected.c, Colors.kSelected);
 
-    // Pieces; a moving piece's destination is drawn by its own rect, below
+    // Pieces; a moving piece's destination is drawn by its own entity, below
     for (let r = 0; r < BOARD_SIZE; r++)
     {
         for (let c = 0; c < BOARD_SIZE; c++)
@@ -902,7 +935,7 @@ function renderGame(isActive)
         if (gMoving.captured !== null)
             renderPiece(gMoving.captured.piece, gMoving.captured.r, gMoving.captured.c); // Until it's landed on
 
-        gBatcher.submit(gMoving.rect, Layers.kPieces);
+        gMoving.entity.submit(gBatcher, Layers.kPieces);
     }
 
     gBatcher.submitDrawable(gSparks, Layers.kPieces); // Drawn after the layer's pieces, so on top
@@ -913,63 +946,47 @@ function renderGame(isActive)
         const hintOffset = (sq - Math.floor(sq * 0.5)) / 2;
 
         for (const t of getLegalTargets(gBoard, gSelected.r, gSelected.c, HUMAN))
-        {
-            gRects.hint.setPos(Math.round(squareX(t.c) + hintOffset), Math.round(squareY(t.r) + hintOffset));
-            gBatcher.submit(gRects.hint, Layers.kPieces);
-        }
+            submitAt(gRects.hint, Math.round(squareX(t.c) + hintOffset), Math.round(squareY(t.r) + hintOffset), Layers.kPieces, Colors.kHint);
     }
 
-    gBatcher.submit(gTexts.status, Layers.kUIText);
-    gBatcher.submit(gTexts.time, Layers.kUIText);
+    gTexts.status.submit(gBatcher, Layers.kUIText);
+    gTexts.time.submit(gBatcher, Layers.kUIText);
     gButtons.menu.render(isActive);
 }
 
 // Draws piece p (EMPTY draws nothing) on (r, c) with the shared piece rects
 function renderPiece(p, r, c)
 {
-    let rect = null;
-
-    switch (p)
-    {
-        case RED: rect = gRects.redMan; break;
-        case BLACK: rect = gRects.blackMan; break;
-        case RED_KING: rect = gRects.redKing; break;
-        case BLACK_KING: rect = gRects.blackKing; break;
-    }
-
-    if (rect === null)
+    if (p === EMPTY)
         return;
 
-    rect.setPos(pieceX(c), pieceY(r));
-    gBatcher.submit(rect, Layers.kPieces);
+    submitAt(pieceRect(p), pieceX(c), pieceY(r), Layers.kPieces, pieceColor(p));
 }
 
 function renderHighlight(r, c, color)
 {
-    gRects.highlight.setColor(color);
-    gRects.highlight.setPos(squareX(c), squareY(r));
-    gBatcher.submit(gRects.highlight, Layers.kHighlight);
+    submitAt(gRects.square, squareX(c), squareY(r), Layers.kHighlight, color);
 }
 
 function renderMenu()
 {
-    gBatcher.submit(gRects.overlay, Layers.kOverlay);
-    gBatcher.submit(gTexts.menuTitle, Layers.kOverlayText);
+    gRects.overlay.submit(gBatcher, Layers.kOverlay);
+    gTexts.menuTitle.submit(gBatcher, Layers.kOverlayText);
     gButtons.quit.render(true, Layers.kOverlayBack, Layers.kOverlayText);
-    gBatcher.submit(gTexts.menuHint, Layers.kOverlayText);
+    gTexts.menuHint.submit(gBatcher, Layers.kOverlayText);
 }
 
 function renderGameOver()
 {
-    gBatcher.submit(gRects.overlay, Layers.kOverlay);
-    gBatcher.submit(gTexts.gameOver, Layers.kOverlayText);
-    gBatcher.submit(gTexts.gameOverHint, Layers.kOverlayText);
+    gRects.overlay.submit(gBatcher, Layers.kOverlay);
+    gTexts.gameOver.submit(gBatcher, Layers.kOverlayText);
+    gTexts.gameOverHint.submit(gBatcher, Layers.kOverlayText);
 }
 
 function renderQuit()
 {
-    gBatcher.submit(gTexts.quitTitle, Layers.kUIText);
-    gBatcher.submit(gTexts.quitHint, Layers.kUIText);
+    gTexts.quitTitle.submit(gBatcher, Layers.kUIText);
+    gTexts.quitHint.submit(gBatcher, Layers.kUIText);
 }
 
 // A ring of sparks flying out from the edge of the piece that just landed on (r, c)
@@ -1021,7 +1038,7 @@ function updateStatusText()
         shadow = YOUR_TURN_SHADOW;
     }
 
-    let status = gTexts.status;
+    let status = gTexts.status.getModel();
     status.setText(text);
 
     // Each of these only redraws the text when it changes something
@@ -1049,7 +1066,7 @@ function updateTimeText()
     if (gTexts.time === undefined)
         return;
 
-    gTexts.time.setText(formatTime(gGameTime)); // Only rebuilds its glyph quads when the second changes
+    gTexts.time.getModel().setText(formatTime(gGameTime)); // Only rebuilds its glyph quads when the second changes
 }
 
 function updateGameOverText()
@@ -1059,7 +1076,7 @@ function updateGameOverText()
 
     const humanWon = (gWinner === HUMAN);
     gTexts.gameOver.setColor(humanWon ? Colors.kWin : Colors.kLose);
-    gTexts.gameOver.setText(humanWon ? "You Win!" : "You Lose!");
+    gTexts.gameOver.getModel().setText(humanWon ? "You Win!" : "You Lose!");
 }
 
 // *** Input ***
@@ -1222,8 +1239,8 @@ function resetGame()
     gMoving = null;
     gSparks?.clear();
 
-    for (const rect of Object.values(gRects.moving ?? {}))
-        rect.getMotion()?.stopAll();
+    for (const entity of Object.values(gRects.moving ?? {}))
+        entity.getMotion()?.stopAll();
 
     updateStatusText();
     updateTimeText();
@@ -1308,18 +1325,18 @@ function startMove(fr, fc, tr, tc, onLanded)
     }
 
     const result = applyStep(gBoard, fr, fc, tr, tc);
-    const rect = gRects.moving[piece]; // The piece as it was, so a man crowned here shows its crown on landing
+    const entity = gRects.moving[piece]; // The piece as it was, so a man crowned here shows its crown on landing
 
-    let motion = rect.getMotion(); // See addMoveMotion()
+    let motion = entity.getMotion(); // See addMoveMotion()
     motion.get("slide").set(new Transform2D(pieceX(fc), pieceY(fr)), new Transform2D(pieceX(tc), pieceY(tr)));
 
-    gMoving = { piece, rect, to: { r: tr, c: tc }, captured, result, onLanded };
+    gMoving = { piece, entity, to: { r: tr, c: tc }, captured, result, onLanded };
 
     motion.play("lift");
     motion.play("slide");
 }
 
-// The slide finished (the moving rect's motion callback): the piece is on its square, so the turn carries on
+// The slide finished (the moving entity's motion callback): the piece is on its square, so the turn carries on
 function landMove()
 {
     const move = gMoving;

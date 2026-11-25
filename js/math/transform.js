@@ -3,8 +3,8 @@
 
     Rotation matches the 2D shaders: y runs up and a positive angle turns
     counter-clockwise (right-hand rule about +Z, toward the viewer). A
-    Model2D rotates and scales about its center, but its transform's
-    position is its anchor (see Model2D.setPos()).
+    Model2D drawn at a transform rotates and scales about its center, but
+    the transform's position is its anchor (see Model2D.setAlignment()).
 
     Multiplying: a * b puts b in a's space, so b is a child placed relative to
     its parent a. The result is b as seen from wherever a sits:

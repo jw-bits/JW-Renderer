@@ -8,13 +8,13 @@
         kPingPongOnce  Start to target and back again, then stops at the start
         kPingPongLoop  Start to target and back again, over and over
 
-    Get one from Entity.enableMotion(); the entity's update(dt) updates it.
+    Get one from Entity.addMotion(); the entity's update(dt) updates it.
     Several motions can play at once, usually on different channels. Each
     frame they're written to the entity in the order they were added, so on
     a channel two of them move, the one added later wins.
 
     Usage:
-        let motion = rect.enableMotion();
+        let motion = piece.addMotion();      // piece is an Entity
         motion.add("lift", liftChain);
         motion.add("slide", slide, MotionPlayStyle.kOnce);
         motion.setEventCallback((controller, name, event) => { if (name === "slide" && event === MotionEvent.kCompleted) ... });
@@ -22,7 +22,7 @@
         motion.play("slide");
 
         // Each frame
-        rect.update(dt);
+        piece.update(dt);
 
     A motion holds its own play time, so give each entity its own motions
     (they can share MotionValues).
@@ -34,7 +34,7 @@ class MotionController
     static #kPaused = 2;
     static #kFinished = 3;
 
-    static #kCurrent = new Transform2D(); // Scratch: a motion's channels before they're written to the entity
+    static #kCurrent = new MotionState(); // Scratch: a motion's channels before they're written to the entity
 
     #owner;         // The Entity
     #tracks;        // Map of name: { motion, playStyle, state, runId }
@@ -43,7 +43,7 @@ class MotionController
     constructor(_owner)
     {
         if ((_owner instanceof Entity) === false)
-            console.error("MotionController needs the Entity it moves (use Entity.enableMotion())");
+            console.error("MotionController needs the Entity it moves (use Entity.addMotion())");
 
         this.#owner = _owner;
         this.#tracks = new Map();
@@ -141,7 +141,7 @@ class MotionController
 
         if (MotionController.#isUnloaded(this.#owner) === true)
         {
-            console.error(`MotionController.play() "${name}": the model isn't loaded`);
+            console.error(`MotionController.play() "${name}": the entity's model isn't loaded`);
                 return false;
         }
 
@@ -227,8 +227,8 @@ class MotionController
 
     // *** Internal Methods ***
 
-    // True for a Model2D that isn't loaded; other Entities have nothing to load
-    static #isUnloaded(entity) { return (entity instanceof Model2D && entity.isLoaded() === false); }
+    // True for an Entity whose model isn't loaded (see Entity.isReady()); one without a model has nothing to load
+    static #isUnloaded(entity) { return (entity.isReady() === false); }
 
     #getTrack(name, methodName)
     {

@@ -1,16 +1,36 @@
+"use strict";
+
 /*
     Model2D - Base class for textured 2D shapes drawn in design units (see WGLV).
 
-    Holds the per-object state (position, size, scale, rotation, color), the
-    material and mesh, the setters/getters, render() and unload().
+    A model is what's drawn, not where: it holds its size, alignment,
+    material and mesh, and is drawn at a Transform2D given each time. One
+    model can be drawn at any number of places in a frame (a board's squares,
+    a grid of tiles). It has no position of its own; place it with a
+    Transform2D, or give it to an Entity (entity.js) for a hierarchy and
+    motion.
+
+        let t = new Transform2D(400, 300);
+        rect.setAlignment(Alignment.kMiddleCenter);
+        rect.render(t);                        // Or batcher.submit(rect, t, layer)
 
     Each subclass does its own loading, two ways:
         load(texture, ...)   A Texture; the subclass creates a Material with its own default shader.
         load(material, ...)  A loaded Material, used as is. It only holds the shader, textures
                              and samplers, so many models can share one (see MaterialManager).
 
+    render() and submit can also take another Material for one draw, e.g. a
+    lit or outlined version of the model's own; it must suit the model's mesh
+    (Rect2D's default shader, or one built from the same source). The UV rect
+    is still the model's own (see below).
+
+    Color: a model has none of its own. render() and submit take the color
+    (a Vector4) to draw with, white if left out, so whoever draws it (an
+    Entity, a widget, game code) holds the color and one model can be drawn
+    in many colors.
+
     Uniform values live here, not in the Material: render() binds the
-    material, then uploads this model's u_color, u_vec0, u_scale, and its UV
+    material, then uploads the given u_color, this model's u_vec0, u_scale, and its UV
     rect as u_uvOffset and u_uvTile (for shaders that use them). Positions are
     world design units; the active camera (see ClipSpace) takes them to the screen.
 
@@ -19,27 +39,20 @@
 
     Meshes are in 0..1 of the model's rect, built with Shapes' makeUnit...()
     methods: the shaders scale them by its width and height (u_vec0), so a
-    size change needs no new quad. Rect2D,
-    Sprite and Text2D each share one static unit quad across all their
-    models (_setMesh(quad, true): never freed by a model). TextGlyphs2D is
-    the exception: its own shader takes its glyph quads in design units.
+    size change needs no new quad. Rect2D, Sprite and Text2D each share one
+    static unit quad across all their models (_setMesh(quad, true): never
+    freed by a model). TextGlyphs2D is the exception: its own shader takes its
+    glyph quads in design units.
 
-    Position: setPos(x, y, align) places an anchor point; align says which part
-    of the model sits on it (bottom-left by default). The model keeps its
-    alignment when its size changes, e.g. centered text stays centered.
-
-    Transform: a Model2D is an Entity (entity.js). Its local transform's
-    position is the anchor, changed through setPos() (or setPosition(), which
-    keeps the alignment), setScale(), setRotation() and setTransform(). The
-    model scales and rotates about its center.
-
-    Parents: as a child, the model's center is placed by its parents' world
-    transform, and their scale and rotation add to its own.
-    getDrawTransform() is what it's drawn with: render() and Batcher use it.
-    getPos(), getX() and getY() stay local (the bottom-left corner relative to
-    the parent); getWorldPos() is the corner it's drawn at. A model's own
-    children are placed relative to its anchor, so center it
-    (Alignment.kMiddleCenter) for children to circle its middle.
+    Alignment: the transform's position is the model's anchor, and
+    setAlignment() says which part of the model sits on it (bottom-left by
+    default). The model keeps its alignment when its size changes, e.g.
+    centered text stays centered. The model scales and rotates about its
+    center, wherever the anchor is. The step from the anchor to the corner
+    isn't turned, so under a turning parent (see Entity) only the anchor is
+    carried round: center the model (Alignment.kMiddleCenter) for it to be
+    carried round by its middle. getDrawTransform() gives what it's drawn
+    with: the transform with its position moved to the bottom-left corner.
 
     Raster scale: a model that draws into a texture at screen resolution can
     call listenForRasterScale(true) and override onRasterScaleChanged(newScale)
@@ -52,106 +65,108 @@
     texture unit 0, it's that AtlasSubTexture's part of the atlas, and a Sprite's
     frames are within it.
 
-    Instancing: canInstance() says whether Batcher may draw the model
-    with its instanced shader: a plain quad filling width x height, drawing a
-    UV rect of texture unit 0, tinted by its color. It's false unless a
-    subclass overrides it; Rect2D (on its default shader), Text2D and Sprite do.
+    Instancing: canInstance(material) says whether Batcher may draw the
+    model with its instanced shader, given the Material it's drawn with: a
+    plain quad filling width x height, drawing a UV rect of texture unit 0,
+    tinted by the color it's drawn with. It's false unless a subclass overrides it; Rect2D
+    (on its default shader), Text2D and Sprite do.
 */
-class Model2D extends Entity
+class Model2D
 {
-    // Scratch values for uploading uniforms in render()
+    // Scratch values for uploading uniforms in draw()
     static #kRect = new Vector4();
     static #kScaleRot = new Vector3();
     static #kUVOffset = new Vector2();
     static #kUVTile = new Vector2();
-    static #kDrawTransform = new Transform2D(); // render() and getWorldPos(): the transform at the bottom-left corner
-    static #kCenter = new Vector2();            // getDrawTransform()
+    static #kDrawTransform = new Transform2D(); // render() and containsPoint(): the transform at the bottom-left corner
 
-    #align;       // Which part of the model sits on the anchor (the local transform's position)
-    #position;    // The bottom-left corner, local: from the anchor, alignment and size
+    #align;       // Which part of the model sits on the transform's position (the anchor)
     #material;
     #width;
     #height;
     #mesh;
     #ownsMesh;    // False for a class's shared quad: unload() leaves it alone
-    #color;
     #isLoaded;
     #isListening;   // For raster scale changes
     #viewListeners; // Given to WGLV.addListeners() while listening
 
-    constructor(_name = "")
+    constructor()
     {
-        super(_name);
-
         this.#align = Alignment.kBottomLeft;
-        this.#position = new Vector2();
         this.#material = null;
         this.#width = 0;
         this.#height = 0;
         this.#mesh = null;
         this.#ownsMesh = false;
-        this.#color = new Vector4(1, 1, 1, 1);
         this.#isLoaded = false;
         this.#isListening = false;
         this.#viewListeners = { onRasterScaleChanged: (newScale) => this.onRasterScaleChanged(newScale) };
     }
 
-    // (x, y) is the anchor point, relative to the parent; align says which part of the model sits on it
-    setPos(x, y, align = Alignment.kBottomLeft)
+    // Which part of the model sits on the transform's position (an Alignment); kept until changed. Returns false if align isn't valid.
+    setAlignment(align)
     {
+        if (Alignment.isValid(align) === false)
+        {
+            console.error(`${this.constructor.name}.setAlignment() needs an Alignment`);
+                return false;
+        }
+
         this.#align = align;
-        this.setPosition(x, y);
+            return true;
     }
 
-    setColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
+    getAlignment() { return this.#align; }
 
-    // The bottom-left corner, whatever the alignment; local (relative to the parent)
-    getPos() { return this.#position; }
-    getX() { return this.#position.x; }
-    getY() { return this.#position.y; }
+    getWidth() { return this.#width; }
+    getHeight() { return this.#height; }
+    getMaterial() { return this.#material; }
+    isLoaded() { return this.#isLoaded; }
 
-    // The bottom-left corner it's drawn at, in the world, written into out and returned
-    getWorldPos(out = new Vector2())
+    /*
+        What it's drawn with at transform (the anchor), written into out (a Transform2D)
+        and returned: transform's scale and rotation, and its position moved by the
+        alignment to the bottom-left corner (see draw()).
+    */
+    getDrawTransform(transform, out)
     {
-        const t = this.getDrawTransform(Model2D.#kDrawTransform);
+        return out.copy(transform).setPosition(transform.getX() + Alignment.offsetX(this.#align, this.#width),
+                                               transform.getY() + Alignment.offsetY(this.#align, this.#height));
+    }
+
+    // The bottom-left corner it's drawn at with transform, written into out and returned
+    getCorner(transform, out = new Vector2())
+    {
+        const t = this.getDrawTransform(transform, Model2D.#kDrawTransform);
         out.set(t.getX(), t.getY());
             return out;
     }
 
-    // As given to setPos(); read-only
-    getAnchor() { return this.getPosition(); }
-    getAlignment() { return this.#align; }
-
-    /*
-        What it's drawn with, written into out (a Transform2D) and returned: the world
-        scale and rotation, and the bottom-left corner to draw at (see draw()), so
-        the center lands where the parents put it.
-    */
-    getDrawTransform(out)
+    // True if point (a Vector2, world design units) is inside the model's rect drawn at transform, scaled and turned
+    containsPoint(transform, point)
     {
-        const parent = this.getParent();
-
-        if (parent === null)
-            return out.copy(this.getTransform()).setPosition(this.#position.x, this.#position.y);
-
+        const t = this.getDrawTransform(transform, Model2D.#kDrawTransform);
         const hw = this.#width / 2.0;
         const hh = this.#height / 2.0;
-        let c = Model2D.#kCenter;
+        const dx = point.x - (t.getX() + hw);
+        const dy = point.y - (t.getY() + hh);
+        const s = Math.sin(t.getRotation());
+        const c = Math.cos(t.getRotation());
+        const sx = t.getScaleX();
+        const sy = t.getScaleY();
 
-        c.set(this.#position.x + hw, this.#position.y + hh);
-        parent.localToWorld(c, c);
+        if (sx === 0.0 || sy === 0.0)
+            return false;
 
-        return out.copy(this.getWorldTransform()).setPosition(c.x - hw, c.y - hh);
+        // Into the model's own axes, unscaled
+        const x = ((dx * c) + (dy * s)) / sx;
+        const y = ((dy * c) - (dx * s)) / sy;
+
+        return (Math.abs(x) <= hw && Math.abs(y) <= hh);
     }
 
-    getWidth() { return this.#width; }
-    getHeight() { return this.#height; }
-    getColor() { return this.#color; }
-    getMaterial() { return this.#material; }
-    isLoaded() { return this.#isLoaded; }
-
-    // True if Batcher may draw this with its instanced shader (see the top of this file). Subclasses opt in.
-    canInstance() { return false; }
+    // True if Batcher may draw this with its instanced shader when drawn with material (see the top of this file). Subclasses opt in.
+    canInstance(material = this.#material) { return false; }
 
     // The part of the texture drawn, as a UVRect. Shared and read-only for models that draw all of it; don't change it.
     getUVRect() { return this.#getTextureUVRect(); }
@@ -175,41 +190,49 @@ class Model2D extends Entity
     // Called by WGLV while listening; override to react (e.g. redraw a texture at the new scale)
     onRasterScaleChanged(newScale) { }
 
-    render()
+    /*
+        Draws it right away at transform (a Transform2D: its position is the anchor, see
+        setAlignment()), with material, or its own Material if null, tinted color (a
+        Vector4, white by default). Returns false if it isn't loaded.
+    */
+    render(transform, material = null, color = Vector4.kWhite)
     {
         if (this.#isLoaded === false)
         {
             console.log("Not loaded, skipping render");
-                return;
+                return false;
         }
 
-        const t = this.getDrawTransform(Model2D.#kDrawTransform);
+        const m = material ?? this.#material;
+        const t = this.getDrawTransform(transform, Model2D.#kDrawTransform);
 
-        this.#material.bind();
-        this.draw(t, this.#color);
+        m.bind();
+        this.draw(t, color ?? Vector4.kWhite, null, m);
+            return true;
     }
 
     /*
-        Draws with the given values instead of this model's own, without binding
-        the material: it must already be bound. Used by Batcher, which
-        binds a material once for many models and replays the values captured
-        when each was submitted.
+        Draws with the given values, without binding the material: it must
+        already be bound. Used by Batcher, which binds a material once for many
+        models and replays the values captured when each was submitted.
 
         transform is a Transform2D whose position is the bottom-left corner to
-        draw at (as getPos() gives it), not the anchor.
+        draw at (getDrawTransform()), not the anchor.
 
         uvRect is the captured getUVRect(), or null for the model's current one.
         It's uploaded as u_uvOffset (x, y) and u_uvTile (width, height); shaders
         that don't use them ignore it. Uniforms keep their value per shader, so
         this sets them every draw: models sharing Rect2D's shader (RoundedRect2D,
         NinePatch2D) get the whole texture back after a tiled Rect2D.
+
+        material is the bound Material the uniforms go to (the model's own by default).
     */
-    draw(transform, color, uvRect = null)
+    draw(transform, color, uvRect = null, material = this.#material)
     {
         if (this.#isLoaded === false)
             return;
 
-        const m = this.#material;
+        const m = material;
         const r = uvRect ?? this.getUVRect();
 
         Model2D.#kRect.set(transform.getX(), transform.getY(), this.#width / 2.0, this.#height / 2.0);
@@ -242,12 +265,11 @@ class Model2D extends Entity
 
     // *** Subclass Methods ***
 
-    // Keeps the anchor and alignment, so the bottom-left corner moves with the size
+    // Design units; the alignment is kept, so the corner moves with the size
     _setSize(width, height)
     {
         this.#width = width;
         this.#height = height;
-        this.#updatePosition();
     }
 
     _setMaterial(material) { this.#material = material; }
@@ -268,11 +290,6 @@ class Model2D extends Entity
     }
 
     _setLoaded(isLoaded) { this.#isLoaded = isLoaded; }
-
-    // *** Entity ***
-
-    // The anchor, or the parent, changed: the corner follows, keeping the alignment
-    _onTransformChanged() { this.#updatePosition(); }
 
     // Texture unit 0 if it's an AtlasSubTexture (see TextureAtlas), else null
     _getSubTexture()
@@ -324,14 +341,6 @@ class Model2D extends Entity
 
     // The part of texture unit 0 to draw: an AtlasSubTexture's UV rect, or the whole texture. Read-only.
     #getTextureUVRect() { return this.#material?.getTexture(0)?.getUVRect() ?? UVRect.kFull; }
-
-    #updatePosition()
-    {
-        const anchor = this.getPosition();
-
-        this.#position.set(anchor.x + Alignment.offsetX(this.#align, this.#width),
-                           anchor.y + Alignment.offsetY(this.#align, this.#height));
-    }
 }
 
 /*
@@ -413,9 +422,9 @@ class Rect2D extends Model2D
     }
 
     /*
-        Changes the size in design units, keeping the anchor and alignment from setPos()
-        (a centered rect stays centered). Cheap: the quad is shared and scaled when drawn.
-        Returns false if not loaded or the size isn't above 0.
+        Changes the size in design units, keeping the alignment (a centered rect stays
+        centered). Cheap: the quad is shared and scaled when drawn. Returns false if
+        not loaded or the size isn't above 0.
     */
     setSize(width, height)
     {
@@ -436,9 +445,9 @@ class Rect2D extends Model2D
     }
 
     // A Material on another shader may do more than the instanced shader can
-    canInstance()
+    canInstance(material = this.getMaterial())
     {
-        return (this.isLoaded() === true && this.getMaterial().getShader() === Rect2D.getDefaultShader());
+        return (this.isLoaded() === true && material.getShader() === Rect2D.getDefaultShader());
     }
 
     /*
@@ -534,8 +543,8 @@ class RoundedRect2D extends Model2D
     }
 
     /*
-        Changes the size in design units, keeping the anchor and alignment from setPos()
-        (a centered rect stays centered). radius is clamped to half the shortest side
+        Changes the size in design units, keeping the alignment (a centered rect
+        stays centered). radius is clamped to half the shortest side
         (the current one by default; Infinity makes a pill). Rebuilds the mesh. Returns
         false if not loaded or the size isn't above 0.
     */
@@ -683,15 +692,15 @@ class NinePatch2D extends Model2D
     Text2D - Screen-space text, drawn as a textured quad.
 
     The text is drawn with TextCanvas and uploaded straight into the Text2D's
-    own texture (no image decode). setColor() is a tint on top of it, so it
-    never re-rasterizes.
+    own texture (no image decode). The color it's drawn with (see render())
+    is a tint on top of it, so it never re-rasterizes.
 
     Rasterized colors: the text is drawn into the texture in
     setRasterizedTextColor() (white by default), with an optional drop shadow
     behind it in setRasterizedShadowColor(). With a white rasterized color,
-    setColor() colors the text; with colored text or a shadow, leave
-    setColor() at (1, 1, 1, a) so the rasterized colors stay as they are and
-    a fades the whole Text2D in or out. Changing a rasterized color, the
+    the draw color colors the text; with colored text or a shadow, draw it
+    with (1, 1, 1, a) so the rasterized colors stay as they are and a fades
+    the whole Text2D in or out. Changing a rasterized color, the
     shadow's offset, or turning the shadow on / off re-rasterizes.
 
         t.setRasterizedTextColor(new Vector4(1, 0.8, 0, 1));
@@ -709,11 +718,10 @@ class NinePatch2D extends Model2D
     Usage:
         const font = await FontManager.load("./fonts/MyFont-Regular.ttf");
         let t = new Text2D(font, 32, "bold");
-        t.setColor(new Vector4(1, 1, 0, 1));
-        t.setPos(400, 300, Alignment.kMiddleCenter);
+        t.setAlignment(Alignment.kMiddleCenter);
         t.setText("Hello"); // isLoaded() is true once this succeeds
         ...
-        t.render();
+        t.render(new Transform2D(400, 300), null, yellow); // Or batcher.submit(t, transform, layer, null, yellow)
 
     The Font is the only way to choose what Text2D draws with; use
     FontManager.loadFromSystem("Arial") for a font the browser already has.
@@ -844,8 +852,11 @@ class Text2D extends Model2D
 
     getDropShadowOffset() { return this.#shadowOffset; }
 
-    // Always drawn with its own Material on Rect2D's default shader
-    canInstance() { return this.isLoaded(); }
+    // Its own Material is on Rect2D's default shader; another may not be
+    canInstance(material = this.getMaterial())
+    {
+        return (this.isLoaded() === true && material.getShader() === Rect2D.getDefaultShader());
+    }
 
     // The view scale changed: redraw at the new scale so the text stays sharp
     onRasterScaleChanged(newScale)
@@ -931,7 +942,7 @@ class Text2D extends Model2D
         const h = c.height / scale;
 
         if (this.isLoaded() === false || w !== this.getWidth() || h !== this.getHeight())
-            this._setSize(w, h); // Keeps the anchor and alignment from setPos()
+            this._setSize(w, h); // Keeps the alignment
 
         this._setMesh(Text2D.#getQuad(), true);
         this._setMaterial(this.#material);
@@ -972,7 +983,7 @@ class Text2D extends Model2D
     draws them one after another with a single bind.
 
     Like Text2D: sizes and positions are in design units, the glyphs are
-    white and setColor() tints them, and its size is the text plus the
+    white and the draw color tints them, and its size is the text plus the
     padding around it, so alignment matches Text2D's.
 
     Raster scale: its TextAtlas draws its glyphs again when the view's scale
@@ -982,11 +993,10 @@ class Text2D extends Model2D
     Usage:
         let digits = new TextAtlas(font, "0123456789:", 40, "bold");
         let time = new TextGlyphs2D(digits);
-        time.setColor(new Vector4(1, 1, 0, 1));
-        time.setPos(400, 300, Alignment.kMiddleCenter);
+        time.setAlignment(Alignment.kMiddleCenter);
         time.setText("12:34"); // isLoaded() is true once this succeeds
         ...
-        time.render();
+        time.render(new Transform2D(400, 300), null, yellow);
 
     Characters missing from the TextAtlas draw as its fallback "?". The
     TextAtlas belongs to the caller; unload it after the TextGlyphs2Ds.
@@ -1005,7 +1015,7 @@ class Text2D extends Model2D
     Each glyph can be changed on its own (see BaseTextEffect):
         setGlyphOffsets()  Moves it
         setGlyphScales()   Scales it about its own center
-        setGlyphColors()   Tints it; multiplied with setColor()
+        setGlyphColors()   Tints it; multiplied with the draw color
     Each only re-uploads its own vertex data. setText() clears all three.
     getGlyphX() / getGlyphY() / getGlyphWidth() / getGlyphHeight() say
     where each glyph's quad is before any of them.
@@ -1180,7 +1190,7 @@ class TextGlyphs2D extends Model2D
 
     /*
         Tints each glyph: colors holds r, g, b, a (0 - 1), one set per glyph,
-        multiplied with setColor()'s color; null makes them all white again.
+        multiplied with the draw color; null makes them all white again.
         Returns false if not loaded or colors is too short.
     */
     setGlyphColors(colors)
@@ -1334,7 +1344,7 @@ class TextGlyphs2D extends Model2D
         this.#colors = colors;
         this.#glyphCount = glyphCount;
         this.#lineCount = lines.length;
-        this._setSize(widest + (ta.getPadding() * 2.0), height * lines.length); // Keeps the anchor and alignment from setPos()
+        this._setSize(widest + (ta.getPadding() * 2.0), height * lines.length); // Keeps the alignment
         this._setMaterial(ta.getMaterial());
         this._setLoaded(true);
 

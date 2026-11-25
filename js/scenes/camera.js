@@ -19,7 +19,7 @@
 
     Usage:
         let camera = new Camera2D();
-        camera.setPosition(player.getAnchor().x, player.getAnchor().y);
+        camera.setPosition(player.getPosition().x, player.getPosition().y); // player is an Entity
         camera.setZoom(1.5);
         camera.follow(player, 0.15);       // Optional: keep the player in view, catching up half the way every 0.15 s
         camera.setWorldBounds(0, 0, 4000, 2000); // Optional: never show past the level's edges
@@ -213,8 +213,8 @@ class Camera2D extends Entity
     isPixelSnap() { return this.#isPixelSnap; }
 
     /*
-        update() moves the camera after target: an Entity (its world position, a
-        Model2D's anchor) or anything with x and y (a Vector2). null stops following. smoothing is the seconds it takes to
+        update() moves the camera after target: an Entity (its world position, its
+        model's anchor) or anything with x and y (a Vector2). null stops following. smoothing is the seconds it takes to
         close half the distance (0 stays exactly on it). The target moves freely inside
         a dead zone of deadZoneWidth x deadZoneHeight world units around the center.
     */

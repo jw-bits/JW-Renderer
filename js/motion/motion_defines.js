@@ -1,36 +1,52 @@
 "use strict";
 
 /*
-    Motion types: moving an Entity's local position, scale and rotation over
-    time. Sprite frame animation (UVs) belongs to rendering; its types are in
-    render_defines.js.
+    Motion types: moving an Entity's local position, scale, rotation and
+    color over time. Sprite frame animation (UVs) belongs to rendering; its
+    types are in render_defines.js.
 
         MotionValues      Per channel: duration and easing. Any number of MotionActions can share one. (Below.)
+        MotionState       A transform and a color: what a motion works out at a moment. (Below.)
         MotionBase        What MotionAction and MotionChain share: play time, direction and update(dt)
         MotionAction      From a start Transform2D to a target one, timed by a MotionValues
         MotionChain       MotionActions, one after another
-        MotionController  An Entity's named motions and how each plays (see Entity.enableMotion())
+        MotionController  An Entity's named motions and how each plays (see Entity.addMotion())
 
     Usage:
         let timing = new MotionValues({ translation: { duration: 0.35, easing: Easing.kQuadraticInOut } });
         let slide = new MotionAction(new Transform2D(100, 100), new Transform2D(400, 200), timing);
 
-        let motion = rect.enableMotion();
+        let motion = piece.addMotion();    // piece is an Entity, e.g. with a Rect2D (Entity.setModel())
         motion.add("slide", slide, MotionPlayStyle.kPingPongLoop);
         motion.play("slide");
 
         // Each frame
-        rect.update(dt);
+        piece.update(dt);
 */
 
-// The parts of a transform a motion can move, as bit flags (combine with |)
+// The parts of an Entity a motion can move, as bit flags (combine with |): its local transform, and its color (Entity.setColor())
 class MotionChannel
 {
     static kNone = 0;
     static kTranslation = 1;
     static kScale = 2;
     static kRotation = 4;
-    static kAll = 7;
+    static kColor = 8;
+    static kAll = 15;
+}
+
+/*
+    MotionState - What a motion works out at a moment, before it's written
+    to an Entity: a transform and a color. Only the channels the motion moves
+    are written into it (see MotionBase.evaluateAt()).
+*/
+class MotionState
+{
+    constructor()
+    {
+        this.transform = new Transform2D();
+        this.color = new Vector4(1, 1, 1, 1); // The model's draw color (see Entity.setColor())
+    }
 }
 
 // How a MotionController plays one of its motions
@@ -62,7 +78,8 @@ class MotionEvent
         let timing = new MotionValues({
             translation: { duration: 0.35, easing: Easing.kQuadraticInOut },
             scale:       { duration: 0.35, easing: Easing.kBackOut },
-            rotation:    { duration: 0.2 }
+            rotation:    { duration: 0.2 },
+            color:       { duration: 0.5 }  // See MotionAction.setColors()
         });
 
         timing.setChannel(MotionChannel.kRotation, 0.5, Easing.kSineOut); // Or one channel at a time
@@ -72,8 +89,8 @@ class MotionEvent
 */
 class MotionValues
 {
-    static #kKeys = ["translation", "scale", "rotation"]; // In #channelIndex() order
-    static #kChannels = [MotionChannel.kTranslation, MotionChannel.kScale, MotionChannel.kRotation];
+    static #kKeys = ["translation", "scale", "rotation", "color"]; // In #channelIndex() order
+    static #kChannels = [MotionChannel.kTranslation, MotionChannel.kScale, MotionChannel.kRotation, MotionChannel.kColor];
 
     #channels; // MotionChannel flags moved
     #timings;  // Per channel, in #kKeys order: { duration (seconds), easing (Easing type) }
@@ -193,7 +210,7 @@ class MotionValues
         return (i >= 0 && (this.#channels & channel) !== 0) ? this.#timings[i] : null;
     }
 
-    // 0, 1 or 2 for kTranslation, kScale or kRotation; -1 for anything else
+    // 0 - 3 for kTranslation, kScale, kRotation or kColor; -1 for anything else
     static #channelIndex(channel) { return MotionValues.#kChannels.indexOf(channel); }
 
     static #isValid(duration, easing, methodName)

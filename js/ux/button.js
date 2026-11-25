@@ -65,6 +65,11 @@ class Button
     #text;          // TextGlyphs2D, or null
     #icon;          // Rect2D, or null
 
+    // Where each part is drawn: every part is centered on its transform (Alignment.kMiddleCenter)
+    #shapeTransform; // The outline and background: the button's center, with the press shrink
+    #iconTransform;
+    #textTransform;
+
     #width;         // Design units, outline included
     #height;
     #radius;        // As asked for (Button.kPill fits any size); clamped to the size when drawn
@@ -103,6 +108,12 @@ class Button
         this.#background = new RoundedRect2D();
         this.#text = null;
         this.#icon = null;
+
+        this.#outline.setAlignment(Alignment.kMiddleCenter);
+        this.#background.setAlignment(Alignment.kMiddleCenter);
+        this.#shapeTransform = new Transform2D();
+        this.#iconTransform = new Transform2D();
+        this.#textTransform = new Transform2D();
 
         this.#width = 0;
         this.#height = 0;
@@ -229,6 +240,7 @@ class Button
         {
             this.#text?.unload();
             this.#text = new TextGlyphs2D(textAtlas);
+            this.#text.setAlignment(Alignment.kMiddleCenter);
         }
 
         if (this.#text.setText(text) === false)
@@ -260,6 +272,7 @@ class Button
         }
 
         let icon = new Rect2D();
+        icon.setAlignment(Alignment.kMiddleCenter);
 
         if (icon.load(texture, width, height) === false)
         {
@@ -455,15 +468,15 @@ class Button
             return false;
 
         if (this.#outlineWidth > 0.0)
-            batcher.submit(this.#outline, layer);
+            batcher.submit(this.#outline, this.#shapeTransform, layer, null, this.#outlineNow);
 
-        batcher.submit(this.#background, layer);
+        batcher.submit(this.#background, this.#shapeTransform, layer, null, this.#backgroundNow);
 
         if (this.#icon !== null)
-            batcher.submit(this.#icon, contentLayer);
+            batcher.submit(this.#icon, this.#iconTransform, contentLayer, null, this.#contentNow);
 
         if (this.#text !== null)
-            batcher.submit(this.#text, contentLayer);
+            batcher.submit(this.#text, this.#textTransform, contentLayer, null, this.#contentNow);
 
         return true;
     }
@@ -475,11 +488,11 @@ class Button
             return;
 
         if (this.#outlineWidth > 0.0)
-            this.#outline.render();
+            this.#outline.render(this.#shapeTransform, null, this.#outlineNow);
 
-        this.#background.render();
-        this.#icon?.render();
-        this.#text?.render();
+        this.#background.render(this.#shapeTransform, null, this.#backgroundNow);
+        this.#icon?.render(this.#iconTransform, null, this.#contentNow);
+        this.#text?.render(this.#textTransform, null, this.#contentNow);
     }
 
     isLoaded() { return this.#isLoaded; }
@@ -574,7 +587,7 @@ class Button
         this.#layout();
     }
 
-    // Places every part about the button's center, scaled by the press shrink, and sets the colors
+    // Places every part about the button's center, scaled by the press shrink
     #layout()
     {
         if (this.#isLoaded === false)
@@ -584,14 +597,7 @@ class Button
         const cx = this.getX() + (this.#width / 2.0);
         const cy = this.getY() + (this.#height / 2.0);
 
-        for (const shape of [this.#outline, this.#background])
-        {
-            shape.setPos(cx, cy, Alignment.kMiddleCenter);
-            shape.setScale(s);
-        }
-
-        this.#outline.setColor(this.#outlineNow);
-        this.#background.setColor(this.#backgroundNow);
+        this.#shapeTransform.set(cx, cy, s, s, 0.0);
 
         // The content, centered: the icon on the left, the text on the right
         const half = this.#contentWidth() / 2.0;
@@ -600,18 +606,14 @@ class Button
         {
             const offset = -half + (this.#icon.getWidth() / 2.0);
 
-            this.#icon.setPos(cx + (offset * s), cy, Alignment.kMiddleCenter);
-            this.#icon.setScale(s);
-            this.#icon.setColor(this.#contentNow);
+            this.#iconTransform.set(cx + (offset * s), cy, s, s, 0.0);
         }
 
         if (this.#text !== null)
         {
             const offset = half - (this.#text.getWidth() / 2.0);
 
-            this.#text.setPos(cx + (offset * s), cy, Alignment.kMiddleCenter);
-            this.#text.setScale(s);
-            this.#text.setColor(this.#contentNow);
+            this.#textTransform.set(cx + (offset * s), cy, s, s, 0.0);
         }
     }
 

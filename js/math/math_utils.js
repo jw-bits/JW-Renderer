@@ -308,7 +308,7 @@ class Interpolator
 
         // Each frame
         slide.update(dt);
-        rect.setPos(slide.getValue().x, slide.getValue().y);
+        piece.setPosition(slide.getValue().x, slide.getValue().y);
 
     Easing.ease(type, t) maps progress (0 - 1) on its own, without an Easing object.
 */

@@ -87,12 +87,16 @@ class SpriteSequence
         s.createSequenceInRect("jump", strip, 1, 4, 0.4);
 
         s.setEventCallback((sprite, event, name) => { if (name === "die") remove(sprite); });
+        s.setAlignment(Alignment.kMiddleCenter);
         s.play("walk");
 
         // Each frame
-        s.update(dt);
-        s.setPos(x, y, Alignment.kMiddleCenter);
-        batcher.submit(s, 2);            // Or s.render()
+        s.update(dt);                    // An Entity holding it does this in its own update()
+        transform.setPosition(x, y);
+        batcher.submit(s, transform, 2); // Or s.render(transform)
+
+    Sharing: a Sprite holds its own place in its sequence, so Entities (or
+    places) that should animate apart each need their own Sprite.
 
     Sprites load from a Texture (the Sprite makes its own Material) or a Material
     built on Sprite.getDefaultShader(), e.g. one shared from MaterialManager.
@@ -387,14 +391,12 @@ class Sprite extends Model2D
     getFrameHeight() { return this.#uvRect.getHeight() * (this.getMaterial()?.getTexture(0)?.getHeight() ?? 0); }
 
     /*
-        Plays its motions (see Entity.update()), then advances the current sequence
-        by dt seconds (times the speed). At most one event is reported per update,
-        even if dt spans several cycles.
+        Advances the current sequence by dt seconds (times the speed). At most one
+        event is reported per update, even if dt spans several cycles. An Entity
+        holding the Sprite calls this from its own update().
     */
     update(dt)
     {
-        super.update(dt);
-
         if (this.#isPlaying === false || this.#sequence === null)
             return;
 
@@ -437,8 +439,11 @@ class Sprite extends Model2D
 
     // *** Model2D ***
 
-    // Always true once loaded: load() only accepts Materials on Sprite's shader
-    canInstance() { return this.isLoaded(); }
+    // Its own Material is always on Sprite's shader (load() only accepts those); another must be too
+    canInstance(material = this.getMaterial())
+    {
+        return (this.isLoaded() === true && material.getShader() === Sprite.getDefaultShader());
+    }
 
     // The frame drawn now, as part of the bound texture: mapped into the atlas for an AtlasSubTexture
     getUVRect()
@@ -448,16 +453,16 @@ class Sprite extends Model2D
     }
 
     // Uploads the frame's UV rect (the captured one from Batcher, or this sprite's own), then draws
-    draw(transform, color, uvRect = null)
+    draw(transform, color, uvRect = null, material = this.getMaterial())
     {
         if (this.isLoaded() === false)
             return;
 
         const r = uvRect ?? this.getUVRect();
         Sprite.#kUVScratch.set(r.getX(), r.getY(), r.getWidth(), r.getHeight());
-        this.getMaterial().setUniform("u_vec1", Sprite.#kUVScratch);
+        material.setUniform("u_vec1", Sprite.#kUVScratch);
 
-        super.draw(transform, color);
+        super.draw(transform, color, null, material);
     }
 
     // Forgets its material and sequences (the quad is shared); the texture belongs to the caller

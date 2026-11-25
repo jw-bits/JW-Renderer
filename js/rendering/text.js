@@ -120,7 +120,7 @@ class TextCanvas
         let digits = new TextAtlas(font, TextAtlas.kDigits + ":", 40, "bold"); // Or kAlphabet, kAscii
 
         let time = new TextGlyphs2D(digits);
-        time.setPos(100, 50, Alignment.kMiddleCenter);
+        time.setAlignment(Alignment.kMiddleCenter);
         time.setText("12:34"); // No drawing; just a new mesh of glyph quads
 
     Glyphs sit side by side by their advance widths; kerning isn't applied.

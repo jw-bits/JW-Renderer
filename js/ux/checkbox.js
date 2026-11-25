@@ -49,6 +49,11 @@ class CheckBox
     #check;         // RoundedRect2D (no texture) or Rect2D (texture)
     #checkTexture;  // Given to load(), or null for a shape check
 
+    // Where each part is drawn: the outline and box by their bottom-left corners, the check by its center
+    #outlineTransform;
+    #boxTransform;
+    #checkTransform;
+
     #size;          // Design units, outline included
     #radius;        // Of the outer corners; 0 is square
     #outlineWidth;
@@ -74,6 +79,10 @@ class CheckBox
         this.#box = new RoundedRect2D();
         this.#check = null;
         this.#checkTexture = null;
+
+        this.#outlineTransform = new Transform2D();
+        this.#boxTransform = new Transform2D();
+        this.#checkTransform = new Transform2D();
 
         this.#size = 0;
         this.#radius = 0;
@@ -192,11 +201,11 @@ class CheckBox
     // *** Colors and outline ***
 
     // Vector4s (copied)
-    setOutlineColor(color) { CheckBox.#copy(this.#outlineColor, color); this.#layout(); }
-    setBoxColor(color) { CheckBox.#copy(this.#boxColor, color); this.#layout(); }
+    setOutlineColor(color) { CheckBox.#copy(this.#outlineColor, color); }
+    setBoxColor(color) { CheckBox.#copy(this.#boxColor, color); }
 
     // The shape check's color, or the texture check's tint
-    setCheckColor(color) { CheckBox.#copy(this.#checkColor, color); this.#layout(); }
+    setCheckColor(color) { CheckBox.#copy(this.#checkColor, color); }
 
     getOutlineColor() { return this.#outlineColor; }
     getBoxColor() { return this.#boxColor; }
@@ -278,11 +287,11 @@ class CheckBox
         if (this.#isLoaded === false)
             return false;
 
-        batcher.submit(this.#outline, layer);
-        batcher.submit(this.#box, layer);
+        batcher.submit(this.#outline, this.#outlineTransform, layer, null, this.#outlineColor);
+        batcher.submit(this.#box, this.#boxTransform, layer, null, this.#boxColor);
 
         if (this.#isChecked === true)
-            batcher.submit(this.#check, checkLayer);
+            batcher.submit(this.#check, this.#checkTransform, checkLayer, null, this.#checkColor);
 
         return true;
     }
@@ -293,11 +302,11 @@ class CheckBox
         if (this.#isLoaded === false)
             return;
 
-        this.#outline.render();
-        this.#box.render();
+        this.#outline.render(this.#outlineTransform, null, this.#outlineColor);
+        this.#box.render(this.#boxTransform, null, this.#boxColor);
 
         if (this.#isChecked === true)
-            this.#check.render();
+            this.#check.render(this.#checkTransform, null, this.#checkColor);
     }
 
     isLoaded() { return this.#isLoaded; }
@@ -349,6 +358,7 @@ class CheckBox
         if (this.#checkTexture !== null)
         {
             this.#check = new Rect2D();
+            this.#check.setAlignment(Alignment.kMiddleCenter);
                 return this.#check.load(this.#checkTexture, inner, inner);
         }
 
@@ -358,10 +368,11 @@ class CheckBox
         const checkRadius = (innerRadius > 0.0) ? innerRadius * CheckBox.kCheckFill : c * CheckBox.#kSquareCheckRadius;
 
         this.#check = new RoundedRect2D();
+        this.#check.setAlignment(Alignment.kMiddleCenter);
             return this.#check.load(m, c, c, checkRadius, CheckBox.#kSegments);
     }
 
-    // Places every part and sets its color
+    // Places every part
     #layout()
     {
         if (this.#isLoaded === false)
@@ -372,14 +383,9 @@ class CheckBox
         const t = this.#outlineWidth;
         const center = this.#size / 2.0;
 
-        this.#outline.setPos(x, y);
-        this.#outline.setColor(this.#outlineColor);
-
-        this.#box.setPos(x + t, y + t);
-        this.#box.setColor(this.#boxColor);
-
-        this.#check.setPos(x + center, y + center, Alignment.kMiddleCenter);
-        this.#check.setColor(this.#checkColor);
+        this.#outlineTransform.setPosition(x, y);
+        this.#boxTransform.setPosition(x + t, y + t);
+        this.#checkTransform.setPosition(x + center, y + center);
     }
 
     // *** Static Internal Helpers ***

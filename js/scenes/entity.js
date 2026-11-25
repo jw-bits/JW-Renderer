@@ -2,8 +2,30 @@
 
 /*
     Entity - Something placed in the world: a name, a local transform and a
-    place in a parent / child hierarchy. Model2D and Camera2D are Entities,
-    and a plain Entity works as an empty group to move things together.
+    place in a parent / child hierarchy, with an optional model (drawn at its
+    world transform) and motion. Camera2D is an Entity, and an Entity without
+    a model works as an empty group to move things together.
+
+    Model: setModel(model) gives it a Model2D (Rect2D, Sprite, Text2D, ...),
+    drawn at its world transform by render() and submit(). Its position is
+    the model's anchor (see Model2D.setAlignment()). A model doesn't belong to
+    the Entity: several can share one (each drawn at its own place), and
+    unloading it is the caller's job. A shared Sprite steps its frames once
+    per holder's update(), so give each its own Sprite.
+
+    Color: setColor() is the color its model is drawn with (a model has
+    none of its own), white by default. Entities sharing one model each have
+    their own (a red and a black piece from one white rect), and alpha 0
+    hides it. Motions can move it (MotionChannel.kColor). It's the entity's
+    alone: children don't inherit it.
+
+        let piece = new Entity("piece");
+        piece.setModel(pieceRect);            // A loaded Rect2D, centered
+        piece.setPosition(400, 300);
+
+        // Each frame
+        root.update(dt);                      // Motion, the model (a Sprite's frames), then the children
+        root.submit(batcher, layer);          // Or root.render(); the children too
 
     Local and world: the transform (getTransform(), changed with
     setPosition(), setScale(), setRotation() or setTransform()) is relative to
@@ -12,7 +34,7 @@
     or scaling a parent carries all its children, grandchildren and so on.
 
         let ship = new Entity("ship");
-        ship.addChild(hull);                  // A Rect2D
+        ship.addChild(hull);                  // Entities with models
         ship.addChild(turret);
         turret.setPosition(0, 40);            // Relative to the ship
         ship.setPosition(500, 300);           // Moves the hull and turret too
@@ -36,16 +58,26 @@
     it in the hierarchy, and removing a parent doesn't unload its children.
 
     Motion: an entity can have a MotionController (js/motion), made with
-    enableMotion(). update(dt) updates it, if there is one, then each child's
-    update(dt), unless setUpdatesChildren(false). Call update() on the roots
-    only, or children with motion move twice a frame.
+    addMotion(). update(dt) updates it, if there is one, then its model's
+    update(dt) if the model has one (a Sprite), then each child's update(dt),
+    unless setUpdatesChildren(false). Call update() on the roots only, or
+    children with motion move twice a frame.
 
-        let motion = rect.enableMotion();
+        let motion = piece.addMotion();
         motion.add("pulse", pulse, MotionPlayStyle.kPingPongLoop);
         motion.play("pulse");
 
         // Each frame
-        root.update(dt);                      // rect too, if it's under root
+        root.update(dt);                      // piece too, if it's under root
+
+    Extending: update(), render() and submit() are meant to be overridden
+    by an application's own Entities; call super's to keep the motion, the
+    model and the children.
+
+        class Ship extends Entity
+        {
+            update(dt) { this.#steer(dt); super.update(dt); }
+        }
 */
 class Entity
 {
@@ -64,8 +96,11 @@ class Entity
     #worldVersion;       // Goes up whenever the world transform changes
     #builtLocalVersion;  // The #localVersion the world transform was last worked out for
     #builtParentVersion; // The parent's world version it was last worked out for
-    #motion;             // MotionController or null (see enableMotion())
+    #motion;             // MotionController or null (see addMotion())
     #updatesChildren;    // update() also updates the children
+    #model;              // Model2D drawn at the world transform, or null
+    #modelMaterial;      // Material to draw the model with, or null for its own
+    #color;              // Vector4 the model is drawn with
 
     constructor(_name = "")
     {
@@ -80,6 +115,9 @@ class Entity
         this.#builtParentVersion = -1;
         this.#motion = null;
         this.#updatesChildren = true;
+        this.#model = null;
+        this.#modelMaterial = null;
+        this.#color = new Vector4(1, 1, 1, 1);
     }
 
     // Returns false (keeping the old name) if name isn't a string
@@ -302,10 +340,71 @@ class Entity
     // World transforms worked out since the page loaded; take the difference between two calls for a frame's
     static getWorldBuildCount() { return Entity.#worldBuilds; }
 
-    // *** Motion and Updating ***
+    // *** Model ***
+
+    /*
+        model (a Model2D) is drawn at this entity's world transform by render() and
+        submit(); null removes it. material draws it instead of its own (see
+        Model2D.render()), or null for its own. The model isn't copied or owned.
+        Returns false (changing nothing) if model isn't a Model2D or null.
+    */
+    setModel(model, material = null)
+    {
+        if (model !== null && (model instanceof Model2D) === false)
+        {
+            console.error("Entity.setModel() needs a Model2D (Rect2D, Sprite, Text2D, ...) or null");
+                return false;
+        }
+
+        if (material !== null && (material instanceof Material) === false)
+        {
+            console.error("Entity.setModel() needs a Material or null for the material");
+                return false;
+        }
+
+        this.#model = model;
+        this.#modelMaterial = material;
+            return true;
+    }
+
+    // The Model2D, or null without one
+    getModel() { return this.#model; }
+
+    // The Material set with setModel(), or null if the model draws with its own
+    getModelMaterial() { return this.#modelMaterial; }
+
+    // The color the model is drawn with: a Vector4 (copied), (r, g, b, a) 0 - 1. Returns false (and changes nothing) if it isn't one.
+    setColor(color)
+    {
+        if ((color instanceof Vector4) === false)
+        {
+            console.error("Entity.setColor() needs a Vector4");
+                return false;
+        }
+
+        this.#color.set(color.x, color.y, color.z, color.w);
+            return true;
+    }
+
+    // Read-only; change it with setColor()
+    getColor() { return this.#color; }
+
+    // False while its model isn't loaded (motion waits for it); true without a model
+    isReady() { return (this.#model === null || this.#model.isLoaded() === true); }
+
+    // True if point (a Vector2, world design units) is inside its model where it's drawn; false without a model
+    containsPoint(point)
+    {
+        if (this.#model === null || this.#model.isLoaded() === false)
+            return false;
+
+        return this.#model.containsPoint(this.getWorldTransform(), point);
+    }
+
+    // *** Motion, Updating and Drawing ***
 
     // The entity's MotionController, made the first time this is called
-    enableMotion()
+    addMotion()
     {
         if (this.#motion === null)
             this.#motion = new MotionController(this);
@@ -314,7 +413,7 @@ class Entity
     }
 
     // Drops the MotionController, leaving the entity where its motions put it
-    disableMotion() { this.#motion = null; }
+    removeMotion() { this.#motion = null; }
 
     // The MotionController, or null without one
     getMotion() { return this.#motion; }
@@ -325,19 +424,43 @@ class Entity
 
     /*
         Moves the entity's motions dt seconds on (if it has a MotionController),
-        then updates each child, unless setUpdatesChildren(false). Subclasses
-        that override it call super.update(dt) first.
+        updates its model if the model has an update() (a Sprite's frames), then
+        updates each child, unless setUpdatesChildren(false). Subclasses that
+        override it call super.update(dt).
     */
     update(dt)
     {
         if (this.#motion !== null)
             this.#motion.update(dt);
 
+        if (this.#model !== null && typeof this.#model.update === "function")
+            this.#model.update(dt);
+
         if (this.#updatesChildren === true)
         {
             for (const child of this.#children)
                 child.update(dt);
         }
+    }
+
+    // Draws its model (if it has a loaded one) at its world transform right away, then each child's render()
+    render()
+    {
+        if (this.#model !== null && this.#model.isLoaded() === true)
+            this.#model.render(this.getWorldTransform(), this.#modelMaterial, this.#color);
+
+        for (const child of this.#children)
+            child.render();
+    }
+
+    // Queues its model (if it has a loaded one) at its world transform on a Batcher layer, then each child's submit()
+    submit(batcher, layer = 0)
+    {
+        if (this.#model !== null && this.#model.isLoaded() === true)
+            batcher.submit(this.#model, this.getWorldTransform(), layer, this.#modelMaterial, this.#color);
+
+        for (const child of this.#children)
+            child.submit(batcher, layer);
     }
 
     // *** Subclass Methods ***

@@ -10,7 +10,7 @@
 
     Usage:
         let hop = new MotionChain([rise, fall]); // MotionActions
-        checker.enableMotion().add("hop", hop);
+        checker.addMotion().add("hop", hop);     // checker is an Entity
 
     The chain holds the play time, not its actions, so an action can be in
     several chains, or more than once in one. Changes to the actions show
@@ -83,7 +83,7 @@ class MotionChain extends MotionBase
     }
 
     /*
-        Writes the moved channels seconds in into out (a Transform2D) and
+        Writes the moved channels seconds in into out (a MotionState) and
         returns it. The action holding that time is part way; the ones before
         it are at their targets. A channel only later actions move is at the
         start of the first of them, so the result depends on the time alone

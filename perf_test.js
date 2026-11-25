@@ -369,39 +369,48 @@ function buildScene()
 
     // *** Models ***
 
+    // Each model is drawn at its own Transform2D (no Entity needed); centered, so it turns and scales about its middle
     let rect = new Rect2D();
     rect.load(t.rect, 200, 200);
+    rect.setAlignment(Alignment.kMiddleCenter);
+    let rectAt = new Transform2D();
 
     items.push({ label: "Rect2D - rotating",
-                 place: (x, y) => rect.setPos(x, y, Alignment.kMiddleCenter),
-                 update: (dt, time) => rect.setRotation(time * 0.6),
-                 submit: () => gBatcher.submit(rect, Layers.kShapes) });
+                 place: (x, y) => rectAt.setPosition(x, y),
+                 update: (dt, time) => rectAt.setRotation(time * 0.6),
+                 submit: () => gBatcher.submit(rect, rectAt, Layers.kShapes) });
 
     let rounded = new RoundedRect2D();
     rounded.load(t.circle, 300, 200, 40);
+    rounded.setAlignment(Alignment.kMiddleCenter);
+    let roundedAt = new Transform2D();
 
     items.push({ label: "RoundedRect2D - pulsing scale",
-                 place: (x, y) => rounded.setPos(x, y, Alignment.kMiddleCenter),
-                 update: (dt, time) => rounded.setScale(1.0 + (0.15 * Math.sin(time * 2.0))),
-                 submit: () => gBatcher.submit(rounded, Layers.kShapes) });
+                 place: (x, y) => roundedAt.setPosition(x, y),
+                 update: (dt, time) => roundedAt.setScale(1.0 + (0.15 * Math.sin(time * 2.0))),
+                 submit: () => gBatcher.submit(rounded, roundedAt, Layers.kShapes) });
 
     let ninePatch = new NinePatch2D();
     ninePatch.load(t.ninePatch, 380, 180, new UVRect(0.3, 0.3, 0.4, 0.4));
+    ninePatch.setAlignment(Alignment.kMiddleCenter);
+    let ninePatchAt = new Transform2D();
 
     items.push({ label: "NinePatch2D - stretched, borders kept",
-                 place: (x, y) => ninePatch.setPos(x, y, Alignment.kMiddleCenter),
-                 update: (dt, time) => ninePatch.setRotation(0.15 * Math.sin(time * 1.3)),
-                 submit: () => gBatcher.submit(ninePatch, Layers.kShapes) });
+                 place: (x, y) => ninePatchAt.setPosition(x, y),
+                 update: (dt, time) => ninePatchAt.setRotation(0.15 * Math.sin(time * 1.3)),
+                 submit: () => gBatcher.submit(ninePatch, ninePatchAt, Layers.kShapes) });
 
     let sprite = new Sprite();
     sprite.load(makeSpriteStrip(), 200, 200, 1, 4);
+    sprite.setAlignment(Alignment.kMiddleCenter);
     sprite.createSequence("count", 0, 0, 0, 3, 1.2);
     sprite.play("count");
+    let spriteAt = new Transform2D();
 
     items.push({ label: "Sprite - frame animation",
-                 place: (x, y) => sprite.setPos(x, y, Alignment.kMiddleCenter),
+                 place: (x, y) => spriteAt.setPosition(x, y),
                  update: (dt) => sprite.update(dt),
-                 submit: () => gBatcher.submit(sprite, Layers.kShapes) });
+                 submit: () => gBatcher.submit(sprite, spriteAt, Layers.kShapes) });
 
     // *** Particles ***
 
@@ -442,21 +451,24 @@ function buildScene()
     text.setRasterizedShadowColor(Colors.kShadow);
     text.setDropShadowOffset(3, -3);
     text.setDropShadowEnabled(true);
+    text.setAlignment(Alignment.kMiddleCenter);
     text.setText(TEXT_TEXT2D);
+    let textAt = new Transform2D();
 
     items.push({ label: "Text2D - rasterized, drop shadow",
-                 place: (x, y) => text.setPos(x, y, Alignment.kMiddleCenter),
+                 place: (x, y) => textAt.setPosition(x, y),
                  update: () => { },
-                 submit: () => gBatcher.submit(text, Layers.kText) });
+                 submit: () => gBatcher.submit(text, textAt, Layers.kText) });
 
     // One atlas for every TextGlyphs2D
     const atlas = new TextAtlas(font, TEXT_GLYPHS + TEXT_WAVE + TEXT_FADE + TEXT_EASE + TEXT_SCROLL, 72, "bold");
     const glyphs = makeGlyphs(atlas, TEXT_GLYPHS);
+    let glyphsAt = new Transform2D();
 
     items.push({ label: "TextGlyphs2D - text from a glyph atlas",
-                 place: (x, y) => glyphs.setPos(x, y, Alignment.kMiddleCenter),
+                 place: (x, y) => glyphsAt.setPosition(x, y),
                  update: () => { },
-                 submit: () => gBatcher.submit(glyphs, Layers.kText) });
+                 submit: () => gBatcher.submit(glyphs, glyphsAt, Layers.kText, null, Colors.kText) });
 
     // *** Text effects, each on its own TextGlyphs2D ***
 
@@ -676,16 +688,20 @@ function buildScene()
     const shader = Rect2D.getDefaultShader();
 
     // Bloom: orbs drawn additively (BlendMode.kAdditive) so overlaps go over 1, kept by a half-float target
+    // Drawn at a scratch transform, moved between submits (the batcher copies it)
+    let at = new Transform2D();
+
     let backdrop = new Rect2D();
     backdrop.load(white, POST_VIEW.x, POST_VIEW.y);
-    backdrop.setColor(Colors.kTileDark);
+    backdrop.setAlignment(Alignment.kMiddleCenter);
 
     let orb = new Rect2D();
     orb.load(MaterialManager.load(shader, [t.circle], null, BlendMode.kAdditive), 110, 110);
+    orb.setAlignment(Alignment.kMiddleCenter);
 
     let bar = new Rect2D();
     bar.load(white, 300, 24);
-    bar.setColor(Colors.kGold);
+    bar.setAlignment(Alignment.kMiddleCenter);
 
     let bloom = new BloomEffect();
     bloom.set(0.6, 0.25, 1.4);
@@ -693,43 +709,36 @@ function buildScene()
 
     items.push(makePostItem("BloomEffect - additive orbs, HDR target", bloom, RenderTarget.kRGBA16F, () => { },
         (batcher, c, time) => {
-            backdrop.setPos(c.x, c.y, Alignment.kMiddleCenter);
-            batcher.submit(backdrop, 0);
-
-            bar.setPos(c.x, c.y - 95, Alignment.kMiddleCenter);
-            batcher.submit(bar, 1);
+            batcher.submit(backdrop, at.identity().setPosition(c.x, c.y), 0, null, Colors.kTileDark);
+            batcher.submit(bar, at.setPosition(c.x, c.y - 95), 1, null, Colors.kGold);
 
             for (let i = 0; i < 5; ++i)
             {
                 const a = (time * 0.9) + ((i * MathDefines.kTwoPi) / 5.0);
-                orb.setColor(Colors.kParticles[i % Colors.kParticles.length]);
-                orb.setPos(c.x + (Math.cos(a) * 150), c.y + 25 + (Math.sin(a) * 55), Alignment.kMiddleCenter);
-                batcher.submit(orb, 2);
+                batcher.submit(orb, at.setPosition(c.x + (Math.cos(a) * 150), c.y + 25 + (Math.sin(a) * 55)), 2, null,
+                               Colors.kParticles[i % Colors.kParticles.length]);
             }
         }));
 
     // Blur: a turning rect and dots, the blur's radius pulsing
     let blurRect = new Rect2D();
     blurRect.load(t.rect, 170, 170);
+    blurRect.setAlignment(Alignment.kMiddleCenter);
 
     let dot = new Rect2D();
     dot.load(t.circle, 70, 70);
+    dot.setAlignment(Alignment.kMiddleCenter);
 
     let blur = new BlurEffect();
 
     items.push(makePostItem("BlurEffect - radius pulsing, half size", blur, RenderTarget.kRGBA8,
         (dt, time) => blur.set(0.3 + (1.7 * (0.5 + (0.5 * Math.sin(time * 1.5))))),
         (batcher, c, time) => {
-            blurRect.setPos(c.x, c.y, Alignment.kMiddleCenter);
-            blurRect.setRotation(time * 0.5);
-            batcher.submit(blurRect, 0);
+            batcher.submit(blurRect, at.identity().setPosition(c.x, c.y).setRotation(time * 0.5), 0);
+            at.identity();
 
             for (let i = 0; i < 3; ++i)
-            {
-                dot.setColor(Colors.kParticles[i]);
-                dot.setPos(c.x + ((i - 1) * 180), c.y - 60, Alignment.kMiddleCenter);
-                batcher.submit(dot, 1);
-            }
+                batcher.submit(dot, at.setPosition(c.x + ((i - 1) * 180), c.y - 60), 1, null, Colors.kParticles[i]);
         }));
 
     // Screen effect: a checkered panel and a turning rect, graded, vignetted and on a curved, scanned tube
@@ -738,6 +747,7 @@ function buildScene()
 
     let screenRect = new Rect2D();
     screenRect.load(t.rect, 150, 150);
+    screenRect.setAlignment(Alignment.kMiddleCenter);
 
     let screen = new ScreenEffect();
     screen.setCurvature(0.15);
@@ -754,19 +764,18 @@ function buildScene()
             const left = c.x - (POST_VIEW.x / 2.0);
             const bottom = c.y - (POST_VIEW.y / 2.0);
 
+            at.identity();
+
             for (let r = 0; r < rows; ++r)
             {
                 for (let col = 0; col < cols; ++col)
                 {
-                    panelTile.setColor(((r + col) % 2 === 0) ? Colors.kTileLight : Colors.kTileDark);
-                    panelTile.setPos(left + (col * 66), bottom + (r * 66));
-                    batcher.submit(panelTile, 0);
+                    const color = ((r + col) % 2 === 0) ? Colors.kTileLight : Colors.kTileDark;
+                    batcher.submit(panelTile, at.setPosition(left + (col * 66), bottom + (r * 66)), 0, null, color);
                 }
             }
 
-            screenRect.setPos(c.x, c.y, Alignment.kMiddleCenter);
-            screenRect.setRotation(time * -0.4);
-            batcher.submit(screenRect, 1);
+            batcher.submit(screenRect, at.setPosition(c.x, c.y).setRotation(time * -0.4), 1);
         }));
 
     // *** Entities ***
@@ -787,10 +796,10 @@ function buildScene()
         item.page = Math.floor(i / ITEMS_PER_PAGE);
         item.place(x, cellBottom + (CELL_H / 2.0) + ITEM_RAISE);
 
-        item.labelText = new TextGlyphs2D(labelAtlas);
-        item.labelText.setColor(Colors.kLabel);
-        item.labelText.setPos(x, cellBottom + LABEL_Y, Alignment.kMiddleCenter);
+        item.labelText = new TextGlyphs2D(labelAtlas); // Drawn in Colors.kLabel
+        item.labelText.setAlignment(Alignment.kMiddleCenter);
         item.labelText.setText(item.label);
+        item.labelAt = new Transform2D(x, cellBottom + LABEL_Y);
     }
 
     gPages.count = Math.ceil(items.length / ITEMS_PER_PAGE);
@@ -800,19 +809,22 @@ function buildScene()
     gScene.time = 0.0;
 }
 
+// Centered on where it's drawn
 function makeGlyphs(atlas, str)
 {
     let g = new TextGlyphs2D(atlas);
-    g.setColor(Colors.kText);
+    g.setAlignment(Alignment.kMiddleCenter);
     g.setText(str);
         return g;
 }
 
-// A text effect as a test item; it's placed by its TextGlyphs2D
+// A text effect as a test item; the effect draws its TextGlyphs2D at its own position
 function makeEffectItem(label, effect)
 {
+    effect.setTextColor(Colors.kText);
+
     return { label: label,
-             place: (x, y) => effect.getGlyphs().setPos(x, y, Alignment.kMiddleCenter),
+             place: (x, y) => effect.setPosition(x, y),
              update: (dt) => effect.update(dt),
              submit: () => effect.submit(gBatcher, Layers.kEffects) };
 }
@@ -823,7 +835,9 @@ function makeEffectItem(label, effect)
 */
 function makeLitItem(label, model, lights, dotTexture, rocks)
 {
-    let center = new Vector2();
+    let modelAt = new Transform2D();
+    let dotAt = new Transform2D();
+    model.setAlignment(Alignment.kMiddleCenter);
 
     let lamp = new PointLight(0, 0, LAMP_Z, LAMP_RANGE);
     lamp.setColor(LAMP_COLOR);
@@ -831,27 +845,25 @@ function makeLitItem(label, model, lights, dotTexture, rocks)
 
     let dot = new Rect2D();
     dot.load(dotTexture, 24, 24);
-    dot.setColor(new Vector4(LAMP_COLOR.x, LAMP_COLOR.y, LAMP_COLOR.z, 1.0));
+    dot.setAlignment(Alignment.kMiddleCenter);
+    const dotColor = new Vector4(LAMP_COLOR.x, LAMP_COLOR.y, LAMP_COLOR.z, 1.0);
 
     return { label: label,
-             place: (x, y) => {
-                 center.set(x, y);
-                 model.setPos(x, y, Alignment.kMiddleCenter);
-             },
+             place: (x, y) => modelAt.setPosition(x, y),
              update: (dt, time) => {
                  const a = time * LAMP_SPEED;
-                 const lx = center.x + (Math.cos(a) * LAMP_RADIUS);
-                 const ly = center.y + (Math.sin(a) * LAMP_RADIUS * 0.5);
+                 const lx = modelAt.getX() + (Math.cos(a) * LAMP_RADIUS);
+                 const ly = modelAt.getY() + (Math.sin(a) * LAMP_RADIUS * 0.5);
 
                  lamp.setPosition(lx, ly, LAMP_Z);
-                 dot.setPos(lx, ly, Alignment.kMiddleCenter);
+                 dotAt.setPosition(lx, ly);
 
                  if (rocks === true)
-                     model.setRotation(0.12 * Math.sin(time * 0.9));
+                     modelAt.setRotation(0.12 * Math.sin(time * 0.9));
              },
              submit: () => {
-                 gBatcher.submit(model, Layers.kLit);
-                 gBatcher.submit(dot, Layers.kParticles); // Unlit, on top
+                 gBatcher.submit(model, modelAt, Layers.kLit);
+                 gBatcher.submit(dot, dotAt, Layers.kParticles, null, dotColor); // Unlit, on top
              } };
 }
 
@@ -881,16 +893,18 @@ function makeCameraItem(world, dotTexture)
 
     let border = new Rect2D();
     border.load(white, CAMERA_VIEW.x + (CAMERA_BORDER * 2), CAMERA_VIEW.y + (CAMERA_BORDER * 2));
-    border.setColor(Colors.kLabel);
+    border.setAlignment(Alignment.kMiddleCenter);
 
     let backdrop = new Rect2D();
     backdrop.load(white, CAMERA_VIEW.x, CAMERA_VIEW.y);
-    backdrop.setColor(Colors.kBackground);
+    backdrop.setAlignment(Alignment.kMiddleCenter);
 
     let cursor = new Rect2D();
     cursor.load(dotTexture, 20, 20);
-    cursor.setColor(Colors.kGold);
+    cursor.setAlignment(Alignment.kMiddleCenter);
 
+    let frameAt = new Transform2D();  // The border and backdrop, centered in the slot
+    let cursorAt = new Transform2D(); // World units
     const viewport = new Vector4();
     const pointer = new Vector2();
     let showCursor = false;
@@ -901,8 +915,7 @@ function makeCameraItem(world, dotTexture)
         label: "Camera2D - A/D pan, W/S zoom, E shake",
         place: (x, y) => {
             camera.setViewport(x - (CAMERA_VIEW.x / 2.0), y - (CAMERA_VIEW.y / 2.0), CAMERA_VIEW.x, CAMERA_VIEW.y);
-            border.setPos(x, y, Alignment.kMiddleCenter);
-            backdrop.setPos(x, y, Alignment.kMiddleCenter);
+            frameAt.setPosition(x, y);
         },
         update: (dt, time) => {
             // Keys, only while its page is showing
@@ -940,18 +953,18 @@ function makeCameraItem(world, dotTexture)
                 if (p.x >= v.x && p.x <= v.x + v.z && p.y >= v.y && p.y <= v.y + v.w)
                 {
                     camera.screenToWorld(p, pointer);
-                    cursor.setPos(pointer.x, pointer.y, Alignment.kMiddleCenter);
+                    cursorAt.setPosition(pointer.x, pointer.y);
                     showCursor = true;
                 }
             }
         },
         submit: () => {
-            batcher.submit(border, 0);
-            batcher.submit(backdrop, 0);
+            batcher.submit(border, frameAt, 0, null, Colors.kLabel);
+            batcher.submit(backdrop, frameAt, 0, null, Colors.kBackground);
             world.submit(batcher, 1);
 
             if (showCursor === true)
-                batcher.submit(cursor, 2);
+                batcher.submit(cursor, cursorAt, 2, null, Colors.kGold);
 
             gBatcher.submitDrawable(drawable, Layers.kShapes);
         },
@@ -967,12 +980,14 @@ function makeCameraWorld(arrowTexture)
     const white = TextureManager.getWhiteTexture();
     const size = CAMERA_TILE * CAMERA_TILES;
 
-    let tile = new Rect2D(); // Submitted once per tile, moved and recolored in between
+    let tile = new Rect2D(); // Submitted once per tile, each in its own color, at a moving transform
     tile.load(white, CAMERA_TILE, CAMERA_TILE);
+    let tileAt = new Transform2D();
 
     let arrow = new Rect2D();
     arrow.load(arrowTexture, CAMERA_TILE * 2, CAMERA_TILE * 2);
-    arrow.setPos(size / 2.0, size / 2.0, Alignment.kMiddleCenter);
+    arrow.setAlignment(Alignment.kMiddleCenter);
+    const arrowAt = new Transform2D(size / 2.0, size / 2.0);
 
     return {
         size: size,
@@ -981,13 +996,12 @@ function makeCameraWorld(arrowTexture)
             {
                 for (let c = 0; c < CAMERA_TILES; ++c)
                 {
-                    tile.setColor(((r + c) % 2 === 0) ? Colors.kTileLight : Colors.kTileDark);
-                    tile.setPos(c * CAMERA_TILE, r * CAMERA_TILE);
-                    batcher.submit(tile, layer);
+                    const color = ((r + c) % 2 === 0) ? Colors.kTileLight : Colors.kTileDark;
+                    batcher.submit(tile, tileAt.setPosition(c * CAMERA_TILE, r * CAMERA_TILE), layer, null, color);
                 }
             }
 
-            batcher.submit(arrow, layer);
+            batcher.submit(arrow, arrowAt, layer);
         }
     };
 }
@@ -1038,9 +1052,13 @@ function makePostItem(label, effect, format, update, draw)
     each planet, where only the pivots are turned. The system is the root; each
     planet's pivot (an empty Entity) is a child of it and each planet a child
     of its pivot, so it's carried round and turns with it (its arrow always
-    points out). Each moon (a plain rect) has a pivot that's a child of its
-    planet, so it follows the planet, turning as it circles and pulsing its
-    own scale. The root breathes and rocks, carrying everything under it.
+    points out). Each moon has a pivot that's a child of its planet, so it
+    follows the planet, turning as it circles and pulsing its own scale. The
+    root breathes and rocks, carrying everything under it.
+
+    The planets, sun and moons are Entities holding models (Entity.setModel()),
+    and every moon draws the same Rect2D, each at its own place. The root's
+    submit() queues every model in the tree.
 
     The pulse, rock and breathe are motions (MotionControllers) ping-ponging
     forever; the root's update(dt) plays its own and, through its children,
@@ -1052,9 +1070,20 @@ function makeHierarchyItem(circleTexture, arrowTexture)
     const easing = Easing.kSineInOut;
     let system = new Entity("system");
     let pivots = [];  // { entity, speed, start }
-    let models = [];
+    let drawnCount = 0; // Entities with a model
 
-    let systemMotion = system.enableMotion();
+    // An Entity named name holding model at (x, y) under parent, drawn in color
+    const addBody = (name, model, parent, x, y, color = Vector4.kWhite) => {
+        let body = new Entity(name);
+        body.setModel(model);
+        body.setPosition(x, y);
+        body.setColor(color);
+        parent.addChild(body);
+        ++drawnCount;
+            return body;
+    };
+
+    let systemMotion = system.addMotion();
     systemMotion.add("rock", new MotionAction(new Transform2D(0, 0, 1, 1, -HIERARCHY_ROCK), new Transform2D(0, 0, 1, 1, HIERARCHY_ROCK),
                                               { rotation: { duration: HIERARCHY_ROCK_TIME, easing: easing } }), MotionPlayStyle.kPingPongLoop);
     systemMotion.add("breathe", new MotionAction(new Transform2D(0, 0, 1.0), new Transform2D(0, 0, HIERARCHY_BREATHE),
@@ -1067,13 +1096,15 @@ function makeHierarchyItem(circleTexture, arrowTexture)
     const pulseSmall = new Transform2D(0, 0, 1.0 - HIERARCHY_MOON_PULSE);
     const pulseBig = new Transform2D(0, 0, 1.0 + HIERARCHY_MOON_PULSE);
 
-    let sun = new Rect2D();
-    sun.setName("sun");
-    sun.load(circleTexture, HIERARCHY_SUN_SIZE, HIERARCHY_SUN_SIZE);
-    sun.setColor(Colors.kGold);
-    sun.setPos(0, 0, Alignment.kMiddleCenter);
-    system.addChild(sun);
-    models.push(sun);
+    let sunRect = new Rect2D();
+    sunRect.load(circleTexture, HIERARCHY_SUN_SIZE, HIERARCHY_SUN_SIZE);
+    sunRect.setAlignment(Alignment.kMiddleCenter);
+    addBody("sun", sunRect, system, 0, 0, Colors.kGold);
+
+    // One Rect2D for every moon, drawn at each moon's place
+    let moonRect = new Rect2D();
+    moonRect.load(white, HIERARCHY_MOON_SIZE, HIERARCHY_MOON_SIZE);
+    moonRect.setAlignment(Alignment.kMiddleCenter);
 
     for (let i = 0; i < HIERARCHY_PLANETS.length; ++i)
     {
@@ -1083,14 +1114,12 @@ function makeHierarchyItem(circleTexture, arrowTexture)
         system.addChild(orbit);
         pivots.push({ entity: orbit, speed: p.speed, start: i * 2.1 });
 
-        let planet = new Rect2D();
-        planet.setName(`planet ${i}`);
-        planet.load(arrowTexture, p.size, p.size);
-        planet.setColor(Colors.kParticles[i % Colors.kParticles.length]);
-        planet.setPos(p.radius, 0, Alignment.kMiddleCenter);
+        let planetRect = new Rect2D();
+        planetRect.load(arrowTexture, p.size, p.size);
+        planetRect.setAlignment(Alignment.kMiddleCenter);
+
+        let planet = addBody(`planet ${i}`, planetRect, orbit, p.radius, 0, Colors.kParticles[i % Colors.kParticles.length]);
         planet.setRotation(-MathDefines.kHalfPi); // The arrow points up; this points it away from the sun
-        orbit.addChild(planet);
-        models.push(planet);
 
         // The moon's pivot sits on the planet's anchor (its center); turning the planet above doesn't matter to it
         let moonOrbit = new Entity(`moon orbit ${i}`);
@@ -1098,20 +1127,15 @@ function makeHierarchyItem(circleTexture, arrowTexture)
         planet.addChild(moonOrbit);
         pivots.push({ entity: moonOrbit, speed: p.speed * HIERARCHY_MOON_SPEED, start: MathDefines.kHalfPi });
 
-        let moon = new Rect2D();
-        moon.setName(`moon ${i}`);
-        moon.load(white, HIERARCHY_MOON_SIZE, HIERARCHY_MOON_SIZE);
-        moon.setPos((p.size / 2.0) + HIERARCHY_MOON_SIZE, 0, Alignment.kMiddleCenter);
-        moonOrbit.addChild(moon);
-        models.push(moon);
+        let moon = addBody(`moon ${i}`, moonRect, moonOrbit, (p.size / 2.0) + HIERARCHY_MOON_SIZE, 0);
 
-        let moonMotion = moon.enableMotion();
+        let moonMotion = moon.addMotion();
         moonMotion.add("pulse", new MotionAction(pulseSmall, pulseBig, pulseTiming), MotionPlayStyle.kPingPongLoop);
         moonMotion.play("pulse");
         moon.update(i * HIERARCHY_MOON_PULSE_STAGGER); // Out of step with the others
     }
 
-    return { label: `Entity - ${models.length} models, parented 3 deep`,
+    return { label: `Entity - ${drawnCount} models, parented 3 deep`,
              place: (x, y) => system.setPosition(x, y),
              update: (dt, time) => {
                  for (const pivot of pivots)
@@ -1119,10 +1143,7 @@ function makeHierarchyItem(circleTexture, arrowTexture)
 
                  system.update(dt); // Its rock and breathe, and through its children each moon's pulse
              },
-             submit: () => {
-                 for (const m of models)
-                     gBatcher.submit(m, Layers.kShapes);
-             } };
+             submit: () => system.submit(gBatcher, Layers.kShapes) };
 }
 
 /*
@@ -1146,15 +1167,19 @@ function makeMinimapItem(world, camera)
 
     let view = new Rect2D(); // 1 x 1, scaled to the camera's view each frame
     view.load(white, 1, 1);
-    view.setColor(new Vector4(Colors.kGold.x, Colors.kGold.y, Colors.kGold.z, 0.45));
+    view.setAlignment(Alignment.kMiddleCenter);
+    const viewColor = new Vector4(Colors.kGold.x, Colors.kGold.y, Colors.kGold.z, 0.45);
 
     let map = new Rect2D();
     map.load(MaterialManager.load(Rect2D.getDefaultShader(), [target.getTexture()], null, BlendMode.kPremultiplied), MINIMAP_SIZE, MINIMAP_SIZE);
+    map.setAlignment(Alignment.kMiddleCenter);
 
     let border = new Rect2D();
     border.load(white, MINIMAP_SIZE + (CAMERA_BORDER * 2), MINIMAP_SIZE + (CAMERA_BORDER * 2));
-    border.setColor(Colors.kLabel);
+    border.setAlignment(Alignment.kMiddleCenter);
 
+    let viewAt = new Transform2D();
+    let mapAt = new Transform2D(); // The map and its border, centered in the slot
     const bounds = new Vector4();
 
     const drawable = {
@@ -1167,24 +1192,20 @@ function makeMinimapItem(world, camera)
             world.submit(batcher, 0);
 
             camera.getWorldBounds(bounds);
-            view.setPos(bounds.x + (bounds.z / 2.0), bounds.y + (bounds.w / 2.0), Alignment.kMiddleCenter);
-            view.setScale(bounds.z, bounds.w);
-            batcher.submit(view, 1);
+            viewAt.set(bounds.x + (bounds.z / 2.0), bounds.y + (bounds.w / 2.0), bounds.z, bounds.w, 0.0);
+            batcher.submit(view, viewAt, 1, null, viewColor);
 
             batcher.render();
             RenderTargets.pop();
 
             // ...then the target onto the screen
-            border.render();
-            map.render();
+            border.render(mapAt, null, Colors.kLabel);
+            map.render(mapAt);
         }
     };
 
     return { label: "RenderTarget - minimap of the Camera2D world",
-             place: (x, y) => {
-                 border.setPos(x, y, Alignment.kMiddleCenter);
-                 map.setPos(x, y, Alignment.kMiddleCenter);
-             },
+             place: (x, y) => mapAt.setPosition(x, y),
              update: () => { },
              submit: () => gBatcher.submitDrawable(drawable, Layers.kShapes) };
 }
@@ -1207,6 +1228,7 @@ function makeCachedItem()
 
     let cell = new Rect2D();
     cell.load(TextureManager.getWhiteTexture(), CACHE_CELL.x - 4, CACHE_CELL.y - 4);
+    let cellAt = new Transform2D();
 
     let colors = Array.from({ length: count }, () => new Vector4());
     const recolor = () => colors.forEach((c) => c.set(randomRange(0.2, 1.0), randomRange(0.2, 1.0), randomRange(0.2, 1.0), 1.0));
@@ -1215,9 +1237,8 @@ function makeCachedItem()
     const drawCells = () => {
         for (let i = 0; i < count; ++i)
         {
-            cell.setColor(colors[i]);
-            cell.setPos(origin.x + ((i % CACHE_COLS) * CACHE_CELL.x) + 2, origin.y + (Math.floor(i / CACHE_COLS) * CACHE_CELL.y) + 2);
-            batcher.submit(cell, 0);
+            cellAt.setPosition(origin.x + ((i % CACHE_COLS) * CACHE_CELL.x) + 2, origin.y + (Math.floor(i / CACHE_COLS) * CACHE_CELL.y) + 2);
+            batcher.submit(cell, cellAt, 0, null, colors[i]);
         }
 
         batcher.render();
@@ -1474,11 +1495,11 @@ function installHooks()
     // Sprite.draw() calls super.draw(), which comes here too
     const modelDraw = Model2D.prototype.draw;
 
-    Model2D.prototype.draw = function(transform, color, uvRect = null)
+    Model2D.prototype.draw = function(...args)
     {
         const outer = gStats.drawingModel;
         gStats.drawingModel = this;
-        modelDraw.call(this, transform, color, uvRect);
+        modelDraw.apply(this, args); // Passed on as given, so the defaults (its own Material) still apply
         gStats.drawingModel = outer;
     };
 }
@@ -1644,7 +1665,7 @@ function drawHud()
         for (const item of gScene.items)
         {
             if (item.page === gPages.current)
-                gBatcher.submit(item.labelText, Layers.kLabels);
+                gBatcher.submit(item.labelText, item.labelAt, Layers.kLabels, null, Colors.kLabel);
         }
 
         gBatcher.submitDrawable(gTransitionDrawable, Layers.kLabels);

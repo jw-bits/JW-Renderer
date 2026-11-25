@@ -16,18 +16,21 @@
         fx.setDropShadow(4, -4, new Vector4(0, 0, 0, 0.6));
         fx.setDropShadowEnabled(true);
 
-    The TextGlyphs2D belongs to the caller and keeps its own text, position,
-    alignment and color; the effect works on top of them. The wave, scroll and
-    ease change its glyphs (see TextGlyphs2D.setGlyphOffsets(), setGlyphScales()
-    and setGlyphColors()) in update(), so after setText() they come back on the
-    next update(); stop() puts them back.
+    The TextGlyphs2D belongs to the caller and keeps its own text and
+    alignment; the effect works on top of them, and draws it at its own
+    transform (setPosition() / setTransform(): the text's anchor) in its own
+    color (setTextColor(), white by default). The wave,
+    scroll and ease change its glyphs (see TextGlyphs2D.setGlyphOffsets(),
+    setGlyphScales() and setGlyphColors()) in update(), so after setText()
+    they come back on the next update(); stop() puts them back.
 
     Usage:
         let title = new TextGlyphs2D(textAtlas);
         title.setText("CHECKERS");
-        title.setPos(960, 700, Alignment.kMiddleCenter);
+        title.setAlignment(Alignment.kMiddleCenter);
 
         let fx = new WaveTextEffect(title);
+        fx.setPosition(960, 700);
         fx.set(8, 0.5); // 8 design units, half a cycle per second
 
         // Each frame
@@ -37,6 +40,7 @@
         // Changing effects
         fx.stop();
         fx = new FadeTextEffect(title);
+        fx.setPosition(960, 700);
         fx.fadeOut(1.0);
 
     Subclasses override what they need:
@@ -48,10 +52,12 @@
 class BaseTextEffect
 {
     // Scratch for #draw()
-    static #kSavedColor = new Vector4();
     static #kDrawColor = new Vector4();
+    static #kShadowTransform = new Transform2D();
 
     #glyphs;         // The TextGlyphs2D, or null if it wasn't given one
+    #transform;      // Where the text is drawn: its anchor (see Model2D.setAlignment())
+    #color;          // Vector4 the text is drawn with; its alpha is multiplied by the opacity
     #isShadowOn;     // Drop shadow
     #shadowOffset;   // Vector2, design units
     #shadowColor;    // Vector4; its alpha is multiplied by the opacity
@@ -67,12 +73,30 @@ class BaseTextEffect
             this.#glyphs = null;
         }
 
+        this.#transform = new Transform2D();
+        this.#color = new Vector4(1, 1, 1, 1);
         this.#isShadowOn = false;
         this.#shadowOffset = new Vector2(3, -3);
         this.#shadowColor = new Vector4(0, 0, 0, 0.6);
     }
 
     getGlyphs() { return this.#glyphs; }
+
+    // *** Placement ***
+
+    // Where the text's anchor is drawn, in design units
+    setPosition(x, y) { this.#transform.setPosition(x, y); }
+
+    // Copies transform (a Transform2D): the text's anchor, scale and rotation
+    setTransform(transform) { this.#transform.copy(transform); }
+
+    getTransform() { return this.#transform; } // Read-only; change it with setPosition() or setTransform()
+
+    // *** Color ***
+
+    // The color the text is drawn with, a Vector4 (copied); white by default
+    setTextColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
+    getTextColor() { return this.#color; } // Read-only; change it with setTextColor()
 
     // *** Drop shadow ***
 
@@ -114,10 +138,10 @@ class BaseTextEffect
     }
 
     // Queues the text (and its shadow, behind it) on a Batcher layer
-    submit(batcher, layer) { this.#draw((model) => batcher.submit(model, layer)); }
+    submit(batcher, layer) { this.#draw((model, transform, color) => batcher.submit(model, transform, layer, null, color)); }
 
     // Draws the text (and its shadow, first) right away
-    render() { this.#draw((model) => model.render()); }
+    render() { this.#draw((model, transform, color) => model.render(transform, null, color)); }
 
     // *** Subclass Methods ***
 
@@ -130,7 +154,7 @@ class BaseTextEffect
 
     // *** Internal Methods ***
 
-    // Draws the shadow then the text with drawFn, at the opacity, then puts the text's color and position back
+    // Draws the shadow then the text with drawFn(model, transform, color), at the opacity
     #draw(drawFn)
     {
         const opacity = this._getOpacity();
@@ -139,30 +163,22 @@ class BaseTextEffect
             return;
 
         const g = this.#glyphs;
-        const c = g.getColor();
-        const saved = BaseTextEffect.#kSavedColor;
-        const drawColor = BaseTextEffect.#kDrawColor;
-        saved.set(c.x, c.y, c.z, c.w);
+        const t = this.#transform;
+        const c = this.#color;
+        let drawColor = BaseTextEffect.#kDrawColor; // The batcher copies it, so one is enough
 
         if (this.#isShadowOn === true)
         {
-            const anchor = g.getAnchor();
-            const ax = anchor.x;
-            const ay = anchor.y;
             const s = this.#shadowColor;
+            let shadowTransform = BaseTextEffect.#kShadowTransform; // Copied by the batcher too
 
+            shadowTransform.copy(t).setPosition(t.getX() + this.#shadowOffset.x, t.getY() + this.#shadowOffset.y);
             drawColor.set(s.x, s.y, s.z, s.w * opacity);
-            g.setColor(drawColor);
-            g.setPos(ax + this.#shadowOffset.x, ay + this.#shadowOffset.y, g.getAlignment());
-            drawFn(g);
-            g.setPos(ax, ay, g.getAlignment());
+            drawFn(g, shadowTransform, drawColor);
         }
 
-        drawColor.set(saved.x, saved.y, saved.z, saved.w * opacity);
-        g.setColor(drawColor);
-        drawFn(g);
-
-        g.setColor(saved);
+        drawColor.set(c.x, c.y, c.z, c.w * opacity);
+        drawFn(g, t, drawColor);
     }
 }
 
@@ -344,8 +360,8 @@ class FadeTextEffect extends BaseTextEffect
 /*
     EaseTextEffect - Eases each glyph's color and scale. The color and the
     scale each have their own from / to, easing and duration, and either can
-    be left out. The color multiplies the text's color, so with white text
-    it's the color seen. The scale is about each glyph's own center (1 is its
+    be left out. The color multiplies the effect's text color (see
+    setTextColor()), so with white it's the color seen. The scale is about each glyph's own center (1 is its
     normal size).
 
         let fx = new EaseTextEffect(title);
@@ -400,7 +416,7 @@ class EaseTextEffect extends BaseTextEffect
 
     /*
         The color part of the ease: from and to are Vector4s (copied),
-        multiplied with the text's color; easing is an Easing type, duration
+        multiplied with the text color (setTextColor()); easing is an Easing type, duration
         in seconds. null for from leaves the color out. Takes effect on the
         next play(). Returns false if the values aren't valid.
     */
@@ -627,8 +643,9 @@ class EaseTextEffect extends BaseTextEffect
 /*
     ScrollTextEffect - Scrolls the text through a view rect of viewWidth x
     viewHeight design units, and what leaves one side comes back in on the
-    other. The view is placed where the text is: on its anchor, with its
-    alignment (see Model2D.setPos()). Across the other axis the text sits in
+    other. The view is placed where the text is: on its anchor (the effect's
+    transform), with its alignment (see Model2D.setAlignment()); the
+    transform's scale and rotation aren't used for it. Across the other axis the text sits in
     the view by that alignment too. The text can be wider than the view, or
     taller with line breaks (see TextGlyphs2D); gap is the space between its
     end and its start coming round again.
@@ -650,6 +667,8 @@ class ScrollTextEffect extends BaseTextEffect
     static kRight = 1;
     static kUp = 2;
     static kDown = 3;
+
+    static #kCorner = new Vector2(); // Scratch for #applyOffsets()
 
     #direction;
     #speed;       // Design units per second, 0 or more
@@ -739,7 +758,7 @@ class ScrollTextEffect extends BaseTextEffect
             this.#viewRect.set(0, 0, w, h);
         else
         {
-            const a = g.getAnchor();
+            const a = this.getTransform().getPosition();
             const align = g.getAlignment();
             this.#viewRect.set(a.x + Alignment.offsetX(align, w), a.y + Alignment.offsetY(align, h), w, h);
         }
@@ -812,8 +831,10 @@ class ScrollTextEffect extends BaseTextEffect
 
         let offsets = this.#offsets;
         const view = this.getView();
-        const pos = g.getPos();
         const align = g.getAlignment();
+        const anchor = this.getTransform().getPosition();
+        let pos = ScrollTextEffect.#kCorner; // The text's bottom-left corner
+        pos.set(anchor.x + Alignment.offsetX(align, g.getWidth()), anchor.y + Alignment.offsetY(align, g.getHeight()));
         const horizontal = (this.#direction === ScrollTextEffect.kLeft || this.#direction === ScrollTextEffect.kRight);
         const textLength = horizontal ? g.getWidth() : g.getHeight();
         const viewLength = horizontal ? view.z : view.w;
