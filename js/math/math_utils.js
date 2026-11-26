@@ -1,6 +1,8 @@
 "use strict";
 class MathUtil
 {
+    static #kNumberList = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i; // One number for parseNumberList()
+
     static isPowerOfTwo(x)
     {
         if (Number.isInteger(x) === false)
@@ -58,7 +60,7 @@ class MathUtil
     }
 
     // 1 if v is positive, -1 if negative, otherwise 0 (unlike Math.sign(), -0 and NaN give 0)
-    static signum(v)
+    static sign(v)
     {
         return v > 0 ? 1 : v < 0 ? -1 : 0;
     }
@@ -91,16 +93,14 @@ class MathUtil
 
         for (const part of s.split(/\s*,\s*|\s+/))
         {
-            if (MathUtil.#kNumber.test(part) === false)
+            if (MathUtil.#kNumberList.test(part) === false)
                 return null;
 
             out.push(Number(part));
         }
 
         return out;
-    }
-
-    static #kNumber = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i; // One number for parseNumberList()
+    }    
 
     /*
         Smooth 1D gradient noise, -1 to 1: a wavy line through x that's 0 at every

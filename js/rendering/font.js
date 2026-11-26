@@ -21,7 +21,7 @@
 */
 class Font
 {
-    #kFallbackCss = "sans-serif";
+    static #kFallbackCss = "sans-serif";
 
     #url;
     #family;
@@ -111,7 +111,7 @@ class Font
     isSystem() { return (this.#isLoaded === true && this.#url === null); }
 
     // The family as used in a CSS / canvas font string; falls back to sans-serif until loaded
-    getCssFamily() { return this.#cssFamily ?? this.#kFallbackCss; }
+    getCssFamily() { return this.#cssFamily ?? Font.#kFallbackCss; }
 
     // e.g. toCss(32, "bold") -> 'bold 32px "My Font"'
     toCss(size, weight = "normal")

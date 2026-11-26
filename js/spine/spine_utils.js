@@ -43,7 +43,7 @@
 
     Replaced: MathUtils is the engine's MathDefines and MathUtil. PI, PI2,
     degRad and radDeg are MathDefines.kPi, kTwoPi, kDegToRad and kRadToDeg
-    (Math.PI rather than Spine's 3.1415927); cosDeg(), sinDeg() and signum()
+    (Math.PI rather than Spine's 3.1415927); cosDeg(), sinDeg() and sign()
     are MathUtil's. Its other helpers were never called.
 
     Replaced: Color is the engine's Vector4, with (r, g, b, a) in (x, y, z, w).

@@ -50,8 +50,6 @@ class MotionController
         this.#eventCallback = null;
     }
 
-    getOwner() { return this.#owner; }
-
     // *** Motions ***
 
     /*
@@ -100,6 +98,8 @@ class MotionController
     has(name) { return this.#tracks.has(name); }
     get(name) { return this.#tracks.get(name)?.motion ?? null; } // The MotionAction or MotionChain, or null
     getNames() { return Array.from(this.#tracks.keys()); }
+    getOwner() { return this.#owner; }
+    getPlayStyle(name) { return this.#tracks.get(name)?.playStyle ?? MotionPlayStyle.kOnce; }
 
     // Takes effect from the motion's next end
     setPlayStyle(name, playStyle)
@@ -119,7 +119,8 @@ class MotionController
             return true;
     }
 
-    getPlayStyle(name) { return this.#tracks.get(name)?.playStyle ?? MotionPlayStyle.kOnce; }
+    // callback(controller, name, MotionEvent), or null for none. It may call play(), stop() and the rest.
+    setEventCallback(callback) { this.#eventCallback = (typeof callback === "function") ? callback : null; }    
 
     // *** Playing ***
 
@@ -203,9 +204,6 @@ class MotionController
         return false;
     }
 
-    // callback(controller, name, MotionEvent), or null for none. It may call play(), stop() and the rest.
-    setEventCallback(callback) { this.#eventCallback = (typeof callback === "function") ? callback : null; }
-
     // Moves every playing motion dt seconds on and writes it to the entity. Entity.update() calls this.
     update(dt)
     {
@@ -226,9 +224,6 @@ class MotionController
     }
 
     // *** Internal Methods ***
-
-    // True for an Entity whose model isn't loaded (see Entity.isReady()); one without a model has nothing to load
-    static #isUnloaded(entity) { return (entity.isReady() === false); }
 
     #getTrack(name, methodName)
     {
@@ -317,4 +312,7 @@ class MotionController
 
         return (track.state === state && track.runId === runId && this.#tracks.get(name) === track);
     }
+
+    // True for an Entity whose model isn't loaded (see Entity.isReady()); one without a model has nothing to load
+    static #isUnloaded(entity) { return (entity.isReady() === false); }
 }

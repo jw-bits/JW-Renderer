@@ -1,5 +1,10 @@
 class Vector3
 {
+    // Shared, read-only constants: frozen, and the class property can't be reassigned.
+    // To get a vector you can change, call the matching static method (e.g. Vector3.zero()).
+    static kZero = Object.freeze(new Vector3());
+    static kOne = Object.freeze(new Vector3(1.0, 1.0, 1.0));
+
     constructor(_x = 0.0, _y = 0.0, _z = 0.0)
     {
         this.x = _x;
@@ -105,16 +110,7 @@ class Vector3
 	    return ((this.x * this.x) + (this.y * this.y) + (this.z * this.z));
     }
 
-    // <== Static Methods ==>
-    static add(v1, v2)
-    {
-        return new Vector3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
-    }
-
-    static subtract(v1, v2)
-    {       
-        return new Vector3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
-    }
+    // *** Static Methods ***
 
     // a to b by t, written into out and returned, so nothing new is created
     static lerp(out, a, b, t)
@@ -125,15 +121,8 @@ class Vector3
             return out;
     }
 
-    // *** Static Vars ***
-
-    // Shared, read-only constants: frozen, and the class property can't be reassigned.
-    // To get a vector you can change, call the matching static method (e.g. Vector3.zero()).
-    static kZero = Object.freeze(new Vector3());
-    static kOne = Object.freeze(new Vector3(1.0, 1.0, 1.0));
-
-    // *** Static Methods: new, changeable copies of the constants ***
-
+    static add(v1, v2) { return new Vector3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z); }
+    static subtract(v1, v2) { return new Vector3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z); }
     static zero() { return new Vector3(); }
     static one() { return new Vector3(1.0, 1.0, 1.0); }
 
