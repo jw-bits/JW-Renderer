@@ -117,7 +117,7 @@ class SpineTimeline
     constructor(frameCount, propertyIds)
     {
         this.propertyIds = propertyIds;
-        this.frames = SpineUtils.newFloatArray(frameCount * this.getFrameEntries());
+        this.frames = new Float32Array(frameCount * this.getFrameEntries());
     }
 
     getPropertyIds()
@@ -166,7 +166,7 @@ class SpineCurveTimeline extends SpineTimeline
     constructor(frameCount, bezierCount, propertyIds)
     {
         super(frameCount, propertyIds);
-        this.curves = SpineUtils.newFloatArray(frameCount + bezierCount * 18 /*BEZIER_SIZE*/);
+        this.curves = new Float32Array(frameCount + bezierCount * 18 /*BEZIER_SIZE*/);
         this.curves[frameCount - 1] = 1 /*STEPPED*/;
     }
 
@@ -189,8 +189,8 @@ class SpineCurveTimeline extends SpineTimeline
         let size = this.getFrameCount() + bezierCount * 18 /*BEZIER_SIZE*/;
         if (this.curves.length > size)
         {
-            let newCurves = SpineUtils.newFloatArray(size);
-            SpineUtils.arrayCopy(this.curves, 0, newCurves, 0, size);
+            let newCurves = new Float32Array(size);
+            newCurves.set(this.curves.subarray(0, size));
             this.curves = newCurves;
         }
     }
@@ -1018,10 +1018,14 @@ class SpineRGBATimeline extends SpineCurveTimeline
             switch (blend)
             {
                 case SpineMixBlend.setup:
-                    color.setFromColor(setup);
+                    color.set(setup);
                     return;
                 case SpineMixBlend.first:
-                    color.add((setup.r - color.r) * alpha, (setup.g - color.g) * alpha, (setup.b - color.b) * alpha, (setup.a - color.a) * alpha);
+                    color.x += (setup.x - color.x) * alpha;
+                    color.y += (setup.y - color.y) * alpha;
+                    color.z += (setup.z - color.z) * alpha;
+                    color.w += (setup.w - color.w) * alpha;
+                    color.clamp01();
             }
             return;
         }
@@ -1055,12 +1059,19 @@ class SpineRGBATimeline extends SpineCurveTimeline
                 a = this.getBezierValue(time, i, 4 /*A*/, curveType + 18 /*BEZIER_SIZE*/ * 3 - 2 /*BEZIER*/);
         }
         if (alpha == 1)
-            color.set(r, g, b, a);
+        {
+            color.setRGBA(r, g, b, a);
+            color.clamp01();
+        }
         else
         {
             if (blend == SpineMixBlend.setup)
-                color.setFromColor(slot.data.color);
-            color.add((r - color.r) * alpha, (g - color.g) * alpha, (b - color.b) * alpha, (a - color.a) * alpha);
+                color.set(slot.data.color);
+            color.x += (r - color.x) * alpha;
+            color.y += (g - color.y) * alpha;
+            color.z += (b - color.z) * alpha;
+            color.w += (a - color.w) * alpha;
+            color.clamp01();
         }
     }
 }
@@ -1106,14 +1117,14 @@ class SpineRGBTimeline extends SpineCurveTimeline
             switch (blend)
             {
                 case SpineMixBlend.setup:
-                    color.r = setup.r;
-                    color.g = setup.g;
-                    color.b = setup.b;
+                    color.x = setup.x;
+                    color.y = setup.y;
+                    color.z = setup.z;
                     return;
                 case SpineMixBlend.first:
-                    color.r += (setup.r - color.r) * alpha;
-                    color.g += (setup.g - color.g) * alpha;
-                    color.b += (setup.b - color.b) * alpha;
+                    color.x += (setup.x - color.x) * alpha;
+                    color.y += (setup.y - color.y) * alpha;
+                    color.z += (setup.z - color.z) * alpha;
             }
             return;
         }
@@ -1144,22 +1155,22 @@ class SpineRGBTimeline extends SpineCurveTimeline
         }
         if (alpha == 1)
         {
-            color.r = r;
-            color.g = g;
-            color.b = b;
+            color.x = r;
+            color.y = g;
+            color.z = b;
         }
         else
         {
             if (blend == SpineMixBlend.setup)
             {
                 let setup = slot.data.color;
-                color.r = setup.r;
-                color.g = setup.g;
-                color.b = setup.b;
+                color.x = setup.x;
+                color.y = setup.y;
+                color.z = setup.z;
             }
-            color.r += (r - color.r) * alpha;
-            color.g += (g - color.g) * alpha;
-            color.b += (b - color.b) * alpha;
+            color.x += (r - color.x) * alpha;
+            color.y += (g - color.y) * alpha;
+            color.z += (b - color.z) * alpha;
         }
     }
 }
@@ -1186,21 +1197,21 @@ class SpineAlphaTimeline extends SpineCurveTimeline1
             switch (blend)
             {
                 case SpineMixBlend.setup:
-                    color.a = setup.a;
+                    color.w = setup.w;
                     return;
                 case SpineMixBlend.first:
-                    color.a += (setup.a - color.a) * alpha;
+                    color.w += (setup.w - color.w) * alpha;
             }
             return;
         }
         let a = this.getCurveValue(time);
         if (alpha == 1)
-            color.a = a;
+            color.w = a;
         else
         {
             if (blend == SpineMixBlend.setup)
-                color.a = slot.data.color.a;
-            color.a += (a - color.a) * alpha;
+                color.w = slot.data.color.w;
+            color.w += (a - color.w) * alpha;
         }
     }
 }
@@ -1252,16 +1263,20 @@ class SpineRGBA2Timeline extends SpineCurveTimeline
             switch (blend)
             {
                 case SpineMixBlend.setup:
-                    light.setFromColor(setupLight);
-                    dark.r = setupDark.r;
-                    dark.g = setupDark.g;
-                    dark.b = setupDark.b;
+                    light.set(setupLight);
+                    dark.x = setupDark.x;
+                    dark.y = setupDark.y;
+                    dark.z = setupDark.z;
                     return;
                 case SpineMixBlend.first:
-                    light.add((setupLight.r - light.r) * alpha, (setupLight.g - light.g) * alpha, (setupLight.b - light.b) * alpha, (setupLight.a - light.a) * alpha);
-                    dark.r += (setupDark.r - dark.r) * alpha;
-                    dark.g += (setupDark.g - dark.g) * alpha;
-                    dark.b += (setupDark.b - dark.b) * alpha;
+                    light.x += (setupLight.x - light.x) * alpha;
+                    light.y += (setupLight.y - light.y) * alpha;
+                    light.z += (setupLight.z - light.z) * alpha;
+                    light.w += (setupLight.w - light.w) * alpha;
+                    light.clamp01();
+                    dark.x += (setupDark.x - dark.x) * alpha;
+                    dark.y += (setupDark.y - dark.y) * alpha;
+                    dark.z += (setupDark.z - dark.z) * alpha;
             }
             return;
         }
@@ -1308,25 +1323,30 @@ class SpineRGBA2Timeline extends SpineCurveTimeline
         }
         if (alpha == 1)
         {
-            light.set(r, g, b, a);
-            dark.r = r2;
-            dark.g = g2;
-            dark.b = b2;
+            light.setRGBA(r, g, b, a);
+            light.clamp01();
+            dark.x = r2;
+            dark.y = g2;
+            dark.z = b2;
         }
         else
         {
             if (blend == SpineMixBlend.setup)
             {
-                light.setFromColor(slot.data.color);
+                light.set(slot.data.color);
                 let setupDark = slot.data.darkColor;
-                dark.r = setupDark.r;
-                dark.g = setupDark.g;
-                dark.b = setupDark.b;
+                dark.x = setupDark.x;
+                dark.y = setupDark.y;
+                dark.z = setupDark.z;
             }
-            light.add((r - light.r) * alpha, (g - light.g) * alpha, (b - light.b) * alpha, (a - light.a) * alpha);
-            dark.r += (r2 - dark.r) * alpha;
-            dark.g += (g2 - dark.g) * alpha;
-            dark.b += (b2 - dark.b) * alpha;
+            light.x += (r - light.x) * alpha;
+            light.y += (g - light.y) * alpha;
+            light.z += (b - light.z) * alpha;
+            light.w += (a - light.w) * alpha;
+            light.clamp01();
+            dark.x += (r2 - dark.x) * alpha;
+            dark.y += (g2 - dark.y) * alpha;
+            dark.z += (b2 - dark.z) * alpha;
         }
     }
 }
@@ -1376,20 +1396,20 @@ class SpineRGB2Timeline extends SpineCurveTimeline
             switch (blend)
             {
                 case SpineMixBlend.setup:
-                    light.r = setupLight.r;
-                    light.g = setupLight.g;
-                    light.b = setupLight.b;
-                    dark.r = setupDark.r;
-                    dark.g = setupDark.g;
-                    dark.b = setupDark.b;
+                    light.x = setupLight.x;
+                    light.y = setupLight.y;
+                    light.z = setupLight.z;
+                    dark.x = setupDark.x;
+                    dark.y = setupDark.y;
+                    dark.z = setupDark.z;
                     return;
                 case SpineMixBlend.first:
-                    light.r += (setupLight.r - light.r) * alpha;
-                    light.g += (setupLight.g - light.g) * alpha;
-                    light.b += (setupLight.b - light.b) * alpha;
-                    dark.r += (setupDark.r - dark.r) * alpha;
-                    dark.g += (setupDark.g - dark.g) * alpha;
-                    dark.b += (setupDark.b - dark.b) * alpha;
+                    light.x += (setupLight.x - light.x) * alpha;
+                    light.y += (setupLight.y - light.y) * alpha;
+                    light.z += (setupLight.z - light.z) * alpha;
+                    dark.x += (setupDark.x - dark.x) * alpha;
+                    dark.y += (setupDark.y - dark.y) * alpha;
+                    dark.z += (setupDark.z - dark.z) * alpha;
             }
             return;
         }
@@ -1432,31 +1452,31 @@ class SpineRGB2Timeline extends SpineCurveTimeline
         }
         if (alpha == 1)
         {
-            light.r = r;
-            light.g = g;
-            light.b = b;
-            dark.r = r2;
-            dark.g = g2;
-            dark.b = b2;
+            light.x = r;
+            light.y = g;
+            light.z = b;
+            dark.x = r2;
+            dark.y = g2;
+            dark.z = b2;
         }
         else
         {
             if (blend == SpineMixBlend.setup)
             {
                 let setupLight = slot.data.color, setupDark = slot.data.darkColor;
-                light.r = setupLight.r;
-                light.g = setupLight.g;
-                light.b = setupLight.b;
-                dark.r = setupDark.r;
-                dark.g = setupDark.g;
-                dark.b = setupDark.b;
+                light.x = setupLight.x;
+                light.y = setupLight.y;
+                light.z = setupLight.z;
+                dark.x = setupDark.x;
+                dark.y = setupDark.y;
+                dark.z = setupDark.z;
             }
-            light.r += (r - light.r) * alpha;
-            light.g += (g - light.g) * alpha;
-            light.b += (b - light.b) * alpha;
-            dark.r += (r2 - dark.r) * alpha;
-            dark.g += (g2 - dark.g) * alpha;
-            dark.b += (b2 - dark.b) * alpha;
+            light.x += (r - light.x) * alpha;
+            light.y += (g - light.y) * alpha;
+            light.z += (b - light.z) * alpha;
+            dark.x += (r2 - dark.x) * alpha;
+            dark.y += (g2 - dark.y) * alpha;
+            dark.z += (b2 - dark.z) * alpha;
         }
     }
 }

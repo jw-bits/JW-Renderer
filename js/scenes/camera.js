@@ -155,7 +155,7 @@ class Camera2D extends Entity
         if (this.#viewport === null)
             this.#viewport = new Vector4();
 
-        this.#viewport.set(x, y, width, height);
+        this.#viewport.setXYZW(x, y, width, height);
         this.#changed();
             return true;
     }
@@ -180,7 +180,7 @@ class Camera2D extends Entity
         if (this.#viewport === null)
             ClipSpace.getSurfaceRect(out);
         else
-            out.set(this.#viewport.x, this.#viewport.y, this.#viewport.z, this.#viewport.w);
+            out.set(this.#viewport);
 
         return out;
     }
@@ -198,7 +198,7 @@ class Camera2D extends Entity
         if (this.#worldBounds === null)
             this.#worldBounds = new Vector4();
 
-        this.#worldBounds.set(x, y, width, height);
+        this.#worldBounds.setXYZW(x, y, width, height);
             return true;
     }
 
@@ -230,7 +230,7 @@ class Camera2D extends Entity
 
         this.#target = target;
         this.#smoothing = smoothing;
-        this.#deadZone.set(deadZoneWidth, deadZoneHeight);
+        this.#deadZone.setXY(deadZoneWidth, deadZoneHeight);
             return true;
     }
 
@@ -346,7 +346,7 @@ class Camera2D extends Entity
         const cos = Math.cos(r);
         const sin = Math.sin(r);
 
-        out.set(c.x + (((vx * cos) - (vy * sin)) / this.#zoom),
+        out.setXY(c.x + (((vx * cos) - (vy * sin)) / this.#zoom),
                 c.y + (((vx * sin) + (vy * cos)) / this.#zoom));
             return out;
     }
@@ -362,7 +362,7 @@ class Camera2D extends Entity
         const cos = Math.cos(r);
         const sin = Math.sin(r);
 
-        out.set((v.x + (v.z / 2.0)) + (this.#zoom * ((dx * cos) + (dy * sin))),
+        out.setXY((v.x + (v.z / 2.0)) + (this.#zoom * ((dx * cos) + (dy * sin))),
                 (v.y + (v.w / 2.0)) + (this.#zoom * ((dy * cos) - (dx * sin))));
             return out;
     }
@@ -372,7 +372,7 @@ class Camera2D extends Entity
     {
         const c = this.#getCenter();
         const half = this.#getHalfExtents(this.#getViewRotation());
-            out.set(c.x - half.x, c.y - half.y, half.x * 2.0, half.y * 2.0);
+            out.setXYZW(c.x - half.x, c.y - half.y, half.x * 2.0, half.y * 2.0);
             return out;
     }
 
@@ -425,19 +425,19 @@ class Camera2D extends Entity
         const world = this.getWorldTransform();
         let c = Camera2D.#kCenter;
 
-        c.set(world.getX(), world.getY());
+        c.setXY(world.getX(), world.getY());
 
         if (this.getParent() !== null)
             this.#clampPoint(c); // With no parent, update() already did
 
-        c.set(c.x + this.#shakeOffset.x, c.y + this.#shakeOffset.y);
+        c.setXY(c.x + this.#shakeOffset.x, c.y + this.#shakeOffset.y);
 
         if (this.#isPixelSnap === true)
         {
             const k = this.#zoom * ClipSpace.getSurfaceScale(); // Device pixels per world unit
 
             if (k > 0.0)
-                c.set(Math.round(c.x * k) / k, Math.round(c.y * k) / k);
+                c.setXY(Math.round(c.x * k) / k, Math.round(c.y * k) / k);
         }
 
         return c;
@@ -477,7 +477,7 @@ class Camera2D extends Entity
                                 (-z * ((cos * c.y) - (sin * c.x))) + vcy,
                                 1.0);
 
-        this.#builtView.set(v.x, v.y, v.z, v.w);
+        this.#builtView.set(v);
         this.#builtScale = scale;
         this.#isDirty = false;
     }
@@ -508,7 +508,7 @@ class Camera2D extends Entity
         const k = (this.#smoothing > 0.0) ? 1.0 - Math.pow(0.5, dt / this.#smoothing) : 1.0;
         let w = Camera2D.#kWorldPoint;
 
-        w.set(p.x + ((goalX - p.x) * k), p.y + ((goalY - p.y) * k));
+        w.setXY(p.x + ((goalX - p.x) * k), p.y + ((goalY - p.y) * k));
 
         // The goal is in the world; the position is relative to the parent
         const parent = this.getParent();
@@ -525,7 +525,7 @@ class Camera2D extends Entity
         const p = this.getPosition();
         let c = Camera2D.#kWorldPoint;
 
-        c.set(p.x, p.y);
+        c.set(p);
         this.#clampPoint(c);
 
         if (c.x !== p.x || c.y !== p.y)
@@ -555,7 +555,7 @@ class Camera2D extends Entity
         else
             y = Math.min(Math.max(y, b.y + half.y), b.y + b.w - half.y);
 
-        c.set(x, y);
+        c.setXY(x, y);
     }
 
     /*
@@ -567,7 +567,7 @@ class Camera2D extends Entity
     {
         if (this.#trauma <= 0.0)
         {
-            this.#shakeOffset.set(0, 0);
+            this.#shakeOffset.setXY(0, 0);
             this.#shakeRotation = 0.0;
             this.#shakeTime = 0.0; // Keeps the noise input small
                 return;
@@ -580,7 +580,7 @@ class Camera2D extends Entity
         const offset = (this.#shakeMaxOffset * amount) / this.#zoom; // Screen units to world units
         const seed = this.#shakeSeed;
 
-        this.#shakeOffset.set(offset * MathUtil.noise1D(t, seed), offset * MathUtil.noise1D(t, seed + 1));
+        this.#shakeOffset.setXY(offset * MathUtil.noise1D(t, seed), offset * MathUtil.noise1D(t, seed + 1));
         this.#shakeRotation = this.#shakeMaxRotation * amount * MathUtil.noise1D(t, seed + 2);
 
         this.#trauma = Math.max(0.0, this.#trauma - (this.#traumaDecay * dt));

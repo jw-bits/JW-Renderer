@@ -34,13 +34,13 @@ class Transform2D
 
     setPosition(x, y)
     {
-        this.#position.set(x, y);
+        this.#position.setXY(x, y);
             return this;
     }
 
     setScale(sx, sy = sx)
     {
-        this.#scale.set(sx, sy);
+        this.#scale.setXY(sx, sy);
             return this;
     }
 
@@ -52,8 +52,8 @@ class Transform2D
 
     set(x, y, scaleX, scaleY, rotation)
     {
-        this.#position.set(x, y);
-        this.#scale.set(scaleX, scaleY);
+        this.#position.setXY(x, y);
+        this.#scale.setXY(scaleX, scaleY);
         this.#rotation = rotation;
             return this;
     }
@@ -97,7 +97,7 @@ class Transform2D
         const s = Math.sin(this.#rotation);
         const c = Math.cos(this.#rotation);
 
-        out.set(this.#position.x + (sx * c) - (sy * s),
+        out.setXY(this.#position.x + (sx * c) - (sy * s),
                 this.#position.y + (sx * s) + (sy * c));
             return out;
     }

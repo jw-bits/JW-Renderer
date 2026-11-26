@@ -6,10 +6,38 @@ class Vector2
         this.y = _y;
     }
 
-    set(_x, _y)
+    // Copies vec (a Vector2, or anything with x and y)
+    set(vec)
+    {
+        this.x = vec.x;
+        this.y = vec.y;
+    }
+
+    setXY(_x, _y)
     {
         this.x = _x;
         this.y = _y;
+    }
+
+    /*
+        Sets x and y from text. Returns false (with a console.error), leaving the
+        vector unchanged, if text isn't two numbers. Valid formats (see
+        MathUtil.parseNumberList()):
+            "1, 2"   "1 2"   "(1, 2)"   "[1, 2]"   "{1, 2}"
+    */
+    setXYFromString(text)
+    {
+        const n = MathUtil.parseNumberList(text);
+
+        if (n === null || n.length !== 2)
+        {
+            console.error(`Vector2.setXYFromString(): "${text}" isn't two numbers, such as "1, 2"`);
+                return false;
+        }
+
+        this.x = n[0];
+        this.y = n[1];
+            return true;
     }
 	
 	// Methods

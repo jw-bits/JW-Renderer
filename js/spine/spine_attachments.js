@@ -185,7 +185,7 @@ class SpineVertexAttachment extends SpineAttachment
             attachment.bones = null;
         if (this.vertices)
         {
-            attachment.vertices = SpineUtils.newFloatArray(this.vertices.length);
+            attachment.vertices = new Float32Array(this.vertices.length);
             SpineUtils.arrayCopy(this.vertices, 0, attachment.vertices, 0, this.vertices.length);
         }
         else
@@ -202,7 +202,7 @@ class SpineVertexAttachment extends SpineAttachment
  * Guide. */
 class SpineBoundingBoxAttachment extends SpineVertexAttachment
 {
-    color = new SpineColor(1, 1, 1, 1);
+    color = new Vector4(1, 1, 1, 1);
 
     constructor(name)
     {
@@ -213,7 +213,7 @@ class SpineBoundingBoxAttachment extends SpineVertexAttachment
     {
         let copy = new SpineBoundingBoxAttachment(this.name);
         this.copyTo(copy);
-        copy.color.setFromColor(this.color);
+        copy.color.set(this.color);
         return copy;
     }
 }
@@ -227,7 +227,7 @@ class SpineClippingAttachment extends SpineVertexAttachment
     // Nonessential.
     /** The color of the clipping polygon as it was in Spine. Available only when nonessential data was exported. Clipping polygons
      * are not usually rendered at runtime. */
-    color = new SpineColor(0.2275, 0.2275, 0.8078, 1); // ce3a3aff
+    color = new Vector4(0.2275, 0.2275, 0.8078, 1); // ce3a3aff
     constructor(name)
     {
         super(name);
@@ -238,7 +238,7 @@ class SpineClippingAttachment extends SpineVertexAttachment
         let copy = new SpineClippingAttachment(this.name);
         this.copyTo(copy);
         copy.endSlot = this.endSlot;
-        copy.color.setFromColor(this.color);
+        copy.color.set(this.color);
         return copy;
     }
 }
@@ -269,7 +269,7 @@ class SpineMeshAttachment extends SpineVertexAttachment
     triangles = null;
 
     /** The color to tint the mesh. */
-    color = new SpineColor(1, 1, 1, 1);
+    color = new Vector4(1, 1, 1, 1);
 
     /** The width of the mesh's image. Available only when nonessential data was exported. */
     width = 0;
@@ -284,7 +284,7 @@ class SpineMeshAttachment extends SpineVertexAttachment
      * nonessential data was exported. Triangulation is not performed at runtime. */
     edges = null;
     parentMesh = null;
-    tempColor = new SpineColor(0, 0, 0, 0);
+    tempColor = new Vector4(0, 0, 0, 0);
 
     constructor(name)
     {
@@ -300,7 +300,7 @@ class SpineMeshAttachment extends SpineVertexAttachment
     {
         let regionUVs = this.regionUVs;
         if (!this.uvs || this.uvs.length != regionUVs.length)
-            this.uvs = SpineUtils.newFloatArray(regionUVs.length);
+            this.uvs = new Float32Array(regionUVs.length);
         let uvs = this.uvs;
         let n = this.uvs.length;
         let u = 0, v = 0, width = 0, height = 0;
@@ -399,7 +399,7 @@ class SpineMeshAttachment extends SpineVertexAttachment
         let copy = new SpineMeshAttachment(this.name);
         copy.region = this.region;
         copy.path = this.path;
-        copy.color.setFromColor(this.color);
+        copy.color.set(this.color);
         this.copyTo(copy);
         copy.regionUVs = new Array(this.regionUVs.length);
         SpineUtils.arrayCopy(this.regionUVs, 0, copy.regionUVs, 0, this.regionUVs.length);
@@ -425,7 +425,7 @@ class SpineMeshAttachment extends SpineVertexAttachment
         let copy = new SpineMeshAttachment(this.name);
         copy.region = this.region;
         copy.path = this.path;
-        copy.color.setFromColor(this.color);
+        copy.color.set(this.color);
         copy.deformAttachment = this.deformAttachment;
         copy.setParentMesh(this.parentMesh ? this.parentMesh : this);
         copy.updateUVs();
@@ -450,7 +450,7 @@ class SpinePathAttachment extends SpineVertexAttachment
 
     /** The color of the path as it was in Spine. Available only when nonessential data was exported. Paths are not usually
      * rendered at runtime. */
-    color = new SpineColor(1, 1, 1, 1);
+    color = new Vector4(1, 1, 1, 1);
 
     constructor(name)
     {
@@ -465,7 +465,7 @@ class SpinePathAttachment extends SpineVertexAttachment
         SpineUtils.arrayCopy(this.lengths, 0, copy.lengths, 0, this.lengths.length);
         copy.closed = closed;
         copy.constantSpeed = this.constantSpeed;
-        copy.color.setFromColor(this.color);
+        copy.color.set(this.color);
         return copy;
     }
 }
@@ -483,7 +483,7 @@ class SpinePointAttachment extends SpineVertexAttachment
 
     /** The color of the point attachment as it was in Spine. Available only when nonessential data was exported. Point attachments
      * are not usually rendered at runtime. */
-    color = new SpineColor(0.38, 0.94, 0, 1);
+    color = new Vector4(0.38, 0.94, 0, 1);
 
     constructor(name)
     {
@@ -511,7 +511,7 @@ class SpinePointAttachment extends SpineVertexAttachment
         copy.x = this.x;
         copy.y = this.y;
         copy.rotation = this.rotation;
-        copy.color.setFromColor(this.color);
+        copy.color.set(this.color);
         return copy;
     }
 }
@@ -543,7 +543,7 @@ class SpineRegionAttachment extends SpineAttachment
     height = 0;
 
     /** The color to tint the region attachment. */
-    color = new SpineColor(1, 1, 1, 1);
+    color = new Vector4(1, 1, 1, 1);
 
     /** The name of the texture region for this attachment. */
     path = null;
@@ -557,9 +557,9 @@ class SpineRegionAttachment extends SpineAttachment
     /** For each of the 4 vertices, a pair of <code>x,y</code> values that is the local position of the vertex.
      *
      * See {@link #updateOffset()}. */
-    offset = SpineUtils.newFloatArray(8);
-    uvs = SpineUtils.newFloatArray(8);
-    tempColor = new SpineColor(1, 1, 1, 1);
+    offset = new Float32Array(8);
+    uvs = new Float32Array(8);
+    tempColor = new Vector4(1, 1, 1, 1);
 
     constructor(name)
     {
@@ -676,9 +676,9 @@ class SpineRegionAttachment extends SpineAttachment
         copy.rotation = this.rotation;
         copy.width = this.width;
         copy.height = this.height;
-        SpineUtils.arrayCopy(this.uvs, 0, copy.uvs, 0, 8);
-        SpineUtils.arrayCopy(this.offset, 0, copy.offset, 0, 8);
-        copy.color.setFromColor(this.color);
+        copy.uvs.set(this.uvs);
+        copy.offset.set(this.offset);
+        copy.color.set(this.color);
         return copy;
     }
 

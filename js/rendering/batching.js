@@ -79,7 +79,10 @@
     Binding: render() remembers the shader, textures and samplers it bound
     (BatchBinder, below) and skips binding them again, so groups sharing
     an atlas or shader cost no binds. getBindsSent() and getBindsSkipped()
-    count them for the last render().
+    count them for the last render(). A model whose draw() binds Materials of
+    its own (Model2D.bindsOwnMaterials(), e.g. Skeleton2D) isn't bound for,
+    and the record is forgotten after it; its getDrawCount() is added to the
+    draw calls.
 
     CachedLayer (below) draws a batch once into a RenderTarget and shows it
     each frame as one textured rect.
@@ -216,7 +219,7 @@ class Batcher
         model.getDrawTransform(transform, e.transform); // From the bottom-left corner, not the anchor (see Model2D.draw())
 
         const c = color ?? Vector4.kWhite;
-        e.color.set(c.x, c.y, c.z, c.w);
+        e.color.set(c);
 
         this.#layers[layer].push(e);
             return true;
@@ -572,14 +575,34 @@ class Batcher
         return this.#pool[this.#poolUsed++];
     }
 
-    // Binds the Material once (skipping what's already bound), then draws each model with its captured values
+    /*
+        Binds the Material once (skipping what's already bound), then draws each model
+        with its captured values. A model that binds its own Materials (Skeleton2D) gets
+        no bind; the binder forgets what's bound after it, so the next model binds again.
+    */
     #drawEach(list, start, end)
     {
-        this.#binder.bindMaterial(list[start].material, true);
+        let isBound = false;
 
         for (let i = start; i < end; ++i)
         {
             const e = list[i];
+
+            if (e.model.bindsOwnMaterials() === true)
+            {
+                e.model.draw(e.transform, e.color, e.uvRect, e.material);
+                this.#binder.reset();
+                isBound = false;
+                this.#drawCalls += e.model.getDrawCount();
+                continue;
+            }
+
+            if (isBound === false)
+            {
+                this.#binder.bindMaterial(e.material, true);
+                isBound = true;
+            }
+
             e.model.draw(e.transform, e.color, e.uvRect, e.material);
             ++this.#drawCalls;
         }
@@ -873,7 +896,7 @@ class CachedLayer
             return false;
 
         this.#target.setDesignRect(x, y, width, height);
-        this.#area.set(x, y, width, height);
+        this.#area.setXYZW(x, y, width, height);
 
         const material = MaterialManager.load(Rect2D.getDefaultShader(), [this.#target.getTexture()], null, BlendMode.kPremultiplied);
 
@@ -931,7 +954,7 @@ class CachedLayer
     render() { this.#rect.render(this.#transform, null, this.#color); }
 
     // Tints or fades it when drawn (a Vector4, copied; premultiplied, so (a, a, a, a) fades it); white by default
-    setColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
+    setColor(color) { this.#color.set(color); }
     getColor() { return this.#color; } // Read-only; change it with setColor()
 
     // The Rect2D showing it; don't load it again

@@ -142,7 +142,7 @@ class Particles2D
     }
 
     // Design units per second squared, e.g. (0, -600) pulls particles down
-    setGravity(gx, gy) { this.#gravity.set(gx, gy); }
+    setGravity(gx, gy) { this.#gravity.setXY(gx, gy); }
     getGravity() { return this.#gravity; }
 
     // How big a particle is at the end of its life, as a fraction of its starting size (1 keeps the size)
@@ -170,12 +170,12 @@ class Particles2D
                 return false;
         }
 
-        this.#frames.set(cols, rows, firstFrame, (lastFrame - firstFrame) + 1);
+        this.#frames.setXYZW(cols, rows, firstFrame, (lastFrame - firstFrame) + 1);
             return true;
     }
 
     // Back to every particle drawing the whole texture
-    clearFrames() { this.#frames.set(1, 1, 0, 1); }
+    clearFrames() { this.#frames.setXYZW(1, 1, 0, 1); }
 
     getFrameRows() { return this.#frames.y; }
     getFrameCols() { return this.#frames.x; }
@@ -257,7 +257,7 @@ class Particles2D
         this.#upload();
 
         const m = this.#material;
-        Particles2D.#kGravityScaleTime.set(this.#gravity.x, this.#gravity.y, this.#endScale, this.#time);
+        Particles2D.#kGravityScaleTime.setXYZW(this.#gravity.x, this.#gravity.y, this.#endScale, this.#time);
 
         m.bind(); // Shader, texture, sampler
         m.setUniform(RenderUniforms.kVector0, Particles2D.#kGravityScaleTime);
@@ -265,8 +265,8 @@ class Particles2D
 
         // The whole texture, or an AtlasSubTexture's part of its atlas
         const r = m.getTexture(0).getUVRect();
-        Particles2D.#kUVOffset.set(r.getX(), r.getY());
-        Particles2D.#kUVTile.set(r.getWidth(), r.getHeight());
+        Particles2D.#kUVOffset.setXY(r.getX(), r.getY());
+        Particles2D.#kUVTile.setXY(r.getWidth(), r.getHeight());
 
         m.setUniform(RenderUniforms.kUVOffset, Particles2D.#kUVOffset);
         m.setUniform(RenderUniforms.kUVTile, Particles2D.#kUVTile);

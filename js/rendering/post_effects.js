@@ -726,7 +726,7 @@ class ScreenEffect extends PostEffect
     setExposure(exposure) { return this.#setIfValid(exposure, 0.0, (v) => { this.#grade.x = v; }, "setExposure"); }
     setContrast(contrast) { return this.#setIfValid(contrast, 0.0, (v) => { this.#grade.y = v; }, "setContrast"); }
     setSaturation(saturation) { return this.#setIfValid(saturation, 0.0, (v) => { this.#grade.z = v; }, "setSaturation"); }
-    setTint(rgb) { this.#tint.set(rgb.x, rgb.y, rgb.z); }
+    setTint(rgb) { this.#tint.set(rgb); }
 
     // texture null turns the LUT off. Returns false (changing nothing) for a size below 2 or an amount outside 0 - 1.
     setLUT(texture, size = 16, amount = 1.0)
@@ -752,7 +752,7 @@ class ScreenEffect extends PostEffect
                 return false;
         }
 
-        this.#vignette.set(amount, radius, softness);
+        this.#vignette.setXYZ(amount, radius, softness);
             return true;
     }
 
@@ -913,7 +913,7 @@ class PostChain
         if (this.#rect === null)
             this.#rect = new Vector4();
 
-        this.#rect.set(x, y, width, height);
+        this.#rect.setXYZW(x, y, width, height);
             return true;
     }
 
@@ -925,7 +925,7 @@ class PostChain
     setOpacity(opacity)
     {
         const a = MathUtil.clamp01(opacity);
-        this.#opacity.set(a, a, a, a);
+        this.#opacity.setRGBA(a, a, a, a);
     }
 
     getOpacity() { return this.#opacity.w; }
@@ -935,7 +935,7 @@ class PostChain
         default), or e.g. the background color, so effects like the vignette and
         scanlines cover the background too (Batcher.setLayerPost() uses it).
     */
-    setClearColor(color) { this.#clearColor.set(color.x, color.y, color.z, color.w); }
+    setClearColor(color) { this.#clearColor.set(color); }
     getClearColor() { return this.#clearColor; }
 
     addEffect(effect)
@@ -1162,7 +1162,7 @@ class ScreenTransition
             const w = this.#capture.getWidth();
             const h = this.#capture.getHeight();
 
-            this.#viewRect.set(WGLV.getViewportX() / w, WGLV.getViewportY() / h, WGLV.getViewportWidth() / w, WGLV.getViewportHeight() / h);
+            this.#viewRect.setXYZW(WGLV.getViewportX() / w, WGLV.getViewportY() / h, WGLV.getViewportWidth() / w, WGLV.getViewportHeight() / h);
         }
 
         return this.#hasFrame;

@@ -206,7 +206,7 @@ class RenderTarget
         if (this.#designRect === null)
             this.#designRect = new Vector4();
 
-        this.#designRect.set(x, y, width, height);
+        this.#designRect.setXYZW(x, y, width, height);
             return true;
     }
 
@@ -217,11 +217,11 @@ class RenderTarget
     getDesignRect(out = new Vector4())
     {
         if (this.#designRect !== null)
-            out.set(this.#designRect.x, this.#designRect.y, this.#designRect.z, this.#designRect.w);
+            out.set(this.#designRect);
         else if (this.#sizeMode === RenderTarget.kView)
-            out.set(0, 0, WGLV.getWidth(), WGLV.getHeight());
+            out.setXYZW(0, 0, WGLV.getWidth(), WGLV.getHeight());
         else
-            out.set(0, 0, this.#width, this.#height);
+            out.setXYZW(0, 0, this.#width, this.#height);
 
         return out;
     }

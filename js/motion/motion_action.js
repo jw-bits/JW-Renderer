@@ -82,8 +82,8 @@ class MotionAction extends MotionBase
                 return false;
         }
 
-        this.#startColor.set(start.x, start.y, start.z, start.w);
-        this.#targetColor.set(target.x, target.y, target.z, target.w);
+        this.#startColor.set(start);
+        this.#targetColor.set(target);
             return true;
     }
 
@@ -146,7 +146,7 @@ class MotionAction extends MotionBase
             const a = this.#startColor;
             const b = this.#targetColor;
 
-            out.color.set(MathUtil.lerp(a.x, b.x, e), MathUtil.lerp(a.y, b.y, e), MathUtil.lerp(a.z, b.z, e), MathUtil.lerp(a.w, b.w, e));
+            out.color.setRGBA(MathUtil.lerp(a.x, b.x, e), MathUtil.lerp(a.y, b.y, e), MathUtil.lerp(a.z, b.z, e), MathUtil.lerp(a.w, b.w, e));
         }
 
         return out;

@@ -303,6 +303,69 @@ const TextGlyphs2DShaderSource = {
 };
 
 /*
+    Skeleton2D (Spine): textured, vertex-colored triangles, always giving
+    premultiplied color, so BlendMode.kPremultiplied (normal and additive) and
+    BlendMode.kMultiply both work on any page.
+
+        a_pos     (x, y) in the skeleton's own units (its world, before the draw transform)
+        a_uv0     Spine's UVs, V running down the page; flipped here, as engine textures are uploaded flipped
+        a_color   Premultiplied (r * a, g * a, b * a, a); alpha 0 draws additive under kPremultiplied
+
+    The draw transform turns, scales and places the skeleton's origin:
+        u_vec0   (x, y, 0, 0)       Where the skeleton's origin goes, world design units
+        u_scale  (sx, sy, rotation) About the origin
+        u_color  Straight-alpha tint (the Entity's color), premultiplied here
+        u_vec1   (1 if the page is already premultiplied (pma) else 0, 0, 0, 0)
+*/
+const Skeleton2DShaderSource = {
+    name: "Skeleton2D",
+    VS: `#version 300 es
+        layout(location = 0) in vec3 a_pos;
+        layout(location = 1) in vec2 a_uv0;
+        layout(location = 7) in vec4 a_color;
+
+        ${FrameSharedSource.VS}
+        uniform vec3 u_scale;
+        uniform vec4 u_vec0;
+
+        out vec2 v_uv0;
+        out vec4 v_color;
+
+        void main() {
+            vec2 ssPos = a_pos.xy * u_scale.xy;
+
+            float sa = sin(u_scale.z);
+            float ca = cos(u_scale.z);
+
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
+
+            gl_Position = worldToClip(rPos + u_vec0.xy);
+
+            v_uv0 = vec2(a_uv0.x, 1.0 - a_uv0.y);
+            v_color = a_color;
+        }
+    `,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+        uniform vec4 u_color;
+        uniform vec4 u_vec1;
+
+        in vec2 v_uv0;
+        in vec4 v_color;
+        out vec4 fragColor;
+
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            c.rgb *= mix(c.a, 1.0, u_vec1.x); // Straight pages premultiplied here
+            fragColor = c * v_color * vec4(u_color.rgb * u_color.a, u_color.a);
+        }
+    `
+};
+
+/*
     Sprite: Rect2D's shader, drawing one rect of its texture (an atlas frame)
     instead of all of it. u_vec1 is the UV rect (u, v, width, height), with
     (u, v) its bottom-left corner and V up (see UVRect).

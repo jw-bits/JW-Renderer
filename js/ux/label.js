@@ -77,7 +77,7 @@ class Label
     // (x, y) is the anchor point; align says which part of the panel sits on it
     setPos(x, y, align = Alignment.kBottomLeft)
     {
-        this.#anchor.set(x, y);
+        this.#anchor.setXY(x, y);
         this.#align = align;
         this.#layout();
     }
@@ -94,7 +94,7 @@ class Label
                 return false;
         }
 
-        this.#padding.set(x, y);
+        this.#padding.setXY(x, y);
         this.#layout();
             return true;
     }
@@ -102,8 +102,8 @@ class Label
     getPadding() { return this.#padding; } // Read-only; change it with setPadding()
 
     // Tints, as Vector4s (copied)
-    setTextColor(color) { this.#textColor.set(color.x, color.y, color.z, color.w); }
-    setPanelColor(color) { this.#panelColor.set(color.x, color.y, color.z, color.w); }
+    setTextColor(color) { this.#textColor.set(color); }
+    setPanelColor(color) { this.#panelColor.set(color); }
 
     getTextColor() { return this.#textColor; }   // Read-only; change it with setTextColor()
     getPanelColor() { return this.#panelColor; } // Read-only; change it with setPanelColor()

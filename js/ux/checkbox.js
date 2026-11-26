@@ -141,7 +141,7 @@ class CheckBox
 
         // A texture check draws the texture as it is; a shape check is the default color
         if (checkTexture !== null)
-            this.#checkColor.set(1.0, 1.0, 1.0, 1.0);
+            this.#checkColor.setRGBA(1.0, 1.0, 1.0, 1.0);
 
         this.#outlineWidth = Math.min(this.#outlineWidth, size / 4.0);
 
@@ -159,7 +159,7 @@ class CheckBox
     // (x, y) is the anchor point; align says which part of the box sits on it
     setPos(x, y, align = Alignment.kBottomLeft)
     {
-        this.#anchor.set(x, y);
+        this.#anchor.setXY(x, y);
         this.#align = align;
         this.#layout();
     }
@@ -390,5 +390,5 @@ class CheckBox
 
     // *** Static Internal Helpers ***
 
-    static #copy(target, color) { target.set(color.x, color.y, color.z, color.w); }
+    static #copy(target, color) { target.set(color); }
 }

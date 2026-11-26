@@ -44,6 +44,7 @@
         SpineMixBlend       How a timeline's value mixes with the setup or current pose
         SpineMixDirection   Whether a timeline is mixing in or out
         SpineProperty       What a timeline changes, for its property ids
+        SpineEventType      What a SpineAnimationState reports to its event callback (AnimationState.ts)
 */
 
 /** Determines how a bone inherits world transforms from parent bones. */
@@ -139,4 +140,16 @@ class SpineProperty
     static pathConstraintPosition = 16;
     static pathConstraintSpacing = 17;
     static pathConstraintMix = 18;
+}
+
+/** What a SpineAnimationState reports to its event callback (see SpineAnimationState.setEventCallback()). Engine: Spine's
+ * listener methods, one value each. */
+class SpineEventType
+{
+    static start = 0;     // The entry became the current entry
+    static interrupt = 1; // Another entry replaced it; it may still be applied while mixing out
+    static end = 2;       // It won't be applied again (a dispose follows)
+    static dispose = 3;   // It goes back to the pool; don't keep it
+    static complete = 4;  // Its animation finished a loop (or reached its end)
+    static event = 5;     // Its animation fired a keyed event
 }

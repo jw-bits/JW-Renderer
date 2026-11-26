@@ -205,7 +205,7 @@ class Button
     // (x, y) is the anchor point; align says which part of the button sits on it
     setPos(x, y, align = Alignment.kBottomLeft)
     {
-        this.#anchor.set(x, y);
+        this.#anchor.setXY(x, y);
         this.#align = align;
         this.#layout();
     }
@@ -323,7 +323,7 @@ class Button
     // Design units between the content and the outline, used by auto size: x left and right, y top and bottom
     setPadding(x, y = x)
     {
-        this.#padding.set(Math.max(0, x), Math.max(0, y));
+        this.#padding.setXY(Math.max(0, x), Math.max(0, y));
         this.#refit();
     }
 
@@ -637,14 +637,14 @@ class Button
             const c = colors[i];
 
             if (c !== null && c !== undefined)
-                targets[i].set(c.x, c.y, c.z, c.w);
+                targets[i].set(c);
         }
     }
 
     // Moves now toward target by k (0 - 1)
     static #approach(now, target, k)
     {
-        now.set(now.x + ((target.x - now.x) * k), now.y + ((target.y - now.y) * k),
+        now.setRGBA(now.x + ((target.x - now.x) * k), now.y + ((target.y - now.y) * k),
                 now.z + ((target.z - now.z) * k), now.w + ((target.w - now.w) * k));
     }
 }

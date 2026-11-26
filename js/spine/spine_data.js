@@ -150,7 +150,7 @@ class SpineBoneData
 
     /** The color of the bone as it was in Spine. Available only when nonessential data was exported. Bones are not usually
      * rendered at runtime. */
-    color = new SpineColor();
+    color = new Vector4(0, 0, 0, 0);
 
     constructor(index, name, parent)
     {
@@ -178,7 +178,7 @@ class SpineSlotData
 
     /** The color used to tint the slot's attachment. If {@link #getDarkColor()} is set, this is used as the light color for two
      * color tinting. */
-    color = new SpineColor(1, 1, 1, 1);
+    color = new Vector4(1, 1, 1, 1);
 
     /** The dark color used to tint the slot's attachment for two color tinting, or null if two color tinting is not used. The dark
      * color's alpha is not used. */

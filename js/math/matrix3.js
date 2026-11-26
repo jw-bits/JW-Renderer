@@ -208,7 +208,7 @@ class Matrix3
         const m = mat.m;
         const x = point.x, y = point.y;
 
-        out.set((x * m[0]) + (y * m[3]) + m[6],
+        out.setXY((x * m[0]) + (y * m[3]) + m[6],
                 (x * m[1]) + (y * m[4]) + m[7]);
         return out;
     }
@@ -223,13 +223,13 @@ class Matrix3
 
         // v1 = v1 - proj_v0(v1)
         const dot01 = v0.dot(v1);
-        v1.set(v1.x - v0.x * dot01, v1.y - v0.y * dot01, v1.z - v0.z * dot01);
+        v1.setXYZ(v1.x - v0.x * dot01, v1.y - v0.y * dot01, v1.z - v0.z * dot01);
         v1.normalize();
 
         // v2 = v2 - proj_v0(v2) - proj_v1(v2)
         const dot02 = v0.dot(v2);
         const dot12 = v1.dot(v2);
-        v2.set(v2.x - (v0.x * dot02 + v1.x * dot12), 
+        v2.setXYZ(v2.x - (v0.x * dot02 + v1.x * dot12), 
                v2.y - (v0.y * dot02 + v1.y * dot12), 
                v2.z - (v0.z * dot02 + v1.z * dot12));
         v2.normalize();

@@ -461,8 +461,8 @@ class SpineSlot
             throw new Error("bone cannot be null.");
         this.data = data;
         this.bone = bone;
-        this.color = new SpineColor();
-        this.darkColor = !data.darkColor ? null : new SpineColor();
+        this.color = new Vector4(0, 0, 0, 0);
+        this.darkColor = !data.darkColor ? null : new Vector4(0, 0, 0, 0);
         this.setToSetupPose();
     }
 
@@ -510,9 +510,9 @@ class SpineSlot
     /** Sets this slot to the setup pose. */
     setToSetupPose()
     {
-        this.color.setFromColor(this.data.color);
+        this.color.set(this.data.color);
         if (this.darkColor)
-            this.darkColor.setFromColor(this.data.darkColor);
+            this.darkColor.set(this.data.darkColor);
         if (!this.data.attachmentName)
             this.attachment = null;
         else
@@ -848,7 +848,7 @@ class SpineTransformConstraint
     mixScaleX = 0;
     mixScaleY = 0;
     mixShearY = 0;
-    temp = new SpineVector2();
+    temp = new Vector2();
     active = false;
 
     constructor(data, skeleton)
@@ -926,7 +926,8 @@ class SpineTransformConstraint
             if (translate)
             {
                 let temp = this.temp;
-                target.localToWorld(temp.set(this.data.offsetX, this.data.offsetY));
+                temp.setXY(this.data.offsetX, this.data.offsetY);
+                target.localToWorld(temp);
                 bone.worldX += (temp.x - bone.worldX) * mixX;
                 bone.worldY += (temp.y - bone.worldY) * mixY;
             }
@@ -994,7 +995,8 @@ class SpineTransformConstraint
             if (translate)
             {
                 let temp = this.temp;
-                target.localToWorld(temp.set(this.data.offsetX, this.data.offsetY));
+                temp.setXY(this.data.offsetX, this.data.offsetY);
+                target.localToWorld(temp);
                 bone.worldX += temp.x * mixX;
                 bone.worldY += temp.y * mixY;
             }
@@ -1692,7 +1694,7 @@ class SpineSkeleton
             let pathConstraintData = data.pathConstraints[i];
             this.pathConstraints.push(new SpinePathConstraint(pathConstraintData, this));
         }
-        this.color = new SpineColor(1, 1, 1, 1);
+        this.color = new Vector4(1, 1, 1, 1);
         this.updateCache();
     }
 
@@ -2209,15 +2211,15 @@ class SpineSkeleton
      * Note that this method will create temporary objects which can add to garbage collection pressure. Use `getBounds()` if garbage collection is a concern. */
     getBoundsRect()
     {
-        let offset = new SpineVector2();
-        let size = new SpineVector2();
+        let offset = new Vector2();
+        let size = new Vector2();
         this.getBounds(offset, size);
         return { x: offset.x, y: offset.y, width: size.x, height: size.y };
     }
 
     /** Returns the axis aligned bounding box (AABB) of the region and mesh attachments for the current pose.
-     * @param offset An output value, the distance from the skeleton origin to the bottom left corner of the AABB.
-     * @param size An output value, the width and height of the AABB.
+     * @param offset An output value (a Vector2), the distance from the skeleton origin to the bottom left corner of the AABB.
+     * @param size An output value (a Vector2), the width and height of the AABB.
      * @param temp Working memory to temporarily store attachments' computed world vertices. */
     getBounds(offset, size, temp = new Array(2))
     {
@@ -2260,8 +2262,8 @@ class SpineSkeleton
                 }
             }
         }
-        offset.set(minX, minY);
-        size.set(maxX - minX, maxY - minY);
+        offset.setXY(minX, minY);
+        size.setXY(maxX - minX, maxY - minY);
     }
 
     /** Increments the skeleton's {@link #time}. */

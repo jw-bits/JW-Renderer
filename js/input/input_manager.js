@@ -311,8 +311,8 @@ class InputManager
     static #setPosition(r)
     {
         const p = WGLV.clientToView(r.x, r.y);
-        InputManager.#position.set(p.x, p.y);
-        InputManager.#client.set(r.x, r.y);
+        InputManager.#position.set(p);
+        InputManager.#client.set(r);
     }
 
     // CSS pixels from the press
@@ -333,9 +333,9 @@ class InputManager
         InputManager.#isDragging = false;
         InputManager.#pressTime = r.time;
         InputManager.#setPosition(r);
-        InputManager.#pressClient.set(r.x, r.y);
-        InputManager.#pressPosition.set(InputManager.#position.x, InputManager.#position.y);
-        InputManager.#reported.set(InputManager.#position.x, InputManager.#position.y);
+        InputManager.#pressClient.set(r);
+        InputManager.#pressPosition.set(InputManager.#position);
+        InputManager.#reported.set(InputManager.#position);
         InputManager.#hasPosition = true;
         InputManager.#wasPressed = true;
     }
@@ -452,8 +452,8 @@ class InputManager
 
         e.type = type;
         e.device = InputManager.#device;
-        e.position.set(pos.x, pos.y);
-        e.startPosition.set(start.x, start.y);
+        e.position.set(pos);
+        e.startPosition.set(start);
         e.duration = time - InputManager.#pressTime;
         e.code = "";
         e.key = "";
@@ -461,13 +461,13 @@ class InputManager
 
         switch (type)
         {
-            case InputEventType.kTap: e.delta.set(0.0, 0.0); break;
-            case InputEventType.kSwipe: e.delta.set(pos.x - start.x, pos.y - start.y); break;
+            case InputEventType.kTap: e.delta.setXY(0.0, 0.0); break;
+            case InputEventType.kSwipe: e.delta.setXY(pos.x - start.x, pos.y - start.y); break;
 
             default: // kDrag, kDragEnd
             {
-                e.delta.set(pos.x - InputManager.#reported.x, pos.y - InputManager.#reported.y);
-                InputManager.#reported.set(pos.x, pos.y);
+                e.delta.setXY(pos.x - InputManager.#reported.x, pos.y - InputManager.#reported.y);
+                InputManager.#reported.set(pos);
             }
             break;
         }
@@ -481,9 +481,9 @@ class InputManager
 
         e.type = type;
         e.device = InputDevice.kKeyboard;
-        e.position.set(InputManager.#position.x, InputManager.#position.y);
-        e.startPosition.set(InputManager.#position.x, InputManager.#position.y);
-        e.delta.set(0.0, 0.0);
+        e.position.set(InputManager.#position);
+        e.startPosition.set(InputManager.#position);
+        e.delta.setXY(0.0, 0.0);
         e.duration = 0.0;
         e.code = code;
         e.key = key;

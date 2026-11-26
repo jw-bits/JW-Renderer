@@ -104,7 +104,7 @@ class SpineSkeletonJson
                 data.skinRequired = SpineSkeletonJson.#getValue(boneMap, "skin", false);
                 let color = SpineSkeletonJson.#getValue(boneMap, "color", null);
                 if (color)
-                    data.color.setFromString(color);
+                    data.color.setRGBAFromString(color);
                 skeletonData.bones.push(data);
             }
         }
@@ -118,10 +118,10 @@ class SpineSkeletonJson
                 let data = new SpineSlotData(skeletonData.slots.length, slotMap.name, boneData);
                 let color = SpineSkeletonJson.#getValue(slotMap, "color", null);
                 if (color)
-                    data.color.setFromString(color);
+                    data.color.setRGBAFromString(color);
                 let dark = SpineSkeletonJson.#getValue(slotMap, "dark", null);
                 if (dark)
-                    data.darkColor = SpineColor.fromString(dark);
+                    data.darkColor = SpineSkeletonJson.#color(dark);
                 data.attachmentName = SpineSkeletonJson.#getValue(slotMap, "attachment", null);
                 data.blendMode = SpineUtils.enumValue(SpineBlendMode, SpineSkeletonJson.#getValue(slotMap, "blend", "normal"));
                 skeletonData.slots.push(data);
@@ -313,7 +313,7 @@ class SpineSkeletonJson
                 region.height = map.height * scale;
                 let color = SpineSkeletonJson.#getValue(map, "color", null);
                 if (color)
-                    region.color.setFromString(color);
+                    region.color.setRGBAFromString(color);
                 region.updateOffset();
                 return region;
             }
@@ -324,7 +324,7 @@ class SpineSkeletonJson
                 this.readVertices(map, box, map.vertexCount << 1);
                 let color = SpineSkeletonJson.#getValue(map, "color", null);
                 if (color)
-                    box.color.setFromString(color);
+                    box.color.setRGBAFromString(color);
                 return box;
             }
             case "mesh":
@@ -336,7 +336,7 @@ class SpineSkeletonJson
                 mesh.path = path;
                 let color = SpineSkeletonJson.#getValue(map, "color", null);
                 if (color)
-                    mesh.color.setFromString(color);
+                    mesh.color.setRGBAFromString(color);
                 mesh.width = SpineSkeletonJson.#getValue(map, "width", 0) * scale;
                 mesh.height = SpineSkeletonJson.#getValue(map, "height", 0) * scale;
                 let parent = SpineSkeletonJson.#getValue(map, "parent", null);
@@ -368,7 +368,7 @@ class SpineSkeletonJson
                 path.lengths = lengths;
                 let color = SpineSkeletonJson.#getValue(map, "color", null);
                 if (color)
-                    path.color.setFromString(color);
+                    path.color.setRGBAFromString(color);
                 return path;
             }
             case "point": {
@@ -380,7 +380,7 @@ class SpineSkeletonJson
                 point.rotation = SpineSkeletonJson.#getValue(map, "rotation", 0);
                 let color = SpineSkeletonJson.#getValue(map, "color", null);
                 if (color)
-                    point.color.setFromString(color);
+                    point.color.setRGBAFromString(color);
                 return point;
             }
             case "clipping": {
@@ -394,7 +394,7 @@ class SpineSkeletonJson
                 this.readVertices(map, clip, vertexCount << 1);
                 let color = SpineSkeletonJson.#getValue(map, "color", null);
                 if (color)
-                    clip.color.setFromString(color);
+                    clip.color.setRGBAFromString(color);
                 return clip;
             }
         }
@@ -467,10 +467,10 @@ class SpineSkeletonJson
                         let timeline = new SpineRGBATimeline(frames, frames << 2, slotIndex);
                         let keyMap = timelineMap[0];
                         let time = SpineSkeletonJson.#getValue(keyMap, "time", 0);
-                        let color = SpineColor.fromString(keyMap.color);
+                        let color = SpineSkeletonJson.#color(keyMap.color);
                         for (let frame = 0, bezier = 0;; frame++)
                         {
-                            timeline.setFrame(frame, time, color.r, color.g, color.b, color.a);
+                            timeline.setFrame(frame, time, color.x, color.y, color.z, color.w);
                             let nextMap = timelineMap[frame + 1];
                             if (!nextMap)
                             {
@@ -478,14 +478,14 @@ class SpineSkeletonJson
                                 break;
                             }
                             let time2 = SpineSkeletonJson.#getValue(nextMap, "time", 0);
-                            let newColor = SpineColor.fromString(nextMap.color);
+                            let newColor = SpineSkeletonJson.#color(nextMap.color);
                             let curve = keyMap.curve;
                             if (curve)
                             {
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.r, newColor.r, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.g, newColor.g, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.b, newColor.b, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 3, time, time2, color.a, newColor.a, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.x, newColor.x, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.y, newColor.y, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.z, newColor.z, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 3, time, time2, color.w, newColor.w, 1);
                             }
                             time = time2;
                             color = newColor;
@@ -498,10 +498,10 @@ class SpineSkeletonJson
                         let timeline = new SpineRGBTimeline(frames, frames * 3, slotIndex);
                         let keyMap = timelineMap[0];
                         let time = SpineSkeletonJson.#getValue(keyMap, "time", 0);
-                        let color = SpineColor.fromString(keyMap.color);
+                        let color = SpineSkeletonJson.#color(keyMap.color);
                         for (let frame = 0, bezier = 0;; frame++)
                         {
-                            timeline.setFrame(frame, time, color.r, color.g, color.b);
+                            timeline.setFrame(frame, time, color.x, color.y, color.z);
                             let nextMap = timelineMap[frame + 1];
                             if (!nextMap)
                             {
@@ -509,13 +509,13 @@ class SpineSkeletonJson
                                 break;
                             }
                             let time2 = SpineSkeletonJson.#getValue(nextMap, "time", 0);
-                            let newColor = SpineColor.fromString(nextMap.color);
+                            let newColor = SpineSkeletonJson.#color(nextMap.color);
                             let curve = keyMap.curve;
                             if (curve)
                             {
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.r, newColor.r, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.g, newColor.g, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.b, newColor.b, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.x, newColor.x, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.y, newColor.y, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.z, newColor.z, 1);
                             }
                             time = time2;
                             color = newColor;
@@ -532,11 +532,11 @@ class SpineSkeletonJson
                         let timeline = new SpineRGBA2Timeline(frames, frames * 7, slotIndex);
                         let keyMap = timelineMap[0];
                         let time = SpineSkeletonJson.#getValue(keyMap, "time", 0);
-                        let color = SpineColor.fromString(keyMap.light);
-                        let color2 = SpineColor.fromString(keyMap.dark);
+                        let color = SpineSkeletonJson.#color(keyMap.light);
+                        let color2 = SpineSkeletonJson.#color(keyMap.dark);
                         for (let frame = 0, bezier = 0;; frame++)
                         {
-                            timeline.setFrame(frame, time, color.r, color.g, color.b, color.a, color2.r, color2.g, color2.b);
+                            timeline.setFrame(frame, time, color.x, color.y, color.z, color.w, color2.x, color2.y, color2.z);
                             let nextMap = timelineMap[frame + 1];
                             if (!nextMap)
                             {
@@ -544,18 +544,18 @@ class SpineSkeletonJson
                                 break;
                             }
                             let time2 = SpineSkeletonJson.#getValue(nextMap, "time", 0);
-                            let newColor = SpineColor.fromString(nextMap.light);
-                            let newColor2 = SpineColor.fromString(nextMap.dark);
+                            let newColor = SpineSkeletonJson.#color(nextMap.light);
+                            let newColor2 = SpineSkeletonJson.#color(nextMap.dark);
                             let curve = keyMap.curve;
                             if (curve)
                             {
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.r, newColor.r, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.g, newColor.g, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.b, newColor.b, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 3, time, time2, color.a, newColor.a, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 4, time, time2, color2.r, newColor2.r, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 5, time, time2, color2.g, newColor2.g, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 6, time, time2, color2.b, newColor2.b, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.x, newColor.x, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.y, newColor.y, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.z, newColor.z, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 3, time, time2, color.w, newColor.w, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 4, time, time2, color2.x, newColor2.x, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 5, time, time2, color2.y, newColor2.y, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 6, time, time2, color2.z, newColor2.z, 1);
                             }
                             time = time2;
                             color = newColor;
@@ -569,11 +569,11 @@ class SpineSkeletonJson
                         let timeline = new SpineRGB2Timeline(frames, frames * 6, slotIndex);
                         let keyMap = timelineMap[0];
                         let time = SpineSkeletonJson.#getValue(keyMap, "time", 0);
-                        let color = SpineColor.fromString(keyMap.light);
-                        let color2 = SpineColor.fromString(keyMap.dark);
+                        let color = SpineSkeletonJson.#color(keyMap.light);
+                        let color2 = SpineSkeletonJson.#color(keyMap.dark);
                         for (let frame = 0, bezier = 0;; frame++)
                         {
-                            timeline.setFrame(frame, time, color.r, color.g, color.b, color2.r, color2.g, color2.b);
+                            timeline.setFrame(frame, time, color.x, color.y, color.z, color2.x, color2.y, color2.z);
                             let nextMap = timelineMap[frame + 1];
                             if (!nextMap)
                             {
@@ -581,17 +581,17 @@ class SpineSkeletonJson
                                 break;
                             }
                             let time2 = SpineSkeletonJson.#getValue(nextMap, "time", 0);
-                            let newColor = SpineColor.fromString(nextMap.light);
-                            let newColor2 = SpineColor.fromString(nextMap.dark);
+                            let newColor = SpineSkeletonJson.#color(nextMap.light);
+                            let newColor2 = SpineSkeletonJson.#color(nextMap.dark);
                             let curve = keyMap.curve;
                             if (curve)
                             {
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.r, newColor.r, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.g, newColor.g, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.b, newColor.b, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 3, time, time2, color2.r, newColor2.r, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 4, time, time2, color2.g, newColor2.g, 1);
-                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 5, time, time2, color2.b, newColor2.b, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 0, time, time2, color.x, newColor.x, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 1, time, time2, color.y, newColor.y, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 2, time, time2, color.z, newColor.z, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 3, time, time2, color2.x, newColor2.x, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 4, time, time2, color2.y, newColor2.y, 1);
+                                bezier = SpineSkeletonJson.#readCurve(curve, timeline, bezier, frame, 5, time, time2, color2.z, newColor2.z, 1);
                             }
                             time = time2;
                             color = newColor;
@@ -857,10 +857,10 @@ class SpineSkeletonJson
                             let deform;
                             let verticesValue = SpineSkeletonJson.#getValue(keyMap, "vertices", null);
                             if (!verticesValue)
-                                deform = weighted ? SpineUtils.newFloatArray(deformLength) : vertices;
+                                deform = weighted ? new Float32Array(deformLength) : vertices;
                             else
                             {
-                                deform = SpineUtils.newFloatArray(deformLength);
+                                deform = new Float32Array(deformLength);
                                 let start = SpineSkeletonJson.#getValue(keyMap, "offset", 0);
                                 SpineUtils.arrayCopy(verticesValue, 0, deform, start, verticesValue.length);
                                 if (scale != 1)
@@ -1040,6 +1040,15 @@ class SpineSkeletonJson
     static #getValue(map, property, defaultValue)
     {
         return map[property] !== undefined ? map[property] : defaultValue;
+    }
+
+    // A new color (Vector4: r, g, b, a in x, y, z, w) from Spine's "rrggbbaa" or "rrggbb" (Vector4.setRGBAFromString())
+    static #color(hex)
+    {
+        let color = new Vector4();
+
+        color.setRGBAFromString(hex);
+            return color;
     }
 }
 

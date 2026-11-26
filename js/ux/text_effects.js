@@ -95,7 +95,7 @@ class BaseTextEffect
     // *** Color ***
 
     // The color the text is drawn with, a Vector4 (copied); white by default
-    setTextColor(color) { this.#color.set(color.x, color.y, color.z, color.w); }
+    setTextColor(color) { this.#color.set(color); }
     getTextColor() { return this.#color; } // Read-only; change it with setTextColor()
 
     // *** Drop shadow ***
@@ -106,8 +106,8 @@ class BaseTextEffect
     // The shadow is offsetX / offsetY design units from the text (negative y is down), tinted color; doesn't turn it on
     setDropShadow(offsetX, offsetY, color)
     {
-        this.#shadowOffset.set(offsetX, offsetY);
-        this.#shadowColor.set(color.x, color.y, color.z, color.w);
+        this.#shadowOffset.setXY(offsetX, offsetY);
+        this.#shadowColor.set(color);
     }
 
     getDropShadowOffset() { return this.#shadowOffset; }
@@ -173,11 +173,11 @@ class BaseTextEffect
             let shadowTransform = BaseTextEffect.#kShadowTransform; // Copied by the batcher too
 
             shadowTransform.copy(t).setPosition(t.getX() + this.#shadowOffset.x, t.getY() + this.#shadowOffset.y);
-            drawColor.set(s.x, s.y, s.z, s.w * opacity);
+            drawColor.setRGBA(s.x, s.y, s.z, s.w * opacity);
             drawFn(g, shadowTransform, drawColor);
         }
 
-        drawColor.set(c.x, c.y, c.z, c.w * opacity);
+        drawColor.setRGBA(c.x, c.y, c.z, c.w * opacity);
         drawFn(g, t, drawColor);
     }
 }
@@ -755,12 +755,12 @@ class ScrollTextEffect extends BaseTextEffect
         const h = this.#viewH;
 
         if (g === null)
-            this.#viewRect.set(0, 0, w, h);
+            this.#viewRect.setXYZW(0, 0, w, h);
         else
         {
             const a = this.getTransform().getPosition();
             const align = g.getAlignment();
-            this.#viewRect.set(a.x + Alignment.offsetX(align, w), a.y + Alignment.offsetY(align, h), w, h);
+            this.#viewRect.setXYZW(a.x + Alignment.offsetX(align, w), a.y + Alignment.offsetY(align, h), w, h);
         }
 
         return this.#viewRect;
@@ -834,7 +834,7 @@ class ScrollTextEffect extends BaseTextEffect
         const align = g.getAlignment();
         const anchor = this.getTransform().getPosition();
         let pos = ScrollTextEffect.#kCorner; // The text's bottom-left corner
-        pos.set(anchor.x + Alignment.offsetX(align, g.getWidth()), anchor.y + Alignment.offsetY(align, g.getHeight()));
+        pos.setXY(anchor.x + Alignment.offsetX(align, g.getWidth()), anchor.y + Alignment.offsetY(align, g.getHeight()));
         const horizontal = (this.#direction === ScrollTextEffect.kLeft || this.#direction === ScrollTextEffect.kRight);
         const textLength = horizontal ? g.getWidth() : g.getHeight();
         const viewLength = horizontal ? view.z : view.w;

@@ -208,7 +208,7 @@ class Entity
         const x = (dx * c) + (dy * s);
         const y = (dy * c) - (dx * s);
 
-        out.set((sx !== 0.0) ? x / sx : 0.0, (sy !== 0.0) ? y / sy : 0.0);
+        out.setXY((sx !== 0.0) ? x / sx : 0.0, (sy !== 0.0) ? y / sy : 0.0);
             return out;
     }
 
@@ -382,7 +382,7 @@ class Entity
                 return false;
         }
 
-        this.#color.set(color.x, color.y, color.z, color.w);
+        this.#color.set(color);
             return true;
     }
 

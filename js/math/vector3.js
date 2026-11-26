@@ -7,12 +7,42 @@ class Vector3
         this.z = _z;
     }
 	
-	set(_x, _y, _z)
-	{
-		this.x = _x;
-		this.y = _y;
-		this.z = _z;
-	}
+    // Copies vec (a Vector3, or anything with x, y and z, such as a Vector4)
+    set(vec)
+    {
+        this.x = vec.x;
+        this.y = vec.y;
+        this.z = vec.z;
+    }
+
+    setXYZ(_x, _y, _z)
+    {
+        this.x = _x;
+        this.y = _y;
+        this.z = _z;
+    }
+
+    /*
+        Sets x, y and z from text. Returns false (with a console.error), leaving the
+        vector unchanged, if text isn't three numbers. Valid formats (see
+        MathUtil.parseNumberList()):
+            "1, 2, 3"   "1 2 3"   "(1, 2, 3)"   "[1, 2, 3]"   "{1, 2, 3}"
+    */
+    setXYZFromString(text)
+    {
+        const n = MathUtil.parseNumberList(text);
+
+        if (n === null || n.length !== 3)
+        {
+            console.error(`Vector3.setXYZFromString(): "${text}" isn't three numbers, such as "1, 2, 3"`);
+                return false;
+        }
+
+        this.x = n[0];
+        this.y = n[1];
+        this.z = n[2];
+            return true;
+    }
 	
 	// Methods
 	dot(vec)

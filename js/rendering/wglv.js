@@ -177,8 +177,8 @@ class WGLV
     static getViewportWidth() { return WGLV.#viewW; }
     static getViewportHeight() { return WGLV.#viewH; }
 
-    static setBarColor(color) { WGLV.#barColor.set(color.x, color.y, color.z, color.w); }
-    static setClearColor(color) { WGLV.#clearColor.set(color.x, color.y, color.z, color.w); }
+    static setBarColor(color) { WGLV.#barColor.set(color); }
+    static setClearColor(color) { WGLV.#clearColor.set(color); }
 
     // Sizes the canvas to the window in device pixels and fits the design area inside it
     static resizeToWindow()

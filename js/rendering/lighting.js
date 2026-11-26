@@ -81,8 +81,8 @@ class BaseLight
             return true;
     }
     
-    setPosition(x, y, z) { this.#position.set(x, y, z); } // Design units; negative z is behind the 2D view, positive in front
-    setColor(color) { this.#color.set(color.x, color.y, color.z); } // (r, g, b) 0 - 1, copied from a Vector3 (or a Vector4; its w is ignored)
+    setPosition(x, y, z) { this.#position.setXYZ(x, y, z); } // Design units; negative z is behind the 2D view, positive in front
+    setColor(color) { this.#color.set(color); } // (r, g, b) 0 - 1, copied from a Vector3 (or a Vector4; its w is ignored)
     setEnabled(enabled) { this.#isEnabled = (enabled === true); }
 
     getShaderPosition(out) { return out; } // The light's u_lightPosN value, written into out (a Vector4) and returned; used by LightSet
@@ -129,7 +129,7 @@ class PointLight extends BaseLight
     {
         const p = this.getPosition();
 
-        out.set(p.x, p.y, p.z, this.#range);
+        out.setXYZW(p.x, p.y, p.z, this.#range);
             return out;
     }
 }
@@ -154,7 +154,7 @@ class DirectionalLight extends BaseLight
         this.#target = new Vector3(_targetX, _targetY, _targetZ);
     }
 
-    setTarget(x, y, z) { this.#target.set(x, y, z); }
+    setTarget(x, y, z) { this.#target.setXYZ(x, y, z); }
     
     getTarget() { return this.#target; } // Read-only; change it with setTarget()
 
@@ -164,10 +164,10 @@ class DirectionalLight extends BaseLight
         const p = this.getPosition();
         const t = this.#target;
 
-        out.set(t.x - p.x, t.y - p.y, t.z - p.z);
+        out.setXYZ(t.x - p.x, t.y - p.y, t.z - p.z);
 
         if (out.lengthSquared() <= MathDefines.kEpsilon)
-            out.set(0.0, 0.0, -1.0); // Same point: shine into the view
+            out.setXYZ(0.0, 0.0, -1.0); // Same point: shine into the view
 
         out.normalize();
             return out;
@@ -178,7 +178,7 @@ class DirectionalLight extends BaseLight
     {
         const d = this.getDirection(DirectionalLight.#kScratch);
 
-        out.set(-d.x, -d.y, -d.z, 0.0);
+        out.setXYZW(-d.x, -d.y, -d.z, 0.0);
             return out;
     }
 }
@@ -265,7 +265,7 @@ class LightSet
     clear() { this.#lights.length = 0; }
 
     // color is (r, g, b) 0 - 1 (a Vector3, or a Vector4 with w ignored), copied and used as is
-    setAmbient(color) { this.#ambient.set(color.x, color.y, color.z, this.#ambient.w); }
+    setAmbient(color) { this.#ambient.setRGBA(color.x, color.y, color.z, this.#ambient.w); }
 
     getAmbient() { return this.#ambient; } // Read-only (w is the light count); change it with setAmbient()
     getLights() { return this.#lights; } // Read-only; change them with add(), remove() and clear()

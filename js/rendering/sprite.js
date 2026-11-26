@@ -459,7 +459,7 @@ class Sprite extends Model2D
             return;
 
         const r = uvRect ?? this.getUVRect();
-        Sprite.#kUVScratch.set(r.getX(), r.getY(), r.getWidth(), r.getHeight());
+        Sprite.#kUVScratch.setXYZW(r.getX(), r.getY(), r.getWidth(), r.getHeight());
         material.setUniform("u_vec1", Sprite.#kUVScratch);
 
         super.draw(transform, color, null, material);

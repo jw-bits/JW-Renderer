@@ -129,7 +129,7 @@ class MotionBase
             const c = state.color;
             let clamped = MotionBase.#kColor;
 
-            clamped.set(MathUtil.clamp01(c.x), MathUtil.clamp01(c.y), MathUtil.clamp01(c.z), MathUtil.clamp01(c.w));
+            clamped.setRGBA(MathUtil.clamp01(c.x), MathUtil.clamp01(c.y), MathUtil.clamp01(c.z), MathUtil.clamp01(c.w));
             entity.setColor(clamped); // Copied
         }
     }

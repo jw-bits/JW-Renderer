@@ -136,7 +136,7 @@ class UVRect
         const x = o.xRunsRight ? (left - o.x) : (o.x - left - width);
         const y = o.yRunsUp ? (bottom - o.y) : (o.y - bottom - height);
 
-        out.set(x, y, width, height);
+        out.setXYZW(x, y, width, height);
             return out;
     }
 
@@ -712,7 +712,7 @@ class ClipSpace
 
         ClipSpace.#camera = camera;
         ClipSpace.#uploadedVersion = version;
-        u.set(s.x, s.y, s.z, s.w);
+        u.set(s);
         ClipSpace.#isUploaded = true;
 
         if (viewportChanged === true)
@@ -732,7 +732,7 @@ class ClipSpace
         if (target !== null)
             return target.getDesignRect(out);
 
-        out.set(0, 0, WGLV.getWidth(), WGLV.getHeight());
+        out.setXYZW(0, 0, WGLV.getWidth(), WGLV.getHeight());
             return out;
     }
 
@@ -840,7 +840,7 @@ class ClipSpace
         ClipSpace.#frame = null;
         ClipSpace.#camera = null;
         ClipSpace.#isUploaded = false;
-        ClipSpace.#uploadedSurface.set(0, 0, 0, 0);
+        ClipSpace.#uploadedSurface.setXYZW(0, 0, 0, 0);
         ClipSpace.#clipStack.length = 0;
     }
 

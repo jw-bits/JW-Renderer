@@ -138,7 +138,7 @@ class Model2D
     getCorner(transform, out = new Vector2())
     {
         const t = this.getDrawTransform(transform, Model2D.#kDrawTransform);
-        out.set(t.getX(), t.getY());
+        out.setXY(t.getX(), t.getY());
             return out;
     }
 
@@ -167,6 +167,16 @@ class Model2D
 
     // True if Batcher may draw this with its instanced shader when drawn with material (see the top of this file). Subclasses opt in.
     canInstance(material = this.#material) { return false; }
+
+    /*
+        True if draw() binds Materials of its own (Skeleton2D: one per atlas page and
+        blend mode) rather than drawing with the bound one. Batcher then doesn't bind
+        one for it and forgets what was bound afterwards. False unless a subclass says so.
+    */
+    bindsOwnMaterials() { return false; }
+
+    // Draw calls the last draw() made; 1 unless a subclass that binds its own Materials says otherwise
+    getDrawCount() { return 1; }
 
     // The part of the texture drawn, as a UVRect. Shared and read-only for models that draw all of it; don't change it.
     getUVRect() { return this.#getTextureUVRect(); }
@@ -235,10 +245,10 @@ class Model2D
         const m = material;
         const r = uvRect ?? this.getUVRect();
 
-        Model2D.#kRect.set(transform.getX(), transform.getY(), this.#width / 2.0, this.#height / 2.0);
-        Model2D.#kScaleRot.set(transform.getScaleX(), transform.getScaleY(), transform.getRotation());
-        Model2D.#kUVOffset.set(r.getX(), r.getY());
-        Model2D.#kUVTile.set(r.getWidth(), r.getHeight());
+        Model2D.#kRect.setXYZW(transform.getX(), transform.getY(), this.#width / 2.0, this.#height / 2.0);
+        Model2D.#kScaleRot.setXYZ(transform.getScaleX(), transform.getScaleY(), transform.getRotation());
+        Model2D.#kUVOffset.setXY(r.getX(), r.getY());
+        Model2D.#kUVTile.setXY(r.getWidth(), r.getHeight());
 
         m.setUniform("u_color", color);
         m.setUniform("u_vec0", Model2D.#kRect);
@@ -844,7 +854,7 @@ class Text2D extends Model2D
         if (offsetX === this.#shadowOffset.x && offsetY === this.#shadowOffset.y)
             return;
 
-        this.#shadowOffset.set(offsetX, offsetY);
+        this.#shadowOffset.setXY(offsetX, offsetY);
 
         if (this.#isShadowOn === true)
             this.#rasterizeAgain();
@@ -970,7 +980,7 @@ class Text2D extends Model2D
         if (target.x === color.x && target.y === color.y && target.z === color.z && target.w === color.w)
             return false;
 
-        target.set(color.x, color.y, color.z, color.w);
+        target.set(color);
             return true;
     }
 }

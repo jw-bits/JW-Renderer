@@ -87,6 +87,8 @@ const kFiles = [
     "js/spine/spine_animation.js",
     "js/spine/spine_json.js",
     "js/spine/spine_skeleton.js",
+    "js/spine/spine_animation_state.js",
+    "js/spine/spine_model.js",
     "js/spine/spine_debug.js",
 
     "js/ux/text_effects.js",

@@ -178,7 +178,7 @@ class Toggle
     // (x, y) is the anchor point; align says which part of the toggle sits on it
     setPos(x, y, align = Alignment.kBottomLeft)
     {
-        this.#anchor.set(x, y);
+        this.#anchor.setXY(x, y);
         this.#align = align;
         this.#layout();
     }
@@ -532,12 +532,12 @@ class Toggle
 
     // *** Static Internal Helpers ***
 
-    static #copy(target, color) { target.set(color.x, color.y, color.z, color.w); }
+    static #copy(target, color) { target.set(color); }
 
     // a blended toward b by t (0 - 1), written into out and returned
     static #lerp(out, a, b, t)
     {
-        out.set(a.x + ((b.x - a.x) * t), a.y + ((b.y - a.y) * t),
+        out.setRGBA(a.x + ((b.x - a.x) * t), a.y + ((b.y - a.y) * t),
                 a.z + ((b.z - a.z) * t), a.w + ((b.w - a.w) * t));
             return out;
     }
@@ -545,7 +545,7 @@ class Toggle
     // color with its alpha times amount, written into out and returned
     static #faded(out, color, amount)
     {
-        out.set(color.x, color.y, color.z, color.w * amount);
+        out.setRGBA(color.x, color.y, color.z, color.w * amount);
             return out;
     }
 }

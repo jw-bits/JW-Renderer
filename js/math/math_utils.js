@@ -46,6 +46,45 @@ class MathUtil
     }
 
     /*
+        The numbers in text as a new array, or null if text isn't a list of numbers.
+        Used by the Vector classes' ...FromString() methods. Valid formats:
+            "1, 2, 3"       Separated by commas
+            "1 2 3"         Separated by spaces (or a mix: "1, 2 3")
+            "(1, 2, 3)"     Wrapped in ( ), [ ] or { }
+        Each number is a plain decimal, optionally signed and with an exponent:
+        "-1.5", "+2", ".5", "3.", "2e-3". Hex, "Infinity" and "NaN" aren't numbers here.
+    */
+    static parseNumberList(text)
+    {
+        if (typeof text !== "string")
+            return null;
+
+        let s = text.trim();
+        const open = s.charAt(0);
+        const close = s.charAt(s.length - 1);
+
+        if ((open === "(" && close === ")") || (open === "[" && close === "]") || (open === "{" && close === "}"))
+            s = s.slice(1, -1).trim();
+
+        if (s.length === 0)
+            return null;
+
+        let out = [];
+
+        for (const part of s.split(/\s*,\s*|\s+/))
+        {
+            if (MathUtil.#kNumber.test(part) === false)
+                return null;
+
+            out.push(Number(part));
+        }
+
+        return out;
+    }
+
+    static #kNumber = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i; // One number for parseNumberList()
+
+    /*
         Smooth 1D gradient noise, -1 to 1: a wavy line through x that's 0 at every
         whole number and changes direction about once per unit. The same x and seed
         always give the same value; a different seed (a whole number) gives a

@@ -12,10 +12,10 @@
 
     Spine (page 4, a page of its own): eight of the Spine sample skeletons
     (tools/Spine/demos/assets), each loaded with SpineSkeletonData.load(),
-    animated with SpineAnimation.apply() and drawn by SpineSkeletonDebug as
-    lines: bones in red, region quads in blue, mesh hulls in orange, paths,
-    bounding boxes and clipping polygons in green (see js/spine). Their images
-    come with Phase 3 of docs/spine_plan.md.
+    animated with SpineAnimation.apply() and drawn by a Skeleton2D (its
+    images), with SpineSkeletonDebug lines over them: bones in red, paths,
+    bounding boxes and clipping polygons in green (see js/spine). The tank
+    shows multiply blending (its shadow), the owl and spineboy additive.
 
     Render targets (render_target.js, post_effects.js): pages change with a
     ScreenTransition (a wipe, circle, dissolve, fade or wipe up, in turn)
@@ -174,7 +174,7 @@ const HIERARCHY_ROCK = 0.2;               // The root turns this many radians ei
 const HIERARCHY_ROCK_TIME = 6.3;          // ...taking this many seconds each way
 const HIERARCHY_BREATHE = 0.84;           // The root's scale swings between this and 1...
 const HIERARCHY_BREATHE_TIME = 2.9;       // ...taking this many seconds each way
-// Spine (page 4): each sample skeleton as SpineSkeletonDebug lines (bones, region quads, mesh hulls), animated.
+// Spine (page 4): each sample skeleton drawn by a Skeleton2D, with its bones (and paths, clipping) as SpineSkeletonDebug lines over it, animated.
 // hold: the bone kept where the setup pose has it (the root if not given), so one that travels plays on the spot.
 // hide: an attachment left out (the tank's 7 ground tiles span 7,200 units, scrolling under it as it drives).
 const SPINE_ASSETS = "./tools/Spine/demos/assets/";
@@ -189,6 +189,7 @@ const SPINE_ITEMS = [{ name: "dragon", atlas: "atlas1", animation: "flying", tes
                      { name: "heroes", atlas: "heroes", animation: "run", tests: "a skin, trimmed regions", skin: 1 }];
 const SPINE_VIEW = new Vector2(CELL_W - 80, CELL_H - 100); // Each skeleton's setup pose is fitted into this, centered in its slot
 const SPINE_LINE_WIDTH = 1.5;
+const SPINE_ORIGIN = new Transform2D(); // Skeleton2Ds are drawn at the origin: the skeleton's own x, y and scale place it (as for the lines)
 
 const TRANSITION_SECONDS = 0.7;
 const TRANSITION_SOFTNESS = 0.15;
@@ -200,7 +201,7 @@ const Layers = {
     kShapes: 1,    // Rect2D, RoundedRect2D, NinePatch2D, Sprite
     kText: 2,      // Text2D, TextGlyphs2D
     kEffects: 3,   // The text effects
-    kParticles: 4, // And the Spine skeletons' debug lines
+    kParticles: 4, // And the Spine skeletons (Skeleton2D) and their debug lines
     kLabels: 5,    // The item labels and the metrics window, drawn after counting stops so they aren't measured
     kHudPanel: 6,
     kHudText: 7
@@ -455,7 +456,7 @@ function buildScene()
     let emitCarry = 0.0; // Particles owed from earlier frames (fractions of one)
 
     items.push({ label: "Particles2D - GPU sprites, frames 0 - 2",
-                 place: (x, y) => origin.set(x, (y - ITEM_RAISE) - (CELL_H / 2.0) + PARTICLE_BASE),
+                 place: (x, y) => origin.setXY(x, (y - ITEM_RAISE) - (CELL_H / 2.0) + PARTICLE_BASE),
                  update: (dt) => {
                      emitCarry += PARTICLE_RATE * dt;
 
@@ -817,6 +818,8 @@ function buildScene()
         console.error("Couldn't load the Spine debug lines");
 
     spineDebug.setLineWidth(SPINE_LINE_WIDTH);
+    spineDebug.setRegions(false); // The images show these now
+    spineDebug.setMeshes(false);
 
     let firstSpine = true;
 
@@ -1096,7 +1099,7 @@ function makePostItem(label, effect, format, update, draw)
 
     return { label: label,
              place: (x, y) => {
-                 center.set(x, y);
+                 center.setXY(x, y);
                  chain.setRect(x - (POST_VIEW.x / 2.0), y - (POST_VIEW.y / 2.0), POST_VIEW.x, POST_VIEW.y);
              },
              update: update,
@@ -1287,7 +1290,7 @@ function makeCachedItem()
     let cellAt = new Transform2D();
 
     let colors = Array.from({ length: count }, () => new Vector4());
-    const recolor = () => colors.forEach((c) => c.set(randomRange(0.2, 1.0), randomRange(0.2, 1.0), randomRange(0.2, 1.0), 1.0));
+    const recolor = () => colors.forEach((c) => c.setRGBA(randomRange(0.2, 1.0), randomRange(0.2, 1.0), randomRange(0.2, 1.0), 1.0));
     recolor();
 
     const drawCells = () => {
@@ -1302,7 +1305,7 @@ function makeCachedItem()
 
     return { label: `CachedLayer - ${count} rects drawn once, new every ${CACHE_REDRAW_SECONDS} s`,
              place: (x, y) => {
-                 origin.set(x - (width / 2.0), y - (height / 2.0));
+                 origin.setXY(x - (width / 2.0), y - (height / 2.0));
 
                  if (cache.load(origin.x, origin.y, width, height) === false)
                      console.error("Couldn't load the CachedLayer");
@@ -1331,7 +1334,16 @@ function makeCachedItem()
 */
 function makeSpineItem(s, data, debug)
 {
-    let skeleton = new SpineSkeleton(data);
+    // Its images (a Skeleton2D), or just the lines if it can't load
+    let model = new Skeleton2D();
+
+    if (model.load(data) === false)
+    {
+        console.error(`Spine ${s.name}: couldn't load its Skeleton2D; showing its debug lines only`);
+        model = null;
+    }
+
+    let skeleton = model?.getSkeleton() ?? new SpineSkeleton(data);
     const animation = data.findAnimation(s.animation);
     const root = (s.hold !== undefined) ? (skeleton.findBone(s.hold) ?? skeleton.getRootBone()) : skeleton.getRootBone();
     let time = 0.0;
@@ -1366,8 +1378,8 @@ function makeSpineItem(s, data, debug)
     const fitBounds = () => {
         let min = new Vector2(Infinity, Infinity);
         let max = new Vector2(-Infinity, -Infinity);
-        let offset = new SpineVector2();
-        let size = new SpineVector2();
+        let offset = new Vector2();
+        let size = new Vector2();
         const samples = (animation !== null) ? 12 : 1;
 
         for (let i = 0; i < samples; ++i)
@@ -1378,8 +1390,8 @@ function makeSpineItem(s, data, debug)
 
             if (Number.isFinite(offset.x) === true && size.x > 0.0)
             {
-                min.set(Math.min(min.x, offset.x), Math.min(min.y, offset.y));
-                max.set(Math.max(max.x, offset.x + size.x), Math.max(max.y, offset.y + size.y));
+                min.setXY(Math.min(min.x, offset.x), Math.min(min.y, offset.y));
+                max.setXY(Math.max(max.x, offset.x + size.x), Math.max(max.y, offset.y + size.y));
             }
         }
 
@@ -1414,7 +1426,13 @@ function makeSpineItem(s, data, debug)
                  time += dt;
                  poseAt(time, last);
              },
-             submit: () => debug.submit(gBatcher, skeleton, Layers.kParticles) };
+             submit: () => {
+                 // The images first, so the bones (lines, another group on the layer) draw over them
+                 if (model !== null)
+                     gBatcher.submit(model, SPINE_ORIGIN, Layers.kParticles);
+
+                 debug.submit(gBatcher, skeleton, Layers.kParticles);
+             } };
 }
 
 // The page transition (see turnPage())

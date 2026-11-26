@@ -35,15 +35,23 @@
     own (Vector4, Vector2, MathUtil, Easing) wherever they do the same job.
 
         SpineIntSet, SpineStringSet  Sets of ints / strings
-        SpineColor                   r, g, b, a (0 - 1)
-        SpineMathUtils               Spine's math helpers (degrees, clamp, signum, ...)
+        SpineMathUtils              Spine's math helpers (degrees, clamp, signum, ...)
         SpinePow, SpinePowOut        Interpolations
         SpineUtils                   Array helpers, enumValue(), and getRegionUVs() (engine addition)
         SpinePool                    Reuses objects
-        SpineVector2                 x, y
 
     Left out: DebugUtils, TimeKeeper and WindowedMean (the engine has its own
     timing and logging).
+
+    Replaced: Color is the engine's Vector4, with (r, g, b, a) in (x, y, z, w).
+    Its set(r, g, b, a) and add() clamped to 0 - 1, so the timelines call
+    Vector4.clamp01() after writing a color; setFromString() is
+    Vector4.setRGBAFromString(). A Spine color made with no values is
+    new Vector4(0, 0, 0, 0), since a new Vector4()'s w is 1.
+    Vector2 is the engine's Vector2: values are written with setXY(), and
+    SpineSkeleton.getBounds() fills Vector2s. newFloatArray() is
+    new Float32Array(), and arrayCopy() between two typed arrays is
+    TypedArray.set(); arrayCopy() stays for copies into or from plain arrays.
 */
 
 class SpineIntSet
@@ -107,105 +115,6 @@ class SpineStringSet
     {
         this.entries = {};
         this.size = 0;
-    }
-}
-
-class SpineColor
-{
-    r;
-    g;
-    b;
-    a;
-    static WHITE = new SpineColor(1, 1, 1, 1);
-    static RED = new SpineColor(1, 0, 0, 1);
-    static GREEN = new SpineColor(0, 1, 0, 1);
-    static BLUE = new SpineColor(0, 0, 1, 1);
-    static MAGENTA = new SpineColor(1, 0, 1, 1);
-
-    constructor(r = 0, g = 0, b = 0, a = 0)
-    {
-        this.r = r;
-        this.g = g;
-        this.b = b;
-        this.a = a;
-    }
-
-    set(r, g, b, a)
-    {
-        this.r = r;
-        this.g = g;
-        this.b = b;
-        this.a = a;
-        return this.clamp();
-    }
-
-    setFromColor(c)
-    {
-        this.r = c.r;
-        this.g = c.g;
-        this.b = c.b;
-        this.a = c.a;
-        return this;
-    }
-
-    setFromString(hex)
-    {
-        hex = hex.charAt(0) == '#' ? hex.substr(1) : hex;
-        this.r = parseInt(hex.substr(0, 2), 16) / 255;
-        this.g = parseInt(hex.substr(2, 2), 16) / 255;
-        this.b = parseInt(hex.substr(4, 2), 16) / 255;
-        this.a = hex.length != 8 ? 1 : parseInt(hex.substr(6, 2), 16) / 255;
-        return this;
-    }
-
-    add(r, g, b, a)
-    {
-        this.r += r;
-        this.g += g;
-        this.b += b;
-        this.a += a;
-        return this.clamp();
-    }
-
-    clamp()
-    {
-        if (this.r < 0)
-            this.r = 0;
-        else if (this.r > 1)
-            this.r = 1;
-        if (this.g < 0)
-            this.g = 0;
-        else if (this.g > 1)
-            this.g = 1;
-        if (this.b < 0)
-            this.b = 0;
-        else if (this.b > 1)
-            this.b = 1;
-        if (this.a < 0)
-            this.a = 0;
-        else if (this.a > 1)
-            this.a = 1;
-        return this;
-    }
-
-    static rgba8888ToColor(color, value)
-    {
-        color.r = ((value & 0xff000000) >>> 24) / 255;
-        color.g = ((value & 0x00ff0000) >>> 16) / 255;
-        color.b = ((value & 0x0000ff00) >>> 8) / 255;
-        color.a = ((value & 0x000000ff)) / 255;
-    }
-
-    static rgb888ToColor(color, value)
-    {
-        color.r = ((value & 0x00ff0000) >>> 16) / 255;
-        color.g = ((value & 0x0000ff00) >>> 8) / 255;
-        color.b = ((value & 0x000000ff)) / 255;
-    }
-
-    static fromString(hex)
-    {
-        return new SpineColor().setFromString(hex);
     }
 }
 
@@ -359,19 +268,6 @@ class SpineUtils
         return array;
     }
 
-    static newFloatArray(size)
-    {
-        if (SpineUtils.SUPPORTS_TYPED_ARRAYS)
-            return new Float32Array(size);
-        else
-        {
-            let array = new Array(size);
-            for (let i = 0; i < array.length; i++)
-                array[i] = 0;
-            return array;
-        }
-    }
-
     static newShortArray(size)
     {
         if (SpineUtils.SUPPORTS_TYPED_ARRAYS)
@@ -462,42 +358,5 @@ class SpinePool
     clear()
     {
         this.items.length = 0;
-    }
-}
-
-class SpineVector2
-{
-    x;
-    y;
-
-    constructor(x = 0, y = 0)
-    {
-        this.x = x;
-        this.y = y;
-    }
-
-    set(x, y)
-    {
-        this.x = x;
-        this.y = y;
-        return this;
-    }
-
-    length()
-    {
-        let x = this.x;
-        let y = this.y;
-        return Math.sqrt(x * x + y * y);
-    }
-
-    normalize()
-    {
-        let len = this.length();
-        if (len != 0)
-        {
-            this.x /= len;
-            this.y /= len;
-        }
-        return this;
     }
 }
