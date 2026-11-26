@@ -20,7 +20,15 @@
     the camera's viewport is its slot, which also clips it, and its position
     and zoom fit the whole animation. The tank's camera follows tankRoot, as
     Spine's own demo does, so the ground and rock scroll past under it. B
-    shows and hides the debug lines while page 4 is shown.
+    shows and hides the debug lines while page 4 is shown (the HUD's Bones
+    line says so there).
+
+    Spine stress (page 5): 40 spineboys running in a grid 4 views wide,
+    with a camera panning across and back. Its batcher culls the ones out
+    of view (Batcher.setLayerCulled(), by a box fitted over the run with
+    Skeleton2D.setCullBounds()); its label shows how many were drawn and
+    culled and the ms its batcher's render() took. C turns culling on and
+    off while page 5 is shown, to compare (the HUD's Culled line says so).
 
     Render targets (render_target.js, post_effects.js): pages change with a
     ScreenTransition (a wipe, circle, dissolve, fade or wipe up, in turn)
@@ -30,7 +38,7 @@
     the upper-left slot, so each page shows up to 8 test items, one per slot,
     nothing overlapping, each with a small label under it saying what it
     tests. The items fill as many pages as they need, and the pages cycle
-    every 5 seconds; space pauses and resumes that. The metrics are for the
+    every 5 seconds; P pauses and resumes that. The metrics are for the
     page shown.
 
     Lighting (see lighting.js): two brick Rect2Ds on a layer the batcher
@@ -44,23 +52,34 @@
     stops, so they never count towards the metrics or the overdraw.
 
     Metrics, per frame (the HUD refreshes a few times a second):
+        Page           The page shown, and seconds to the next (P pauses and resumes)
         FPS            Frames per second, averaged over the last half second
         Vertices       Vertex shader runs: each draw call's index (or vertex) count times its instances
         Materials      Different Materials bound
-        Rectangles     Quads drawn: each instance of an instanced draw (Rect2D, Text2D, Sprite through
-                       the batcher, and every particle), plus Rect2D / Sprite / Text2D drawn on their own
-                       and each glyph of a TextGlyphs2D. RoundedRect2D and NinePatch2D aren't quads.
-        Overdraw       Pixels drawn 2 or more times, and the share of the view that is
-        Draw calls     GL draw calls (post effect passes included)
-        State changes  GL state calls RenderState sent (blend mode and scissor); the ones it
+        Objects        Models drawn: each Model2D.draw() (Skeleton2D's included, culled ones not),
+                       plus each instance of the batcher's instanced draws (Rect2D, Text2D, Sprite);
+                       a Particles2D counts once, not once per particle
+        Overdraw       The share of the view drawn 2 or more times; 0 while off or not yet sampled (O)
+        Draw Calls     GL draw calls (post effect passes included)
+        State Changes  GL state calls RenderState sent (blend mode and scissor); the ones it
                        skipped because nothing changed aren't counted
-        Binds          The scene batcher's shader, texture and sampler GL calls sent, and the
-                       binds it skipped because they were already bound (see BatchBinder)
-        Targets      RenderTargets loaded and their GPU memory, and how many are RenderTargetPool's
+        Binds          Shader, texture and sampler GL calls sent, and the binds skipped because
+                       they were already bound: every batcher's (see BatchBinder), plus Skeleton2D's
+                       own Material.bind() calls, which are all sent
+    Shown only on the pages that use them:
+        Targets        RenderTargets loaded and their GPU memory, and how many are RenderTargetPool's;
+                       shown once the page has drawn into a target or borrowed one from the pool
+        Bones          The bones of the Skeleton2Ds drawn (culled ones not); B toggles the
+                       debug lines on the Spine page
+        Culled         Models the batchers culled (Batcher.setLayerCulled()); shown once the page
+                       has set a layer's culling. C toggles it on the stress page.
+    The HUD has as many lines as the page shown needs.
 
-    The counts come from wrapping, from here, the GL
-    context's draw calls, Material.prototype.bind, BatchBinder.prototype.bindMaterial
-    and Model2D.prototype.draw; Binds comes from the batcher itself.
+    The counts come from wrapping, from here, the GL context's draw calls,
+    Material.prototype.bind, BatchBinder.prototype.bindMaterial,
+    Model2D.prototype.draw, Skeleton2D.prototype.draw, Particles2D.prototype.render,
+    RenderTargets.push, RenderTargetPool.acquire and Batcher.prototype's
+    setLayerCulled and render; the batchers' Binds come from their own counts.
 
     Overdraw: the context is created with a stencil buffer. Twice a second the
     scene is drawn one extra time with every fragment incrementing the
@@ -75,7 +94,7 @@
     O turns it on and off.
 
     Particles2D draws every slot of its ring each frame, alive or not, so its
-    vertices and rectangles are its capacity's worth.
+    vertices are its capacity's worth.
 */
 
 // *** Constants ***
@@ -90,7 +109,7 @@ const GRID_ROWS = 3;
 const CELL_W = DESIGN_WIDTH / GRID_COLS;   // 640
 const CELL_H = DESIGN_HEIGHT / GRID_ROWS;  // 360
 const ITEMS_PER_PAGE = (GRID_COLS * GRID_ROWS) - 1;
-const PAGE_SECONDS = 5.0;        // Auto-cycle; space pauses and resumes it
+const PAGE_SECONDS = 5.0;        // Auto-cycle; P pauses and resumes it
 
 // Each page's background (the clear color), in turn, so page transitions stand out
 const PAGE_BACKGROUNDS = [new Vector4(0.0, 0.0, 64.0 / 255.0, 1.0),
@@ -108,7 +127,6 @@ const HUD_FONT = "Consolas, 'Courier New', monospace"; // Monospaced, so the lab
 const HUD_FONT_SIZE = 16.5;
 const HUD_MARGIN = 10.5;         // From the view's top-left corner
 const HUD_PADDING = 7.5;         // Around the text, inside the panel
-const HUD_LABELS = ["Page", "FPS", "Vertices", "Materials", "Rectangles", "Overdraw", "Draw calls", "State changes", "Binds", "Targets", "Keys"];
 const OVERDRAW_SAMPLE_MS = 500;  // How often overdraw is measured
 const MAX_DT = 0.1;              // Seconds; longer frames (e.g. a hidden tab) are clamped
 
@@ -201,6 +219,15 @@ const SPINE_CLIP = new Vector2(CELL_W - 16, CELL_H - 16);  // Each skeleton's ca
 const SPINE_LINE_WIDTH = 1.5;           // Screen design units, whatever the camera's zoom
 const SPINE_MIX = 0.2;                  // Seconds of crossfade between a sequence's animations
 const SPINE_ORIGIN = new Transform2D(); // Skeleton2Ds are drawn at the origin at scale 1; their cameras place them
+// Spine stress (page 5): SPINE_STRESS_COLS x SPINE_STRESS_ROWS spineboys running, spread over SPINE_STRESS_VIEWS camera views
+// across; the camera pans across and back, and its batcher culls the ones out of view (C turns culling on and off).
+const SPINE_STRESS_NAME = "spineboy";
+const SPINE_STRESS_ANIMATION = "run";
+const SPINE_STRESS_COLS = 10;
+const SPINE_STRESS_ROWS = 4;
+const SPINE_STRESS_VIEWS = 4;           // The grid is this many views wide
+const SPINE_STRESS_PAN_SECONDS = 8.0;   // Each way
+const SPINE_STRESS_MARGIN = 1.1;        // Each spineboy's cell is its fitted box times this
 
 const TRANSITION_SECONDS = 0.7;
 const TRANSITION_SOFTNESS = 0.15;
@@ -255,12 +282,16 @@ let gIsReady = false;
 let gFrameTS = 0.0;     // This frame's requestAnimationFrame() time in milliseconds (the last frame's until appMain() sets it)
 let gEaseHold = 0.0;    // Seconds the ease holds its end before playing again
 
-// Which page is shown; it changes every PAGE_SECONDS unless paused (space). isTurning: change at the end of this frame.
+// Which page is shown; it changes every PAGE_SECONDS unless paused (P). isTurning: change at the end of this frame.
 let gPages = { current: 0, count: 1, timer: 0.0, isPaused: false, isTurning: false };
 
 // Spine's page: B shows and hides the debug lines while it's shown
 let gSpinePage = -1;    // The page the Spine items are on (-1: none loaded)
 let gSpineLines = true;
+
+// Spine stress's page: C turns its culling on and off while it's shown
+let gStressPage = -1;   // -1: not loaded
+let gStressCull = true;
 
 // The page transition
 let gTransition = null; // ScreenTransition
@@ -275,14 +306,24 @@ let gStats = {
     drawingModel: null,     // The Model2D in Model2D.draw(), so its draw calls know what they are
     materials: new Set(),
 
+    inParticles: false,     // In Particles2D.render(), so its instanced draw counts as one object
+
     // This frame, while counting
     vertices: 0,
-    rects: 0,
+    objects: 0,
+    bones: 0,
+    culled: 0,
+    bindsSent: 0,
+    bindsSkipped: 0,
     drawCalls: 0,
-    stateStart: 0,          // RenderState.getChangeCount() when counting began
+    stateStart: 0,         // RenderState.getChangeCount() when counting began
 
     // The last finished frame
-    last: { vertices: 0, rects: 0, drawCalls: 0, materials: 0, stateChanges: 0, bindsSent: 0, bindsSkipped: 0 },
+    last: { vertices: 0, objects: 0, bones: 0, culled: 0, drawCalls: 0, materials: 0, stateChanges: 0, bindsSent: 0, bindsSkipped: 0 },
+
+    // Since the page was shown (turnPage() resets them): whether to show the Targets and Culled lines
+    pageUsesTargets: false,
+    pageUsesCulling: false,
 
     // FPS over a window of frames
     fpsFrames: 0,
@@ -332,15 +373,14 @@ window.onload = () => {
 
 window.onresize = () => WGLV.resizeToWindow();
 
-// Space pauses and resumes the page cycle, O toggles the overdraw measuring, B the Spine debug lines (on their page)
+// P pauses and resumes the page cycle, O toggles the overdraw measuring, B the Spine debug lines and C Spine stress's culling (each on its page)
 window.addEventListener("keydown", (e) => {
     if (e.repeat === true)
         return;
 
     switch (e.code)
     {
-        case KeyCode.kSpace:
-            e.preventDefault(); // No page scroll
+        case KeyCode.kP:
             gPages.isPaused = !gPages.isPaused;
             break;
 
@@ -351,6 +391,11 @@ window.addEventListener("keydown", (e) => {
         case KeyCode.kB:
             if (gPages.current === gSpinePage)
                 gSpineLines = !gSpineLines;
+            break;
+
+        case KeyCode.kC:
+            if (gPages.current === gStressPage)
+                gStressCull = !gStressCull;
             break;
     }
 });
@@ -856,9 +901,21 @@ function buildScene()
         items.push(spineItem);
     });
 
+    // *** Spine stress: page 5 is its own ***
+
+    const stressData = gScene.spineData[SPINE_ITEMS.findIndex((s) => s.name === SPINE_STRESS_NAME)] ?? null;
+
+    if (stressData !== null)
+    {
+        let stressItem = makeSpineStressItem(stressData);
+        stressItem.startsPage = true;
+        stressItem.isStress = true;
+        items.push(stressItem);
+    }
+
     // *** Pages and labels ***
 
-    const labelAtlas = new TextAtlas(font, items.map((item) => item.label).join(""), LABEL_FONT_SIZE);
+    const labelAtlas = new TextAtlas(font, items.map((item) => item.label).join("") + "0123456789.", LABEL_FONT_SIZE); // Digits for labels that change
     let position = 0; // Items placed so far, counting the slots left empty before an item that starts a page
 
     for (let i = 0; i < items.length; ++i)
@@ -884,6 +941,7 @@ function buildScene()
 
     gPages.count = Math.ceil(position / ITEMS_PER_PAGE);
     gSpinePage = items.find((item) => item.isSpine === true)?.page ?? -1;
+    gStressPage = items.find((item) => item.isStress === true)?.page ?? -1;
 
     gScene.items = items;
     gScene.lights = lights;
@@ -1535,6 +1593,140 @@ function makeSpineItem(s, data, debug)
              } };
 }
 
+/*
+    Spine stress: SPINE_STRESS_COLS x SPINE_STRESS_ROWS Skeleton2Ds of one skeleton (spineboy), each
+    playing SPINE_STRESS_ANIMATION from a different time, in a grid SPINE_STRESS_VIEWS camera views
+    wide. Like the Spine items it has its own Camera2D and Batcher, its viewport its slot; the camera
+    pans across the grid and back. The batcher culls layer 0 (Batcher.setLayerCulled()) while
+    gStressCull, by a box fitted over the animation (Skeleton2D.setCullBounds()), so only the ones in
+    view are streamed and drawn; every one still updates. The label shows how many were drawn and
+    culled, and the average ms its batcher's render() took (the CPU side: streams, uploads, draw calls).
+*/
+function makeSpineStressItem(data)
+{
+    const count = SPINE_STRESS_COLS * SPINE_STRESS_ROWS;
+    const animation = data.findAnimation(SPINE_STRESS_ANIMATION);
+    let models = [];
+    let places = [];
+    let item = null;
+
+    let camera = new Camera2D();
+    let batcher = new Batcher();
+    batcher.setCamera(camera);
+
+    // The box over the whole animation, sampled, in skeleton units
+    let box = new Bounds2D();
+    let offset = new Vector2();
+    let size = new Vector2();
+    const fitter = new SpineSkeleton(data);
+
+    for (let i = 0; i < 12; ++i)
+    {
+        fitter.setToSetupPose();
+        animation?.apply(fitter, 0.0, (animation.duration * i) / 12, true, null, 1.0, SpineMixBlend.setup, SpineMixDirection.mixIn);
+        fitter.updateWorldTransform();
+        fitter.getBounds(offset, size, []);
+
+        if (Number.isFinite(offset.x) === true && size.x > 0.0)
+            box.union(new Bounds2D(offset.x, offset.y, offset.x + size.x, offset.y + size.y));
+    }
+
+    if (box.isEmpty() === true)
+        box.setMinMax(-100.0, 0.0, 100.0, 400.0); // Not expected; something to cull by
+
+    // The grid: rows fill the view's height; columns spread over SPINE_STRESS_VIEWS views across
+    const cellH = box.getHeight() * SPINE_STRESS_MARGIN;
+    const zoom = SPINE_CLIP.y / (cellH * SPINE_STRESS_ROWS);
+    const viewW = SPINE_CLIP.x / zoom;
+    const gridW = viewW * SPINE_STRESS_VIEWS;
+    const cellW = gridW / SPINE_STRESS_COLS;
+    const center = box.getCenter();
+
+    camera.setZoom(zoom);
+
+    for (let i = 0; i < count; ++i)
+    {
+        let model = new Skeleton2D();
+
+        if (model.load(data) === false)
+        {
+            console.error("Spine stress: a Skeleton2D couldn't load; showing fewer");
+            break;
+        }
+
+        const entry = model.setAnimation(0, SPINE_STRESS_ANIMATION, true);
+
+        if (entry !== null)
+            entry.trackTime = (animation.duration * i) / count; // Out of step, so it doesn't look like one copied
+
+        model.setCullBounds(box);
+        models.push(model);
+
+        // Each cell's middle at the fitted box's middle; the grid's middle at (0, 0)
+        const col = i % SPINE_STRESS_COLS;
+        const row = Math.floor(i / SPINE_STRESS_COLS);
+        places.push(new Transform2D(((col + 0.5) * cellW) - (gridW / 2.0) - center.x,
+                                    ((row + 0.5) * cellH) - ((cellH * SPINE_STRESS_ROWS) / 2.0) - center.y));
+    }
+
+    let time = 0.0;
+    let msTotal = 0.0; // render() ms since the label last changed...
+    let msFrames = 0;  // ...over this many frames
+    let labelTimer = 0.0;
+    let drawn = models.length;
+    let culled = 0;
+
+    const drawable = {
+        render: () => {
+            const start = performance.now();
+            batcher.render();
+            msTotal += performance.now() - start;
+            ++msFrames;
+            culled = batcher.getCulledCount();
+            drawn = models.length - culled;
+        } };
+
+    const makeLabel = (ms) => `Spine stress - ${models.length} ${SPINE_STRESS_NAME}s: ${drawn} drawn, ${culled} culled, ` +
+                              `${ms.toFixed(2)} ms (C: cull ${(gStressCull === true) ? "on" : "off"})`;
+
+    item = { label: makeLabel(0.0),
+             place: (x, y) => {
+                 camera.setViewport(x - (SPINE_CLIP.x / 2.0), y - (SPINE_CLIP.y / 2.0), SPINE_CLIP.x, SPINE_CLIP.y);
+             },
+             update: (dt) => {
+                 time += dt;
+
+                 for (const m of models)
+                     m.update(dt); // Culled or not
+
+                 // Across and back: from the grid's left edge in view to its right
+                 const swing = 0.5 - (0.5 * Math.cos((time * Math.PI) / SPINE_STRESS_PAN_SECONDS));
+                 camera.setPosition(((gridW - viewW) * (swing - 0.5)), 0.0);
+                 camera.update(dt);
+
+                 // The label, as often as the metrics window
+                 labelTimer += dt;
+
+                 if (item.labelText !== undefined && labelTimer >= (HUD_REFRESH_MS / 1000.0))
+                 {
+                     item.labelText.setText(makeLabel((msFrames > 0) ? msTotal / msFrames : 0.0));
+                     labelTimer = 0.0;
+                     msTotal = 0.0;
+                     msFrames = 0;
+                 }
+             },
+             submit: () => {
+                 batcher.setLayerCulled(0, gStressCull);
+
+                 for (let i = 0; i < models.length; ++i)
+                     batcher.submit(models[i], places[i], 0);
+
+                 gBatcher.submitDrawable(drawable, Layers.kParticles);
+             } };
+
+    return item;
+}
+
 // The page transition (see turnPage())
 function buildTransition()
 {
@@ -1573,6 +1765,8 @@ function turnPage()
     }
 
     gPages.current = (gPages.current + 1) % gPages.count;
+    gStats.pageUsesTargets = false; // The new page shows these lines once it uses them
+    gStats.pageUsesCulling = false;
     WGLV.setClearColor(PAGE_BACKGROUNDS[gPages.current % PAGE_BACKGROUNDS.length]);
 }
 
@@ -1744,7 +1938,13 @@ function installHooks()
     Material.prototype.bind = function(...args)
     {
         if (gStats.isCounting === true)
+        {
             gStats.materials.add(this);
+
+            // Skeleton2D binds its Materials itself, past the batcher's BatchBinder: every GL call is sent, none skipped
+            if (gStats.drawingModel instanceof Skeleton2D)
+                gStats.bindsSent += materialBindCalls(this, args[0] !== false, args[1] !== false);
+        }
 
         return materialBind.apply(this, args);
     };
@@ -1760,16 +1960,112 @@ function installHooks()
         return binderBind.call(this, material, withShader);
     };
 
-    // Sprite.draw() calls super.draw(), which comes here too
+    // Sprite.draw() calls super.draw(), which comes here too; it's counted once
     const modelDraw = Model2D.prototype.draw;
 
     Model2D.prototype.draw = function(...args)
     {
         const outer = gStats.drawingModel;
+
+        if (gStats.isCounting === true && outer !== this)
+            ++gStats.objects;
+
         gStats.drawingModel = this;
         modelDraw.apply(this, args); // Passed on as given, so the defaults (its own Material) still apply
         gStats.drawingModel = outer;
     };
+
+    // Skeleton2D has its own draw(); the batcher doesn't call it for a culled one
+    const skeletonDraw = Skeleton2D.prototype.draw;
+
+    Skeleton2D.prototype.draw = function(...args)
+    {
+        if (gStats.isCounting === true)
+        {
+            ++gStats.objects;
+
+            const skeleton = this.getSkeleton();
+
+            if (skeleton !== null)
+                gStats.bones += skeleton.bones.length;
+        }
+
+        const outer = gStats.drawingModel;
+        gStats.drawingModel = this;
+        const result = skeletonDraw.apply(this, args);
+        gStats.drawingModel = outer;
+            return result;
+    };
+
+    // One object for its one instanced draw, however many particles
+    const particlesRender = Particles2D.prototype.render;
+
+    Particles2D.prototype.render = function(...args)
+    {
+        if (gStats.isCounting === true)
+            ++gStats.objects;
+
+        gStats.inParticles = true;
+        particlesRender.apply(this, args);
+        gStats.inParticles = false;
+    };
+
+    // Whether the page uses render targets (drawn into, or borrowed from the pool)
+    const targetsPush = RenderTargets.push;
+
+    RenderTargets.push = function(...args)
+    {
+        if (gStats.isCounting === true)
+            gStats.pageUsesTargets = true;
+
+        return targetsPush.apply(RenderTargets, args);
+    };
+
+    const poolAcquire = RenderTargetPool.acquire;
+
+    RenderTargetPool.acquire = function(...args)
+    {
+        if (gStats.isCounting === true)
+            gStats.pageUsesTargets = true;
+
+        return poolAcquire.apply(RenderTargetPool, args);
+    };
+
+    // Whether the page sets culling (on or off), and how many each batcher culled
+    const setLayerCulled = Batcher.prototype.setLayerCulled;
+
+    Batcher.prototype.setLayerCulled = function(...args)
+    {
+        if (gStats.isCounting === true)
+            gStats.pageUsesCulling = true;
+
+        return setLayerCulled.apply(this, args);
+    };
+
+    const batcherRender = Batcher.prototype.render;
+
+    Batcher.prototype.render = function(...args)
+    {
+        const result = batcherRender.apply(this, args);
+
+        // This render()'s; a batcher drawn from another (a drawable) keeps its own counts, so nothing's counted twice
+        if (gStats.isCounting === true)
+        {
+            gStats.culled += this.getCulledCount();
+            gStats.bindsSent += this.getBindsSent();
+            gStats.bindsSkipped += this.getBindsSkipped();
+        }
+
+        return result;
+    };
+}
+
+// The GL bind calls Material.bind() makes, counted as BatchBinder counts them: the shader and its texture units, then per texture its active unit, the texture and its sampler
+function materialBindCalls(material, withShader, withTextures)
+{
+    const shaderCalls = (withShader === true) ? 2 : 0;
+    const textureCalls = (withTextures === true) ? (3 * material.getTextureCount()) : 0;
+        return shaderCalls + textureCalls;
 }
 
 function countDraw(mode, count, instances, isInstanced)
@@ -1779,37 +2075,21 @@ function countDraw(mode, count, instances, isInstanced)
 
     ++gStats.drawCalls;
     gStats.vertices += count * instances;
-    gStats.rects += quadsIn(mode, count, instances, isInstanced);
-}
 
-// Quads in one draw call (see Rectangles at the top of this file)
-function quadsIn(mode, count, instances, isInstanced)
-{
-    const gl = WGLV.context;
-
-    if (mode !== gl.TRIANGLES)
-        return 0;
-
-    // Every instanced draw here is a 6-index quad per instance (Batcher, Particles2D)
-    if (isInstanced === true)
-        return (count === 6) ? instances : 0;
-
-    const m = gStats.drawingModel;
-
-    if (m instanceof TextGlyphs2D)
-        return Math.floor(count / 6); // One quad per glyph
-
-    if (m instanceof Rect2D || m instanceof Sprite || m instanceof Text2D)
-        return 1;
-
-    return 0; // RoundedRect2D, NinePatch2D, or not a model
+    // The batcher's instanced draws are a 6-index quad per model (Rect2D, Text2D, Sprite)
+    if (isInstanced === true && gStats.inParticles === false && mode === WGLV.context.TRIANGLES && count === 6)
+        gStats.objects += instances;
 }
 
 function beginCounting()
 {
     gStats.isCounting = true;
     gStats.vertices = 0;
-    gStats.rects = 0;
+    gStats.objects = 0;
+    gStats.bones = 0;
+    gStats.culled = 0;
+    gStats.bindsSent = 0;
+    gStats.bindsSkipped = 0;
     gStats.drawCalls = 0;
     gStats.stateStart = RenderState.getChangeCount();
     gStats.materials.clear();
@@ -1819,11 +2099,13 @@ function endCounting()
 {
     gStats.isCounting = false;
     gStats.last.vertices = gStats.vertices;
-    gStats.last.rects = gStats.rects;
+    gStats.last.objects = gStats.objects;
+    gStats.last.bones = gStats.bones;
+    gStats.last.culled = gStats.culled;
     gStats.last.drawCalls = gStats.drawCalls;
     gStats.last.stateChanges = RenderState.getChangeCount() - gStats.stateStart;
-    gStats.last.bindsSent = gBatcher.getBindsSent(); // The scene's render(), just done
-    gStats.last.bindsSkipped = gBatcher.getBindsSkipped();
+    gStats.last.bindsSent = gStats.bindsSent; // Every batcher's render() and Skeleton2D's own binds
+    gStats.last.bindsSkipped = gStats.bindsSkipped;
     gStats.last.materials = gStats.materials.size;
     gStats.materials.clear(); // Don't keep Materials alive
 }
@@ -1857,37 +2139,41 @@ function updateHud(ts)
     }
 
     const l = gStats.last;
-    let overdraw = "n/a";
 
-    if (gStats.isOverdrawOn === false)
-        overdraw = "off (O turns it on)";
-    else if (gMark !== null && gStats.viewPixels > 0)
-    {
-        const share = (100.0 * gStats.overdrawPixels) / gStats.viewPixels;
-        overdraw = `${formatCount(gStats.overdrawPixels)} px (${share.toFixed(1)}% of view)`;
-    }
+    // 0 while off, or before the first sample
+    let share = 0.0;
+
+    if (gStats.isOverdrawOn === true && gMark !== null && gStats.viewPixels > 0)
+        share = (100.0 * gStats.overdrawPixels) / gStats.viewPixels;
 
     const p = gPages;
-    const pageState = (p.isPaused === true) ? "(paused, space resumes)" : `(next in ${Math.max(1, Math.ceil(PAGE_SECONDS - p.timer))} s)`;
+    const pageState = (p.isPaused === true) ? "(paused)  Resume: P" : `(next in ${Math.max(1, Math.ceil(PAGE_SECONDS - p.timer))} s)  Pause: P`;
 
-    // One per HUD_LABELS entry, in order
-    const values = [
-        `${p.current + 1} / ${p.count} ${pageState}`,
-        `${gStats.fps.toFixed(1)} (${gStats.frameMs.toFixed(2)} ms)`,
-        formatCount(l.vertices),
-        String(l.materials),
-        formatCount(l.rects),
-        overdraw,
-        String(l.drawCalls),
-        String(l.stateChanges),
-        `${l.bindsSent} sent, ${l.bindsSkipped} skipped`,
-        `${RenderTarget.getCount()} (${(RenderTarget.getTotalMemoryBytes() / 1048576).toFixed(1)} MB), ${RenderTargetPool.getCount()} pooled`,
-        "Space pause, O overdraw, B Spine lines"
+    // [label, value]; Targets, Bones and Culled only on the pages that use them
+    let lines = [
+        ["Page:", `${p.current + 1} / ${p.count} ${pageState}`],
+        ["FPS:", `${gStats.fps.toFixed(1)} (${gStats.frameMs.toFixed(2)} ms)`],
+        ["Vertices:", formatCount(l.vertices)],
+        ["Materials:", String(l.materials)],
+        ["Objects:", formatCount(l.objects)],
+        ["Overdraw:", `(${share.toFixed(1)}% of view)   Toggle: O`],
+        ["Draw Calls:", String(l.drawCalls)],
+        ["State Changes:", String(l.stateChanges)],
+        ["Binds:", `Sent (${l.bindsSent}) Skipped (${l.bindsSkipped})`]
     ];
 
+    if (gStats.pageUsesTargets === true)
+        lines.push(["Targets:", `${RenderTarget.getCount()} (${(RenderTarget.getTotalMemoryBytes() / 1048576).toFixed(1)} MB) Pooled (${RenderTargetPool.getCount()})`]);
+
+    if (l.bones > 0)
+        lines.push(["Bones:", formatCount(l.bones) + ((p.current === gSpinePage) ? "   Toggle: B" : "")]);
+
+    if (gStats.pageUsesCulling === true)
+        lines.push(["Culled:", formatCount(l.culled) + ((p.current === gStressPage) ? "   Toggle: C" : "")]);
+
     // Labels padded to one width; the font is monospaced, so the values line up
-    const width = Math.max(...HUD_LABELS.map((s) => s.length)) + 2;
-    setHudText(HUD_LABELS.map((label, i) => label.padEnd(width) + values[i]).join("\n"));
+    const width = Math.max(...lines.map(([label]) => label.length)) + 1;
+    setHudText(lines.map(([label, value]) => label.padEnd(width) + value).join("\n"));
 }
 
 function formatCount(n) { return n.toLocaleString("en-US"); }

@@ -256,7 +256,7 @@ const TextGlyphs2DShaderSource = {
     VS: `#version 300 es
         layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
-        layout(location = 7) in vec4 a_color;
+        layout(location = 5) in vec4 a_color;
 
         ${FrameSharedSource.VS}
         uniform vec3 u_scale;
@@ -322,7 +322,7 @@ const Skeleton2DShaderSource = {
     VS: `#version 300 es
         layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
-        layout(location = 7) in vec4 a_color;
+        layout(location = 5) in vec4 a_color;
 
         ${FrameSharedSource.VS}
         uniform vec3 u_scale;
@@ -371,7 +371,7 @@ const Skeleton2DShaderSource = {
     the texture's dark parts take on (spine-webgl's two-color shader, for
     premultiplied color). Everything else is as above.
 
-        a_color1  The dark color (r * a, g * a, b * a, 1), with a the vertex's own alpha
+        a_vec0    The dark color (r * a, g * a, b * a, 1), with a the vertex's own alpha
                   (not 0 for additive); (0, 0, 0, 1) for slots without one
 */
 const Skeleton2DTwoColorShaderSource = {
@@ -379,8 +379,8 @@ const Skeleton2DTwoColorShaderSource = {
     VS: `#version 300 es
         layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
-        layout(location = 7) in vec4 a_color;
-        layout(location = 15) in vec4 a_color1;
+        layout(location = 5) in vec4 a_color;
+        layout(location = 6) in vec4 a_vec0;
 
         ${FrameSharedSource.VS}
         uniform vec3 u_scale;
@@ -403,7 +403,7 @@ const Skeleton2DTwoColorShaderSource = {
 
             v_uv0 = vec2(a_uv0.x, 1.0 - a_uv0.y);
             v_color = a_color;
-            v_dark = a_color1;
+            v_dark = a_vec0;
         }
     `,
     FS: `#version 300 es

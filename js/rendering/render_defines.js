@@ -37,8 +37,6 @@ class RenderAttributes
     // 2-component
     static kUV0 = "a_uv0";
     static kUV1 = "a_uv1";
-    static kUV2 = "a_uv2";
-    static kUV3 = "a_uv3";
 
     // 3-component
     static kPosition = "a_pos";
@@ -47,7 +45,8 @@ class RenderAttributes
     // 4-component
     static kTangent = "a_tangent"; // (X, Y, Z, W): W is the bitangent's handedness, +1 or -1
     static kColor = "a_color";
-    static kColor1 = "a_color1";   // A second color, e.g. Spine's two-color tint (the dark color)
+    static kVector0 = "a_vec0";    // (X, Y, Z, W) as floats, e.g. Spine's two-color tint (the dark color)
+    static kVector1 = "a_vec1";    // (X, Y, Z, W) as floats
 
     static allAttribs = new Map(); // Name -> { count, location }; locations must match the shaders' layout(location = N)
 
@@ -71,21 +70,19 @@ class RenderAttributes
         all.set(RenderAttributes.kPosition, { count: 3, location: 0 }); // Always present; some drivers are slow when location 0 isn't an enabled array
         all.set(RenderAttributes.kUV0,      { count: 2, location: 1 });
         all.set(RenderAttributes.kUV1,      { count: 2, location: 2 });
-        all.set(RenderAttributes.kUV2,      { count: 2, location: 3 });
-        all.set(RenderAttributes.kUV3,      { count: 2, location: 4 });
-        all.set(RenderAttributes.kNormal,   { count: 3, location: 5 });
-        all.set(RenderAttributes.kTangent,  { count: 4, location: 6 });
-        all.set(RenderAttributes.kColor,    { count: 4, location: 7 });
-        all.set(RenderAttributes.kColor1,   { count: 4, location: 15 }); // After InstancedAttributes' 8 - 14; the last of WebGL2's guaranteed 16
+        all.set(RenderAttributes.kNormal,   { count: 3, location: 3 });
+        all.set(RenderAttributes.kTangent,  { count: 4, location: 4 });
+        all.set(RenderAttributes.kColor,    { count: 4, location: 5 });
+        all.set(RenderAttributes.kVector0,  { count: 4, location: 6 });
+        all.set(RenderAttributes.kVector1,  { count: 4, location: 7 });
     }
 }
 
 /*
     Every per-instance attribute an instanced shader may use (see
-    InstancedQuadMesh). Locations 8 - 14 are clear of RenderAttributes' (0 - 7
-    and 15), so a mesh's position (location 0) can be drawn alongside them.
-    All 16 locations WebGL2 guarantees are now taken; unused ones (kUV1 - kUV3,
-    kNormal, kTangent) are the place to look before adding more.
+    InstancedQuadMesh). Locations 8 - 14 are clear of RenderAttributes' (0 - 7),
+    so a mesh's position (location 0) can be drawn alongside them. Location 15,
+    the last of WebGL2's guaranteed 16, is free.
     Shaders without a named meaning for a value pack it into a_instVec0 - a_instVec3.
 */
 class InstancedAttributes

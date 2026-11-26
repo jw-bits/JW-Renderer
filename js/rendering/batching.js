@@ -59,6 +59,17 @@
         batcher.setCamera(camera);
         batcher.setLayerFollowsCamera(Layers.kUI, false);
 
+    Culling: setLayerCulled(layer, true) makes submit() skip models on that
+    layer whose box (Model2D.getCullBounds(), the world bounds unless the
+    model has a cheaper one, see Skeleton2D.setCullBounds()) is out of view:
+    the camera's world rect when the layer follows one, otherwise the design
+    area being drawn (ClipSpace.getSurfaceRect(): the screen, or a pushed
+    RenderTarget's). The view is taken at submit(), so move the camera (and
+    push the target) first. Clip rects aren't looked at, and
+    drawing that reaches outside the box (a drop shadow) can vanish a little
+    early at the edge. Off by default. getCulledCount() is how many the last
+    render() skipped.
+
     Post effects: setLayerPost(first, last, chain) draws layers first - last
     into a PostChain (post_effects.js), which runs its effects and draws the
     result back after the last of them, so later layers (a HUD, say) are left
@@ -95,12 +106,18 @@ class Batcher
 
     static #kFloatsPerInstance = 15; // Rect (4), scale + rotation (3), color (4), UV rect (4)
     static #kStartCapacity = 64;     // Instances; grows as needed
+    static #kCullView = new Bounds2D(); // Scratch for #isOutOfView()
+    static #kCullBox = new Bounds2D();
+    static #kCameraRect = new Vector4();
 
     #layers;      // Per layer: the submitted entries
     #groups;      // Per layer: group key (texture key string for instanced, else the Material) -> group number, in order of first submission
     #drawables;   // Per layer: objects with render(), drawn after the layer's models
     #litLayers;   // Per layer: true if its instanced models are lit
     #ignoresCamera; // Per layer: true if it draws in screen design units whatever the camera
+    #culledLayers;  // Per layer: true if submit() skips models out of view
+    #culled;        // Models skipped as out of view since the last render()
+    #lastCulled;    // ...and by the last render()
     #camera;      // Camera2D the layers follow, or null
     #postRanges;  // { first, last, chain, isRunning }: PostChains around ranges of layers
     #postBegins;  // Per layer: ranges to begin before it, outermost first
@@ -128,6 +145,9 @@ class Batcher
         this.#drawables = [];
         this.#litLayers = [];
         this.#ignoresCamera = [];
+        this.#culledLayers = [];
+        this.#culled = 0;
+        this.#lastCulled = 0;
         this.#camera = null;
         this.#postRanges = [];
         this.#postBegins = [];
@@ -140,6 +160,7 @@ class Batcher
             this.#drawables.push([]);
             this.#litLayers.push(false);
             this.#ignoresCamera.push(false);
+            this.#culledLayers.push(false);
             this.#postBegins.push([]);
             this.#postEnds.push([]);
         }
@@ -167,7 +188,8 @@ class Batcher
         0 (back) to 7 (front). material draws it instead of its own (see
         Model2D.render()), or null for its own; color (a Vector4, copied) tints it,
         white by default. Returns false if it isn't loaded, or the transform, layer
-        or material isn't valid.
+        or material isn't valid. On a culled layer (setLayerCulled()) a model out of
+        view is skipped, and still returns true.
     */
     submit(model, transform, layer = 0, material = null, color = Vector4.kWhite)
     {
@@ -196,6 +218,12 @@ class Batcher
         {
             console.error("Batcher.submit() needs a loaded Material, or null for the model's own");
                 return false;
+        }
+
+        if (this.#culledLayers[layer] === true && this.#isOutOfView(model, transform, layer) === true)
+        {
+            ++this.#culled;
+                return true; // Submitted; there's just nothing to draw
         }
 
         material = material ?? model.getMaterial();
@@ -302,6 +330,25 @@ class Batcher
     doesLayerFollowCamera(layer) { return (this.#ignoresCamera[layer] !== true); }
 
     /*
+        Whether submit() skips models on a layer that are out of view (true) or queues
+        them all (false, the default; see the top of this file). Kept until changed.
+        Returns false if the layer isn't valid.
+    */
+    setLayerCulled(layer, culled)
+    {
+        if (Number.isInteger(layer) === false || layer < Batcher.kMinLayer || layer > Batcher.kMaxLayer)
+        {
+            console.error(`Batcher.setLayerCulled(): layer must be ${Batcher.kMinLayer} - ${Batcher.kMaxLayer}`);
+                return false;
+        }
+
+        this.#culledLayers[layer] = (culled === true);
+            return true;
+    }
+
+    isLayerCulled(layer) { return (this.#culledLayers[layer] === true); }
+
+    /*
         Draws layers first - last through a loaded PostChain (see the top of this file).
         Kept until clearLayerPost(). Returns false (changing nothing) if the range isn't
         valid, overlaps another without nesting, or the chain already has a range.
@@ -403,6 +450,7 @@ class Batcher
         }
 
         ClipSpace.setCamera(before);
+        this.#lastCulled = this.#culled;
         this.clear();
     }
 
@@ -423,10 +471,14 @@ class Batcher
         }
 
         this.#poolUsed = 0;
+        this.#culled = 0;
     }
 
     // Draw calls the last render() made
     getDrawCallCount() { return this.#drawCalls; }
+
+    // Models submit() skipped as out of view for the last render() (see setLayerCulled())
+    getCulledCount() { return this.#lastCulled; }
 
     // GL bind calls the last render() sent (shaders, active units, textures, samplers, sampler uniforms), and the binds it skipped as they'd change nothing
     getBindsSent() { return this.#binder.getSentCount(); }
@@ -455,6 +507,19 @@ class Batcher
             this.#postBegins[l] = this.#postRanges.filter((r) => r.first === l).sort((a, b) => (b.last - b.first) - (a.last - a.first));
             this.#postEnds[l] = this.#postRanges.filter((r) => r.last === l).sort((a, b) => (a.last - a.first) - (b.last - b.first));
         }
+    }
+
+    // True if model's cull box at transform misses the view: the camera's world rect if layer follows it, else the surface's design rect
+    #isOutOfView(model, transform, layer)
+    {
+        let view = Batcher.#kCullView;
+
+        if (this.#camera !== null && this.#ignoresCamera[layer] === false)
+            view.setFromVector4(this.#camera.getWorldBounds(Batcher.#kCameraRect));
+        else
+            view.setFromVector4(ClipSpace.getSurfaceRect(Batcher.#kCameraRect)); // The canvas, or the RenderTarget being drawn
+
+        return (model.getCullBounds(transform, Batcher.#kCullBox).intersects(view) === false);
     }
 
     // True if anything was submitted on layers first - last

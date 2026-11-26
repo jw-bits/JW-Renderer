@@ -194,6 +194,14 @@ class Model2D
         return Model2D._setTurnedBox(out, t.getX() + hw, t.getY() + hh, hw, hh, t.getScaleX(), t.getScaleY(), t.getRotation());
     }
 
+    /*
+        The box a Batcher culls the model by when drawn at transform (see
+        Batcher.setLayerCulled()), written into out (a Bounds2D) and returned: an empty
+        box is culled. getWorldBounds() unless a subclass has a cheaper one
+        (Skeleton2D.setCullBounds()).
+    */
+    getCullBounds(transform, out = new Bounds2D()) { return this.getWorldBounds(transform, out); }
+
     // True if Batcher may draw this with its instanced shader when drawn with material (see the top of this file). Subclasses opt in.
     canInstance(material = this.#material) { return false; }
 

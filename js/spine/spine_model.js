@@ -55,6 +55,13 @@
     updateAttachments() mark it stale, so call updateAttachments() after
     posing by hand.
 
+    Culling: on a Batcher layer with setLayerCulled(), a skeleton is skipped
+    when its getCullBounds() box is out of view. That's the pose's world box
+    unless setCullBounds() gives a fixed box in skeleton units (e.g. fitted
+    over its animations), which saves working the pose's box out each frame.
+    A culled skeleton still moves on and poses in update(); only the draw is
+    skipped.
+
     Attaching to a bone: an Entity that's a child of the entity holding this
     Skeleton2D can follow one of its bones, e.g. a weapon in a hand:
 
@@ -77,7 +84,7 @@
 
     Two-color tint: a skeleton whose data has dark colors (slot "dark" in
     Spine) streams 12 floats per vertex instead of 8, the slot's dark color
-    (premultiplied; black for slots without one) in RenderAttributes.kColor1,
+    (premultiplied; black for slots without one) in RenderAttributes.kVector0,
     and draws with Skeleton2DTwoColorShaderSource, where the texture's dark
     parts take on the dark color. Skeletons without dark colors keep the
     smaller stream and the plain shader.
@@ -109,7 +116,7 @@ class Skeleton2D extends Model2D
     static #kBoneTransform = new Transform2D(); // Scratch for updateAttachments()
     static #kBoundsOffset = new Vector2();      // Scratch for #refreshBounds()
     static #kBoundsSize = new Vector2();
-    static #kBoundsCenter = new Vector2();      // Scratch for getWorldBounds()
+    static #kBoundsCenter = new Vector2();      // Scratch for #toWorld()
     static #kClipper = new SpineSkeletonClipping(); // Shared by every Skeleton2D; _fillStream() starts and ends with it unused
     static #kLight = new Vector4();             // Scratch: the vertex colors given to the clipper
     static #kDark = new Vector4();
@@ -136,6 +143,7 @@ class Skeleton2D extends Model2D
     #boundsTemp;    // Array: getBounds()' working memory, reused
     #hitBounds;     // SpineSkeletonBounds: the bounding-box polygons, while #hitStale is false
     #hitStale;
+    #cullBounds;    // Bounds2D in skeleton units that culling uses instead of the pose's (see setCullBounds()), or null
 
     constructor()
     {
@@ -163,6 +171,7 @@ class Skeleton2D extends Model2D
         this.#boundsTemp = [];
         this.#hitBounds = new SpineSkeletonBounds();
         this.#hitStale = true;
+        this.#cullBounds = null;
     }
 
     /*
@@ -195,7 +204,7 @@ class Skeleton2D extends Model2D
         let layout = [[RenderAttributes.kPosition, 2], [RenderAttributes.kUV0, 2], [RenderAttributes.kColor, 4]];
 
         if (twoColor === true)
-            layout.push([RenderAttributes.kColor1, 4]);
+            layout.push([RenderAttributes.kVector0, 4]);
 
         let mesh = new DynamicMesh();
 
@@ -503,22 +512,43 @@ class Skeleton2D extends Model2D
     */
     getWorldBounds(transform, out = new Bounds2D())
     {
-        const local = this.getLocalBounds(out);
+        return Skeleton2D.#toWorld(this.getLocalBounds(out), transform, out);
+    }
 
-        if (local.isEmpty() === true)
-            return out;
+    /*
+        Gives culling (see Batcher.setLayerCulled()) a fixed box in skeleton units, like
+        getLocalBounds()' (a Bounds2D, copied), e.g. one fitted over every pose its
+        animations reach, so it doesn't work out the pose's box each frame. null goes
+        back to the pose's box. Kept until changed or unload(). Returns false if bounds
+        isn't a Bounds2D or null.
+    */
+    setCullBounds(bounds)
+    {
+        if (bounds !== null && (bounds instanceof Bounds2D) === false)
+        {
+            console.error("Skeleton2D.setCullBounds() needs a Bounds2D, or null for the pose's box");
+                return false;
+        }
 
-        const sx = transform.getScaleX();
-        const sy = transform.getScaleY();
-        const r = transform.getRotation();
-        const s = Math.sin(r);
-        const c = Math.cos(r);
-        const center = local.getCenter(Skeleton2D.#kBoundsCenter);
-        const x = center.x * sx;
-        const y = center.y * sy;
+        if (bounds === null)
+            this.#cullBounds = null;
+        else
+        {
+            this.#cullBounds = this.#cullBounds ?? new Bounds2D();
+            this.#cullBounds.set(bounds);
+        }
 
-        return Model2D._setTurnedBox(out, transform.getX() + (x * c) - (y * s), transform.getY() + (x * s) + (y * c),
-                                     local.getWidth() / 2.0, local.getHeight() / 2.0, sx, sy, r);
+        return true;
+    }
+
+    // The box culling uses (Model2D.getCullBounds()): setCullBounds()' box as drawn at transform, or without one getWorldBounds()
+    getCullBounds(transform, out = new Bounds2D())
+    {
+        if (this.#cullBounds === null || this.isLoaded() === false)
+            return this.getWorldBounds(transform, out);
+
+        out.set(this.#cullBounds);
+            return Skeleton2D.#toWorld(out, transform, out);
     }
 
     // *** Hit tests ***
@@ -639,6 +669,7 @@ class Skeleton2D extends Model2D
         this.#stateData = null;
         this.#skeleton = null;
         this.#attachments.length = 0; // Their bones were this skeleton's
+        this.#cullBounds = null;      // In this skeleton's units
         this.#mesh = null;
         this.#materials.clear();
         this.#vertexCount = 0;
@@ -860,6 +891,28 @@ class Skeleton2D extends Model2D
             this.#bounds.setEmpty();
 
         this.#boundsStale = false;
+    }
+
+    // local (a Bounds2D in skeleton units) as drawn at transform: scaled and turned about the origin, then moved to its position. out may be local.
+    static #toWorld(local, transform, out)
+    {
+        if (local.isEmpty() === true)
+        {
+            out.setEmpty();
+                return out;
+        }
+
+        const sx = transform.getScaleX();
+        const sy = transform.getScaleY();
+        const r = transform.getRotation();
+        const s = Math.sin(r);
+        const c = Math.cos(r);
+        const center = local.getCenter(Skeleton2D.#kBoundsCenter);
+        const x = center.x * sx;
+        const y = center.y * sy;
+
+        return Model2D._setTurnedBox(out, transform.getX() + (x * c) - (y * s), transform.getY() + (x * s) + (y * c),
+                                     local.getWidth() / 2.0, local.getHeight() / 2.0, sx, sy, r);
     }
 
     // Sets a's entity's local transform to its bone (as its options allow) times its offset; skipped while the entity isn't under a holder
