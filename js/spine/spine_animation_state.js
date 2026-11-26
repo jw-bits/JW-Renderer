@@ -532,16 +532,16 @@ class SpineAnimationState
             }
             let current = diff > 0, dir = lastTotal >= 0;
             // Detect cross at 0 (not 180).
-            if (SpineMathUtils.signum(lastDiff) != SpineMathUtils.signum(diff) && Math.abs(lastDiff) <= 90)
+            if (MathUtil.signum(lastDiff) != MathUtil.signum(diff) && Math.abs(lastDiff) <= 90)
             {
                 // A cross after a 360 rotation is a loop.
                 if (Math.abs(lastTotal) > 180)
-                    lastTotal += 360 * SpineMathUtils.signum(lastTotal);
+                    lastTotal += 360 * MathUtil.signum(lastTotal);
                 dir = current;
             }
             total = diff + lastTotal - lastTotal % 360; // Store loops as part of lastTotal.
             if (dir != current)
-                total += 360 * SpineMathUtils.signum(lastTotal);
+                total += 360 * MathUtil.signum(lastTotal);
             timelinesRotation[i] = total;
         }
         timelinesRotation[i + 1] = diff;

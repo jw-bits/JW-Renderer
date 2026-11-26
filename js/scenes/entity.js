@@ -45,9 +45,10 @@
     built from, so asking costs a check per parent up to the root. With no
     parent the world transform is the local one, with no work at all.
 
-    Skew: a parent with a different scale across and up (sx !== sy) and a
-    rotated child would skew the child, which a Transform2D (and the shaders)
-    can't hold; the child's scale is then only close (see Transform2D).
+    Shear: a parent with a different scale across and up (sx !== sy) and a
+    rotated child shears the child. The world transform holds that exactly
+    (see Transform2D), so world points and children are right, but the 2D
+    shaders don't draw shear yet, so the child's model draws unsheared.
 
     keepWorld: addChild(), removeChild() and setParent() take keepWorld. False
     (the default) keeps the local transform, so the entity jumps to its place
@@ -85,7 +86,7 @@ class Entity
 
     // Scratch for keepWorld
     static #kWorld = new Transform2D();
-    static #kPoint = new Vector2();
+    static #kInverse = new Transform2D();
 
     #name;
     #transform;          // Local: relative to the parent, or the world with none
@@ -157,6 +158,13 @@ class Entity
         this.#localChanged();
     }
 
+    // Radians; a positive shear leans the y axis counter-clockwise (math only: the model draws unsheared, see Transform2D)
+    setShear(radians)
+    {
+        this.#transform.setShear(radians);
+        this.#localChanged();
+    }
+
     // Copies transform (a Transform2D) as the local transform
     setTransform(transform)
     {
@@ -172,6 +180,7 @@ class Entity
     getRotation() { return this.#transform.getRotation(); }
     getScaleX() { return this.#transform.getScaleX(); }
     getScaleY() { return this.#transform.getScaleY(); }
+    getShear() { return this.#transform.getShear(); }
 
     // *** World Transform ***
 
@@ -198,18 +207,7 @@ class Entity
     // A world point in this entity's space, written into out and returned. out may be point.
     worldToLocal(point, out = new Vector2())
     {
-        const w = this.getWorldTransform();
-        const dx = point.x - w.getX();
-        const dy = point.y - w.getY();
-        const s = Math.sin(w.getRotation());
-        const c = Math.cos(w.getRotation());
-        const sx = w.getScaleX();
-        const sy = w.getScaleY();
-        const x = (dx * c) + (dy * s);
-        const y = (dy * c) - (dx * s);
-
-        out.setXY((sx !== 0.0) ? x / sx : 0.0, (sy !== 0.0) ? y / sy : 0.0);
-            return out;
+        return this.getWorldTransform().inverseTransformPoint(point, out);
     }
 
     // *** Hierarchy ***
@@ -518,11 +516,16 @@ class Entity
                 return;
         }
 
-        const pw = p.getWorldTransform();
-        const pos = p.worldToLocal(world.getPosition(), Entity.#kPoint);
-        const sx = (pw.getScaleX() !== 0.0) ? world.getScaleX() / pw.getScaleX() : world.getScaleX();
-        const sy = (pw.getScaleY() !== 0.0) ? world.getScaleY() / pw.getScaleY() : world.getScaleY();
+        // The parent's world undone, then world: world as seen from the parent
+        const inverse = Transform2D.invert(Entity.#kInverse, p.getWorldTransform());
 
-        this.#transform.set(pos.x, pos.y, sx, sy, world.getRotation() - pw.getRotation());
+        // A parent scaled to 0 can't be undone: keep world as the local transform
+        if (inverse === false)
+        {
+            this.#transform.copy(world);
+                return;
+        }
+
+        Transform2D.multiply(this.#transform, inverse, world);
     }
 }

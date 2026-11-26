@@ -1,8 +1,8 @@
 "use strict";
 
 /*
-    Motion types: moving an Entity's local position, scale, rotation and
-    color over time. Sprite frame animation (UVs) belongs to rendering; its
+    Motion types: moving an Entity's local position, scale, rotation, shear
+    and color over time. Sprite frame animation (UVs) belongs to rendering; its
     types are in render_defines.js.
 
         MotionParams      Per channel: duration and easing. Any number of MotionActions can share one. (Below.)
@@ -32,7 +32,8 @@ class MotionChannel
     static kScale = 2;
     static kRotation = 4;
     static kColor = 8;
-    static kAll = 15;
+    static kShear = 16;
+    static kAll = 31;
 }
 
 /*
@@ -79,6 +80,7 @@ class MotionEvent
             translation: { duration: 0.35, easing: Easing.kQuadraticInOut },
             scale:       { duration: 0.35, easing: Easing.kBackOut },
             rotation:    { duration: 0.2 },
+            shear:       { duration: 0.2 },
             color:       { duration: 0.5 }  // See MotionAction.setColors()
         });
 
@@ -89,8 +91,8 @@ class MotionEvent
 */
 class MotionParams
 {
-    static #kKeys = ["translation", "scale", "rotation", "color"]; // In #channelIndex() order
-    static #kChannels = [MotionChannel.kTranslation, MotionChannel.kScale, MotionChannel.kRotation, MotionChannel.kColor];
+    static #kKeys = ["translation", "scale", "rotation", "color", "shear"]; // In #channelIndex() order
+    static #kChannels = [MotionChannel.kTranslation, MotionChannel.kScale, MotionChannel.kRotation, MotionChannel.kColor, MotionChannel.kShear];
 
     #channels; // MotionChannel flags moved
     #timings;  // Per channel, in #kKeys order: { duration (seconds), easing (Easing type) }
@@ -210,7 +212,7 @@ class MotionParams
         return (i >= 0 && (this.#channels & channel) !== 0) ? this.#timings[i] : null;
     }
 
-    // 0 - 3 for kTranslation, kScale, kRotation or kColor; -1 for anything else
+    // 0 - 4 for kTranslation, kScale, kRotation, kColor or kShear; -1 for anything else
     static #channelIndex(channel) { return MotionParams.#kChannels.indexOf(channel); }
 
     static #isValid(duration, easing, methodName)

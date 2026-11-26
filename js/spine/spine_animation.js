@@ -616,15 +616,15 @@ class SpineScaleTimeline extends SpineCurveTimeline2
                     case SpineMixBlend.setup:
                         bx = bone.data.scaleX;
                         by = bone.data.scaleY;
-                        bone.scaleX = bx + (Math.abs(x) * SpineMathUtils.signum(bx) - bx) * alpha;
-                        bone.scaleY = by + (Math.abs(y) * SpineMathUtils.signum(by) - by) * alpha;
+                        bone.scaleX = bx + (Math.abs(x) * MathUtil.signum(bx) - bx) * alpha;
+                        bone.scaleY = by + (Math.abs(y) * MathUtil.signum(by) - by) * alpha;
                         break;
                     case SpineMixBlend.first:
                     case SpineMixBlend.replace:
                         bx = bone.scaleX;
                         by = bone.scaleY;
-                        bone.scaleX = bx + (Math.abs(x) * SpineMathUtils.signum(bx) - bx) * alpha;
-                        bone.scaleY = by + (Math.abs(y) * SpineMathUtils.signum(by) - by) * alpha;
+                        bone.scaleX = bx + (Math.abs(x) * MathUtil.signum(bx) - bx) * alpha;
+                        bone.scaleY = by + (Math.abs(y) * MathUtil.signum(by) - by) * alpha;
                         break;
                     case SpineMixBlend.add:
                         bone.scaleX += (x - bone.data.scaleX) * alpha;
@@ -636,15 +636,15 @@ class SpineScaleTimeline extends SpineCurveTimeline2
                 switch (blend)
                 {
                     case SpineMixBlend.setup:
-                        bx = Math.abs(bone.data.scaleX) * SpineMathUtils.signum(x);
-                        by = Math.abs(bone.data.scaleY) * SpineMathUtils.signum(y);
+                        bx = Math.abs(bone.data.scaleX) * MathUtil.signum(x);
+                        by = Math.abs(bone.data.scaleY) * MathUtil.signum(y);
                         bone.scaleX = bx + (x - bx) * alpha;
                         bone.scaleY = by + (y - by) * alpha;
                         break;
                     case SpineMixBlend.first:
                     case SpineMixBlend.replace:
-                        bx = Math.abs(bone.scaleX) * SpineMathUtils.signum(x);
-                        by = Math.abs(bone.scaleY) * SpineMathUtils.signum(y);
+                        bx = Math.abs(bone.scaleX) * MathUtil.signum(x);
+                        by = Math.abs(bone.scaleY) * MathUtil.signum(y);
                         bone.scaleX = bx + (x - bx) * alpha;
                         bone.scaleY = by + (y - by) * alpha;
                         break;
@@ -704,12 +704,12 @@ class SpineScaleXTimeline extends SpineCurveTimeline1
                 {
                     case SpineMixBlend.setup:
                         bx = bone.data.scaleX;
-                        bone.scaleX = bx + (Math.abs(x) * SpineMathUtils.signum(bx) - bx) * alpha;
+                        bone.scaleX = bx + (Math.abs(x) * MathUtil.signum(bx) - bx) * alpha;
                         break;
                     case SpineMixBlend.first:
                     case SpineMixBlend.replace:
                         bx = bone.scaleX;
-                        bone.scaleX = bx + (Math.abs(x) * SpineMathUtils.signum(bx) - bx) * alpha;
+                        bone.scaleX = bx + (Math.abs(x) * MathUtil.signum(bx) - bx) * alpha;
                         break;
                     case SpineMixBlend.add:
                         bone.scaleX += (x - bone.data.scaleX) * alpha;
@@ -720,12 +720,12 @@ class SpineScaleXTimeline extends SpineCurveTimeline1
                 switch (blend)
                 {
                     case SpineMixBlend.setup:
-                        bx = Math.abs(bone.data.scaleX) * SpineMathUtils.signum(x);
+                        bx = Math.abs(bone.data.scaleX) * MathUtil.signum(x);
                         bone.scaleX = bx + (x - bx) * alpha;
                         break;
                     case SpineMixBlend.first:
                     case SpineMixBlend.replace:
-                        bx = Math.abs(bone.scaleX) * SpineMathUtils.signum(x);
+                        bx = Math.abs(bone.scaleX) * MathUtil.signum(x);
                         bone.scaleX = bx + (x - bx) * alpha;
                         break;
                     case SpineMixBlend.add:
@@ -783,12 +783,12 @@ class SpineScaleYTimeline extends SpineCurveTimeline1
                 {
                     case SpineMixBlend.setup:
                         by = bone.data.scaleY;
-                        bone.scaleY = by + (Math.abs(y) * SpineMathUtils.signum(by) - by) * alpha;
+                        bone.scaleY = by + (Math.abs(y) * MathUtil.signum(by) - by) * alpha;
                         break;
                     case SpineMixBlend.first:
                     case SpineMixBlend.replace:
                         by = bone.scaleY;
-                        bone.scaleY = by + (Math.abs(y) * SpineMathUtils.signum(by) - by) * alpha;
+                        bone.scaleY = by + (Math.abs(y) * MathUtil.signum(by) - by) * alpha;
                         break;
                     case SpineMixBlend.add:
                         bone.scaleY += (y - bone.data.scaleY) * alpha;
@@ -799,12 +799,12 @@ class SpineScaleYTimeline extends SpineCurveTimeline1
                 switch (blend)
                 {
                     case SpineMixBlend.setup:
-                        by = Math.abs(bone.data.scaleY) * SpineMathUtils.signum(y);
+                        by = Math.abs(bone.data.scaleY) * MathUtil.signum(y);
                         bone.scaleY = by + (y - by) * alpha;
                         break;
                     case SpineMixBlend.first:
                     case SpineMixBlend.replace:
-                        by = Math.abs(bone.scaleY) * SpineMathUtils.signum(y);
+                        by = Math.abs(bone.scaleY) * MathUtil.signum(y);
                         bone.scaleY = by + (y - by) * alpha;
                         break;
                     case SpineMixBlend.add:

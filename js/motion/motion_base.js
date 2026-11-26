@@ -124,6 +124,9 @@ class MotionBase
         if ((channels & MotionChannel.kRotation) !== 0)
             entity.setRotation(t.getRotation());
 
+        if ((channels & MotionChannel.kShear) !== 0)
+            entity.setShear(t.getShear());
+
         if ((channels & MotionChannel.kColor) !== 0)
         {
             const c = state.color;

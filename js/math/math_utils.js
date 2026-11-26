@@ -45,6 +45,24 @@ class MathUtil
         return Math.min(max, Math.max(min, v));
     }
 
+    // Cosine of an angle in degrees
+    static cosDeg(d)
+    {
+        return Math.cos(d * MathDefines.kDegToRad);
+    }
+
+    // Sine of an angle in degrees
+    static sinDeg(d)
+    {
+        return Math.sin(d * MathDefines.kDegToRad);
+    }
+
+    // 1 if v is positive, -1 if negative, otherwise 0 (unlike Math.sign(), -0 and NaN give 0)
+    static signum(v)
+    {
+        return v > 0 ? 1 : v < 0 ? -1 : 0;
+    }
+
     /*
         The numbers in text as a new array, or null if text isn't a list of numbers.
         Used by the Vector classes' ...FromString() methods. Valid formats:

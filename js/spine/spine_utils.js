@@ -35,13 +35,16 @@
     own (Vector4, Vector2, MathUtil, Easing) wherever they do the same job.
 
         SpineIntSet, SpineStringSet  Sets of ints / strings
-        SpineMathUtils              Spine's math helpers (degrees, clamp, signum, ...)
-        SpinePow, SpinePowOut        Interpolations
         SpineUtils                   Array helpers, enumValue(), and getRegionUVs() (engine addition)
         SpinePool                    Reuses objects
 
     Left out: DebugUtils, TimeKeeper and WindowedMean (the engine has its own
-    timing and logging).
+    timing and logging), and the Pow / PowOut interpolations (never used).
+
+    Replaced: MathUtils is the engine's MathDefines and MathUtil. PI, PI2,
+    degRad and radDeg are MathDefines.kPi, kTwoPi, kDegToRad and kRadToDeg
+    (Math.PI rather than Spine's 3.1415927); cosDeg(), sinDeg() and signum()
+    are MathUtil's. Its other helpers were never called.
 
     Replaced: Color is the engine's Vector4, with (r, g, b, a) in (x, y, z, w).
     Its set(r, g, b, a) and add() clamped to 0 - 1, so the timelines call
@@ -115,109 +118,6 @@ class SpineStringSet
     {
         this.entries = {};
         this.size = 0;
-    }
-}
-
-class SpineMathUtils
-{
-    static PI = 3.1415927;
-    static PI2 = SpineMathUtils.PI * 2;
-    static radiansToDegrees = 180 / SpineMathUtils.PI;
-    static radDeg = SpineMathUtils.radiansToDegrees;
-    static degreesToRadians = SpineMathUtils.PI / 180;
-    static degRad = SpineMathUtils.degreesToRadians;
-
-    static clamp(value, min, max)
-    {
-        if (value < min)
-            return min;
-        if (value > max)
-            return max;
-        return value;
-    }
-
-    static cosDeg(degrees)
-    {
-        return Math.cos(degrees * SpineMathUtils.degRad);
-    }
-
-    static sinDeg(degrees)
-    {
-        return Math.sin(degrees * SpineMathUtils.degRad);
-    }
-
-    static signum(value)
-    {
-        return value > 0 ? 1 : value < 0 ? -1 : 0;
-    }
-
-    static toInt(x)
-    {
-        return x > 0 ? Math.floor(x) : Math.ceil(x);
-    }
-
-    static cbrt(x)
-    {
-        let y = Math.pow(Math.abs(x), 1 / 3);
-        return x < 0 ? -y : y;
-    }
-
-    static randomTriangular(min, max)
-    {
-        return SpineMathUtils.randomTriangularWith(min, max, (min + max) * 0.5);
-    }
-
-    static randomTriangularWith(min, max, mode)
-    {
-        let u = Math.random();
-        let d = max - min;
-        if (u <= (mode - min) / d)
-            return min + Math.sqrt(u * d * (mode - min));
-        return max - Math.sqrt((1 - u) * d * (max - mode));
-    }
-
-    static isPowerOfTwo(value)
-    {
-        return value && (value & (value - 1)) === 0;
-    }
-}
-
-class SpineInterpolation
-{
-    apply(start, end, a)
-    {
-        return start + (end - start) * this.applyInternal(a);
-    }
-}
-
-class SpinePow extends SpineInterpolation
-{
-    power = 2;
-
-    constructor(power)
-    {
-        super();
-        this.power = power;
-    }
-
-    applyInternal(a)
-    {
-        if (a <= 0.5)
-            return Math.pow(a * 2, this.power) / 2;
-        return Math.pow((a - 1) * 2, this.power) / (this.power % 2 == 0 ? -2 : 2) + 1;
-    }
-}
-
-class SpinePowOut extends SpinePow
-{
-    constructor(power)
-    {
-        super(power);
-    }
-
-    applyInternal(a)
-    {
-        return Math.pow(a - 1, this.power) * (this.power % 2 == 0 ? -1 : 1) + 1;
     }
 }
 

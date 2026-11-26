@@ -499,10 +499,10 @@ class SpinePointAttachment extends SpineVertexAttachment
 
     computeWorldRotation(bone)
     {
-        let cos = SpineMathUtils.cosDeg(this.rotation), sin = SpineMathUtils.sinDeg(this.rotation);
+        let cos = MathUtil.cosDeg(this.rotation), sin = MathUtil.sinDeg(this.rotation);
         let x = cos * bone.a + sin * bone.b;
         let y = cos * bone.c + sin * bone.d;
-        return Math.atan2(y, x) * SpineMathUtils.radDeg;
+        return Math.atan2(y, x) * MathDefines.kRadToDeg;
     }
 
     copy()

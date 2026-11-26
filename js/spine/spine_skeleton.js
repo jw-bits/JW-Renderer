@@ -188,10 +188,10 @@ class SpineBone
             let rotationY = rotation + 90 + shearY;
             let sx = skeleton.scaleX;
             let sy = skeleton.scaleY;
-            this.a = SpineMathUtils.cosDeg(rotation + shearX) * scaleX * sx;
-            this.b = SpineMathUtils.cosDeg(rotationY) * scaleY * sx;
-            this.c = SpineMathUtils.sinDeg(rotation + shearX) * scaleX * sy;
-            this.d = SpineMathUtils.sinDeg(rotationY) * scaleY * sy;
+            this.a = MathUtil.cosDeg(rotation + shearX) * scaleX * sx;
+            this.b = MathUtil.cosDeg(rotationY) * scaleY * sx;
+            this.c = MathUtil.sinDeg(rotation + shearX) * scaleX * sy;
+            this.d = MathUtil.sinDeg(rotationY) * scaleY * sy;
             this.worldX = x * sx + skeleton.x;
             this.worldY = y * sy + skeleton.y;
             return;
@@ -203,10 +203,10 @@ class SpineBone
         {
             case SpineTransformMode.Normal: {
                 let rotationY = rotation + 90 + shearY;
-                let la = SpineMathUtils.cosDeg(rotation + shearX) * scaleX;
-                let lb = SpineMathUtils.cosDeg(rotationY) * scaleY;
-                let lc = SpineMathUtils.sinDeg(rotation + shearX) * scaleX;
-                let ld = SpineMathUtils.sinDeg(rotationY) * scaleY;
+                let la = MathUtil.cosDeg(rotation + shearX) * scaleX;
+                let lb = MathUtil.cosDeg(rotationY) * scaleY;
+                let lc = MathUtil.sinDeg(rotation + shearX) * scaleX;
+                let ld = MathUtil.sinDeg(rotationY) * scaleY;
                 this.a = pa * la + pb * lc;
                 this.b = pa * lb + pb * ld;
                 this.c = pc * la + pd * lc;
@@ -215,10 +215,10 @@ class SpineBone
             }
             case SpineTransformMode.OnlyTranslation: {
                 let rotationY = rotation + 90 + shearY;
-                this.a = SpineMathUtils.cosDeg(rotation + shearX) * scaleX;
-                this.b = SpineMathUtils.cosDeg(rotationY) * scaleY;
-                this.c = SpineMathUtils.sinDeg(rotation + shearX) * scaleX;
-                this.d = SpineMathUtils.sinDeg(rotationY) * scaleY;
+                this.a = MathUtil.cosDeg(rotation + shearX) * scaleX;
+                this.b = MathUtil.cosDeg(rotationY) * scaleY;
+                this.c = MathUtil.sinDeg(rotation + shearX) * scaleX;
+                this.d = MathUtil.sinDeg(rotationY) * scaleY;
                 break;
             }
             case SpineTransformMode.NoRotationOrReflection: {
@@ -231,20 +231,20 @@ class SpineBone
                     pc /= this.skeleton.scaleY;
                     pb = pc * s;
                     pd = pa * s;
-                    prx = Math.atan2(pc, pa) * SpineMathUtils.radDeg;
+                    prx = Math.atan2(pc, pa) * MathDefines.kRadToDeg;
                 }
                 else
                 {
                     pa = 0;
                     pc = 0;
-                    prx = 90 - Math.atan2(pd, pb) * SpineMathUtils.radDeg;
+                    prx = 90 - Math.atan2(pd, pb) * MathDefines.kRadToDeg;
                 }
                 let rx = rotation + shearX - prx;
                 let ry = rotation + shearY - prx + 90;
-                let la = SpineMathUtils.cosDeg(rx) * scaleX;
-                let lb = SpineMathUtils.cosDeg(ry) * scaleY;
-                let lc = SpineMathUtils.sinDeg(rx) * scaleX;
-                let ld = SpineMathUtils.sinDeg(ry) * scaleY;
+                let la = MathUtil.cosDeg(rx) * scaleX;
+                let lb = MathUtil.cosDeg(ry) * scaleY;
+                let lc = MathUtil.sinDeg(rx) * scaleX;
+                let ld = MathUtil.sinDeg(ry) * scaleY;
                 this.a = pa * la - pb * lc;
                 this.b = pa * lb - pb * ld;
                 this.c = pc * la + pd * lc;
@@ -253,8 +253,8 @@ class SpineBone
             }
             case SpineTransformMode.NoScale:
             case SpineTransformMode.NoScaleOrReflection: {
-                let cos = SpineMathUtils.cosDeg(rotation);
-                let sin = SpineMathUtils.sinDeg(rotation);
+                let cos = MathUtil.cosDeg(rotation);
+                let sin = MathUtil.sinDeg(rotation);
                 let za = (pa * cos + pb * sin) / this.skeleton.scaleX;
                 let zc = (pc * cos + pd * sin) / this.skeleton.scaleY;
                 let s = Math.sqrt(za * za + zc * zc);
@@ -269,10 +269,10 @@ class SpineBone
                 let r = Math.PI / 2 + Math.atan2(zc, za);
                 let zb = Math.cos(r) * s;
                 let zd = Math.sin(r) * s;
-                let la = SpineMathUtils.cosDeg(shearX) * scaleX;
-                let lb = SpineMathUtils.cosDeg(90 + shearY) * scaleY;
-                let lc = SpineMathUtils.sinDeg(shearX) * scaleX;
-                let ld = SpineMathUtils.sinDeg(90 + shearY) * scaleY;
+                let la = MathUtil.cosDeg(shearX) * scaleX;
+                let lb = MathUtil.cosDeg(90 + shearY) * scaleY;
+                let lc = MathUtil.sinDeg(shearX) * scaleX;
+                let ld = MathUtil.sinDeg(90 + shearY) * scaleY;
                 this.a = za * la + zb * lc;
                 this.b = za * lb + zb * ld;
                 this.c = zc * la + zd * lc;
@@ -302,13 +302,13 @@ class SpineBone
     /** The world rotation for the X axis, calculated using {@link #a} and {@link #c}. */
     getWorldRotationX()
     {
-        return Math.atan2(this.c, this.a) * SpineMathUtils.radDeg;
+        return Math.atan2(this.c, this.a) * MathDefines.kRadToDeg;
     }
 
     /** The world rotation for the Y axis, calculated using {@link #b} and {@link #d}. */
     getWorldRotationY()
     {
-        return Math.atan2(this.d, this.b) * SpineMathUtils.radDeg;
+        return Math.atan2(this.d, this.b) * MathDefines.kRadToDeg;
     }
 
     /** The magnitude (always positive) of the world scale X, calculated using {@link #a} and {@link #c}. */
@@ -338,11 +338,11 @@ class SpineBone
         {
             this.ax = this.worldX - this.skeleton.x;
             this.ay = this.worldY - this.skeleton.y;
-            this.arotation = Math.atan2(this.c, this.a) * SpineMathUtils.radDeg;
+            this.arotation = Math.atan2(this.c, this.a) * MathDefines.kRadToDeg;
             this.ascaleX = Math.sqrt(this.a * this.a + this.c * this.c);
             this.ascaleY = Math.sqrt(this.b * this.b + this.d * this.d);
             this.ashearX = 0;
-            this.ashearY = Math.atan2(this.a * this.b + this.c * this.d, this.a * this.d - this.b * this.c) * SpineMathUtils.radDeg;
+            this.ashearY = Math.atan2(this.a * this.b + this.c * this.d, this.a * this.d - this.b * this.c) * MathDefines.kRadToDeg;
             return;
         }
         let pa = parent.a, pb = parent.b, pc = parent.c, pd = parent.d;
@@ -364,15 +364,15 @@ class SpineBone
         {
             let det = ra * rd - rb * rc;
             this.ascaleY = det / this.ascaleX;
-            this.ashearY = Math.atan2(ra * rb + rc * rd, det) * SpineMathUtils.radDeg;
-            this.arotation = Math.atan2(rc, ra) * SpineMathUtils.radDeg;
+            this.ashearY = Math.atan2(ra * rb + rc * rd, det) * MathDefines.kRadToDeg;
+            this.arotation = Math.atan2(rc, ra) * MathDefines.kRadToDeg;
         }
         else
         {
             this.ascaleX = 0;
             this.ascaleY = Math.sqrt(rb * rb + rd * rd);
             this.ashearY = 0;
-            this.arotation = 90 - Math.atan2(rd, rb) * SpineMathUtils.radDeg;
+            this.arotation = 90 - Math.atan2(rd, rb) * MathDefines.kRadToDeg;
         }
     }
 
@@ -398,16 +398,16 @@ class SpineBone
     /** Transforms a world rotation to a local rotation. */
     worldToLocalRotation(worldRotation)
     {
-        let sin = SpineMathUtils.sinDeg(worldRotation), cos = SpineMathUtils.cosDeg(worldRotation);
-        return Math.atan2(this.a * sin - this.c * cos, this.d * cos - this.b * sin) * SpineMathUtils.radDeg + this.rotation - this.shearX;
+        let sin = MathUtil.sinDeg(worldRotation), cos = MathUtil.cosDeg(worldRotation);
+        return Math.atan2(this.a * sin - this.c * cos, this.d * cos - this.b * sin) * MathDefines.kRadToDeg + this.rotation - this.shearX;
     }
 
     /** Transforms a local rotation to a world rotation. */
     localToWorldRotation(localRotation)
     {
         localRotation -= this.rotation - this.shearX;
-        let sin = SpineMathUtils.sinDeg(localRotation), cos = SpineMathUtils.cosDeg(localRotation);
-        return Math.atan2(cos * this.c + sin * this.d, cos * this.a + sin * this.b) * SpineMathUtils.radDeg;
+        let sin = MathUtil.sinDeg(localRotation), cos = MathUtil.cosDeg(localRotation);
+        return Math.atan2(cos * this.c + sin * this.d, cos * this.a + sin * this.b) * MathDefines.kRadToDeg;
     }
 
     /** Rotates the world transform the specified amount.
@@ -417,7 +417,7 @@ class SpineBone
     rotateWorld(degrees)
     {
         let a = this.a, b = this.b, c = this.c, d = this.d;
-        let cos = SpineMathUtils.cosDeg(degrees), sin = SpineMathUtils.sinDeg(degrees);
+        let cos = MathUtil.cosDeg(degrees), sin = MathUtil.sinDeg(degrees);
         this.a = cos * a - sin * c;
         this.b = cos * b - sin * d;
         this.c = sin * a + cos * c;
@@ -613,7 +613,7 @@ class SpineIkConstraint
                 let sc = pc / bone.skeleton.scaleY;
                 pb = -sc * s * bone.skeleton.scaleX;
                 pd = sa * s * bone.skeleton.scaleY;
-                rotationIK += Math.atan2(sc, sa) * SpineMathUtils.radDeg;
+                rotationIK += Math.atan2(sc, sa) * MathDefines.kRadToDeg;
             // Fall through
             default:
                 let x = targetX - p.worldX, y = targetY - p.worldY;
@@ -621,7 +621,7 @@ class SpineIkConstraint
                 tx = (x * pd - y * pb) / d - bone.ax;
                 ty = (y * pa - x * pc) / d - bone.ay;
         }
-        rotationIK += Math.atan2(ty, tx) * SpineMathUtils.radDeg;
+        rotationIK += Math.atan2(ty, tx) * MathDefines.kRadToDeg;
         if (bone.ascaleX < 0)
             rotationIK += 180;
         if (rotationIK > 180)
@@ -775,7 +775,7 @@ class SpineIkConstraint
                     break outer;
                 }
             }
-            let minAngle = SpineMathUtils.PI, minX = l1 - a, minDist = minX * minX, minY = 0;
+            let minAngle = MathDefines.kPi, minX = l1 - a, minDist = minX * minX, minY = 0;
             let maxAngle = 0, maxX = l1 + a, maxDist = maxX * maxX, maxY = 0;
             c = -a * l1 / (aa - bb);
             if (c >= -1 && c <= 1)
@@ -812,14 +812,14 @@ class SpineIkConstraint
         }
         let os = Math.atan2(cy, cx) * s2;
         let rotation = parent.arotation;
-        a1 = (a1 - os) * SpineMathUtils.radDeg + os1 - rotation;
+        a1 = (a1 - os) * MathDefines.kRadToDeg + os1 - rotation;
         if (a1 > 180)
             a1 -= 360;
         else if (a1 < -180) //
             a1 += 360;
         parent.updateWorldTransformWith(px, py, rotation + a1 * alpha, sx, sy, 0, 0);
         rotation = child.arotation;
-        a2 = ((a2 + os) * SpineMathUtils.radDeg - child.ashearX) * s2 + os2 - rotation;
+        a2 = ((a2 + os) * MathDefines.kRadToDeg - child.ashearX) * s2 + os2 - rotation;
         if (a2 > 180)
             a2 -= 360;
         else if (a2 < -180) //
@@ -901,7 +901,7 @@ class SpineTransformConstraint
         let translate = mixX != 0 || mixY != 0;
         let target = this.target;
         let ta = target.a, tb = target.b, tc = target.c, td = target.d;
-        let degRadReflect = ta * td - tb * tc > 0 ? SpineMathUtils.degRad : -SpineMathUtils.degRad;
+        let degRadReflect = ta * td - tb * tc > 0 ? MathDefines.kDegToRad : -MathDefines.kDegToRad;
         let offsetRotation = this.data.offsetRotation * degRadReflect;
         let offsetShearY = this.data.offsetShearY * degRadReflect;
         let bones = this.bones;
@@ -912,10 +912,10 @@ class SpineTransformConstraint
             {
                 let a = bone.a, b = bone.b, c = bone.c, d = bone.d;
                 let r = Math.atan2(tc, ta) - Math.atan2(c, a) + offsetRotation;
-                if (r > SpineMathUtils.PI)
-                    r -= SpineMathUtils.PI2;
-                else if (r < -SpineMathUtils.PI) //
-                    r += SpineMathUtils.PI2;
+                if (r > MathDefines.kPi)
+                    r -= MathDefines.kTwoPi;
+                else if (r < -MathDefines.kPi) //
+                    r += MathDefines.kTwoPi;
                 r *= mixRotate;
                 let cos = Math.cos(r), sin = Math.sin(r);
                 bone.a = cos * a - sin * c;
@@ -952,10 +952,10 @@ class SpineTransformConstraint
                 let b = bone.b, d = bone.d;
                 let by = Math.atan2(d, b);
                 let r = Math.atan2(td, tb) - Math.atan2(tc, ta) - (by - Math.atan2(bone.c, bone.a));
-                if (r > SpineMathUtils.PI)
-                    r -= SpineMathUtils.PI2;
-                else if (r < -SpineMathUtils.PI) //
-                    r += SpineMathUtils.PI2;
+                if (r > MathDefines.kPi)
+                    r -= MathDefines.kTwoPi;
+                else if (r < -MathDefines.kPi) //
+                    r += MathDefines.kTwoPi;
                 r = by + (r + offsetShearY) * mixShearY;
                 let s = Math.sqrt(b * b + d * d);
                 bone.b = Math.cos(r) * s;
@@ -971,7 +971,7 @@ class SpineTransformConstraint
         let translate = mixX != 0 || mixY != 0;
         let target = this.target;
         let ta = target.a, tb = target.b, tc = target.c, td = target.d;
-        let degRadReflect = ta * td - tb * tc > 0 ? SpineMathUtils.degRad : -SpineMathUtils.degRad;
+        let degRadReflect = ta * td - tb * tc > 0 ? MathDefines.kDegToRad : -MathDefines.kDegToRad;
         let offsetRotation = this.data.offsetRotation * degRadReflect, offsetShearY = this.data.offsetShearY * degRadReflect;
         let bones = this.bones;
         for (let i = 0, n = bones.length; i < n; i++)
@@ -981,10 +981,10 @@ class SpineTransformConstraint
             {
                 let a = bone.a, b = bone.b, c = bone.c, d = bone.d;
                 let r = Math.atan2(tc, ta) + offsetRotation;
-                if (r > SpineMathUtils.PI)
-                    r -= SpineMathUtils.PI2;
-                else if (r < -SpineMathUtils.PI) //
-                    r += SpineMathUtils.PI2;
+                if (r > MathDefines.kPi)
+                    r -= MathDefines.kTwoPi;
+                else if (r < -MathDefines.kPi) //
+                    r += MathDefines.kTwoPi;
                 r *= mixRotate;
                 let cos = Math.cos(r), sin = Math.sin(r);
                 bone.a = cos * a - sin * c;
@@ -1015,12 +1015,12 @@ class SpineTransformConstraint
             if (mixShearY > 0)
             {
                 let r = Math.atan2(td, tb) - Math.atan2(tc, ta);
-                if (r > SpineMathUtils.PI)
-                    r -= SpineMathUtils.PI2;
-                else if (r < -SpineMathUtils.PI) //
-                    r += SpineMathUtils.PI2;
+                if (r > MathDefines.kPi)
+                    r -= MathDefines.kTwoPi;
+                else if (r < -MathDefines.kPi) //
+                    r += MathDefines.kTwoPi;
                 let b = bone.b, d = bone.d;
-                r = Math.atan2(d, b) + (r - SpineMathUtils.PI / 2 + offsetShearY) * mixShearY;
+                r = Math.atan2(d, b) + (r - MathDefines.kPi / 2 + offsetShearY) * mixShearY;
                 let s = Math.sqrt(b * b + d * d);
                 bone.b = Math.cos(r) * s;
                 bone.d = Math.sin(r) * s;
@@ -1235,7 +1235,7 @@ class SpinePathConstraint
         {
             tip = false;
             let p = this.target.bone;
-            offsetRotation *= p.a * p.d - p.b * p.c > 0 ? SpineMathUtils.degRad : -SpineMathUtils.degRad;
+            offsetRotation *= p.a * p.d - p.b * p.c > 0 ? MathDefines.kDegToRad : -MathDefines.kDegToRad;
         }
         for (let i = 0, p = 3; i < boneCount; i++, p += 3)
         {
@@ -1277,10 +1277,10 @@ class SpinePathConstraint
                 {
                     r += offsetRotation;
                 }
-                if (r > SpineMathUtils.PI)
-                    r -= SpineMathUtils.PI2;
-                else if (r < -SpineMathUtils.PI) //
-                    r += SpineMathUtils.PI2;
+                if (r > MathDefines.kPi)
+                    r -= MathDefines.kTwoPi;
+                else if (r < -MathDefines.kPi) //
+                    r += MathDefines.kTwoPi;
                 r *= mixRotate;
                 cos = Math.cos(r);
                 sin = Math.sin(r);
@@ -1935,10 +1935,10 @@ class SpineSkeleton
         rootBone.worldX = pa * this.x + pb * this.y + parent.worldX;
         rootBone.worldY = pc * this.x + pd * this.y + parent.worldY;
         let rotationY = rootBone.rotation + 90 + rootBone.shearY;
-        let la = SpineMathUtils.cosDeg(rootBone.rotation + rootBone.shearX) * rootBone.scaleX;
-        let lb = SpineMathUtils.cosDeg(rotationY) * rootBone.scaleY;
-        let lc = SpineMathUtils.sinDeg(rootBone.rotation + rootBone.shearX) * rootBone.scaleX;
-        let ld = SpineMathUtils.sinDeg(rotationY) * rootBone.scaleY;
+        let la = MathUtil.cosDeg(rootBone.rotation + rootBone.shearX) * rootBone.scaleX;
+        let lb = MathUtil.cosDeg(rotationY) * rootBone.scaleY;
+        let lc = MathUtil.sinDeg(rootBone.rotation + rootBone.shearX) * rootBone.scaleX;
+        let ld = MathUtil.sinDeg(rotationY) * rootBone.scaleY;
         rootBone.a = (pa * la + pb * lc) * this.scaleX;
         rootBone.b = (pa * lb + pb * ld) * this.scaleX;
         rootBone.c = (pc * la + pd * lc) * this.scaleY;

@@ -44,6 +44,7 @@ const kOutName = "jw-renderer";
 const kFiles = [
     "js/math/math_defines.js",
     "js/math/math_utils.js",
+    "js/math/matrix2.js",
     "js/math/matrix3.js",
     "js/math/matrix4.js",
     "js/math/vector2.js",

@@ -20,7 +20,7 @@
         let spin = new MotionAction(null, new Transform2D(0, 0, 1, 1, MathDefines.kPi), { rotation: { duration: 0.5 } });
 
     Rotation goes straight from start to target, without wrapping: from
-    2 PI to 0 turns a full circle back.
+    2 PI to 0 turns a full circle back. Shear (radians) blends the same way.
 
     Color: setColors() gives a start and target color (white by default) for
     the color channel, written to the Entity's color, which its model is
@@ -138,6 +138,12 @@ class MotionAction extends MotionBase
         {
             const e = d.getProgress(MotionChannel.kRotation, seconds);
             o.setRotation(MathUtil.lerp(s.getRotation(), t.getRotation(), e));
+        }
+
+        if ((channels & MotionChannel.kShear) !== 0)
+        {
+            const e = d.getProgress(MotionChannel.kShear, seconds);
+            o.setShear(MathUtil.lerp(s.getShear(), t.getShear(), e));
         }
 
         if ((channels & MotionChannel.kColor) !== 0)
