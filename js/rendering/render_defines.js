@@ -47,6 +47,7 @@ class RenderAttributes
     // 4-component
     static kTangent = "a_tangent"; // (X, Y, Z, W): W is the bitangent's handedness, +1 or -1
     static kColor = "a_color";
+    static kColor1 = "a_color1";   // A second color, e.g. Spine's two-color tint (the dark color)
 
     static allAttribs = new Map(); // Name -> { count, location }; locations must match the shaders' layout(location = N)
 
@@ -75,13 +76,16 @@ class RenderAttributes
         all.set(RenderAttributes.kNormal,   { count: 3, location: 5 });
         all.set(RenderAttributes.kTangent,  { count: 4, location: 6 });
         all.set(RenderAttributes.kColor,    { count: 4, location: 7 });
+        all.set(RenderAttributes.kColor1,   { count: 4, location: 15 }); // After InstancedAttributes' 8 - 14; the last of WebGL2's guaranteed 16
     }
 }
 
 /*
     Every per-instance attribute an instanced shader may use (see
-    InstancedQuadMesh). Locations 8 - 14 are past RenderAttributes' (0 - 7),
-    so a mesh's position (location 0) can be drawn alongside them.
+    InstancedQuadMesh). Locations 8 - 14 are clear of RenderAttributes' (0 - 7
+    and 15), so a mesh's position (location 0) can be drawn alongside them.
+    All 16 locations WebGL2 guarantees are now taken; unused ones (kUV1 - kUV3,
+    kNormal, kTangent) are the place to look before adding more.
     Shaders without a named meaning for a value pack it into a_instVec0 - a_instVec3.
 */
 class InstancedAttributes
@@ -338,6 +342,9 @@ class RenderUniformBlocks
                         premultiplied (a PMA texture, or a shader that outputs rgb * a),
                         or partly see-through parts brighten. Alpha is left alone.
         kNone           Replaces what's there, alpha included (blending off).
+        kScreen         1 - (1 - what's there) * (1 - color): brightens, never past white; black
+                        changes nothing. The color must be premultiplied, as for kMultiply.
+                        Alpha is left alone.
 */
 class BlendMode
 {
@@ -346,8 +353,9 @@ class BlendMode
     static kAdditive = 2;
     static kMultiply = 3;
     static kNone = 4;
+    static kScreen = 5;
 
-    static isValid(mode) { return (Number.isInteger(mode) === true && mode >= BlendMode.kAlpha && mode <= BlendMode.kNone); }
+    static isValid(mode) { return (Number.isInteger(mode) === true && mode >= BlendMode.kAlpha && mode <= BlendMode.kScreen); }
 }
 
 // How a SpriteSequence plays through its frames

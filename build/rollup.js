@@ -51,6 +51,7 @@ const kFiles = [
     "js/math/vector3.js",
     "js/math/vector4.js",
     "js/math/transform.js",
+    "js/math/bounds2d.js",
     "js/math/hermite_spline.js",
 
     "js/rendering/render_defines.js",
@@ -89,6 +90,7 @@ const kFiles = [
     "js/spine/spine_json.js",
     "js/spine/spine_skeleton.js",
     "js/spine/spine_animation_state.js",
+    "js/spine/spine_clipping.js",
     "js/spine/spine_model.js",
     "js/spine/spine_debug.js",
 

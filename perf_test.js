@@ -16,6 +16,11 @@
     images), with SpineSkeletonDebug lines over them: bones in red, paths,
     bounding boxes and clipping polygons in green (see js/spine). The tank
     shows multiply blending (its shadow), the owl and spineboy additive.
+    Each skeleton has its own Camera2D and Batcher (drawn from the main one):
+    the camera's viewport is its slot, which also clips it, and its position
+    and zoom fit the whole animation. The tank's camera follows tankRoot, as
+    Spine's own demo does, so the ground and rock scroll past under it. B
+    shows and hides the debug lines while page 4 is shown.
 
     Render targets (render_target.js, post_effects.js): pages change with a
     ScreenTransition (a wipe, circle, dissolve, fade or wipe up, in turn)
@@ -175,21 +180,23 @@ const HIERARCHY_ROCK_TIME = 6.3;          // ...taking this many seconds each wa
 const HIERARCHY_BREATHE = 0.84;           // The root's scale swings between this and 1...
 const HIERARCHY_BREATHE_TIME = 2.9;       // ...taking this many seconds each way
 // Spine (page 4): each sample skeleton drawn by a Skeleton2D, with its bones (and paths, clipping) as SpineSkeletonDebug lines over it, animated.
-// hold: the bone kept where the setup pose has it (the root if not given), so one that travels plays on the spot.
-// hide: an attachment left out (the tank's 7 ground tiles span 7,200 units, scrolling under it as it drives).
+// follow: a bone its camera follows across (the tank drives about 4,100 units; its ground tiles and rock scroll past).
+// fitSkip: attachments left out when fitting the animation into the slot (the tank's ground and rock).
 const SPINE_ASSETS = "./tools/Spine/demos/assets/";
 const SPINE_JSON = SPINE_ASSETS + "demos.json";   // Holds every sample skeleton, by name
 const SPINE_ITEMS = [{ name: "dragon", atlas: "atlas1", animation: "flying", tests: "regions only" },
                      { name: "raptor", atlas: "atlas1", animation: "walk", tests: "IK, weighted meshes" },
                      { name: "spineboy", atlas: "atlas1", animation: "run", tests: "IK, transform, clipping" },
                      { name: "owl", atlas: "atlas2", animation: "idle", tests: "meshes, deform" },
-                     { name: "tank", atlas: "atlas2", animation: "drive", tests: "145 slots, path", hold: "tankRoot", hide: "tank/ground" },
+                     { name: "tank", atlas: "atlas2", animation: "drive", tests: "145 slots, path",
+                       follow: "tankRoot", fitSkip: ["tank/ground", "tank/rock"] },
                      { name: "stretchyman", atlas: "atlas2", animation: "idle", tests: "paths, IK stretch" },
                      { name: "vine", atlas: "atlas2", animation: "animation", tests: "path constraint" },
                      { name: "heroes", atlas: "heroes", animation: "run", tests: "a skin, trimmed regions", skin: 1 }];
-const SPINE_VIEW = new Vector2(CELL_W - 80, CELL_H - 100); // Each skeleton's setup pose is fitted into this, centered in its slot
-const SPINE_LINE_WIDTH = 1.5;
-const SPINE_ORIGIN = new Transform2D(); // Skeleton2Ds are drawn at the origin: the skeleton's own x, y and scale place it (as for the lines)
+const SPINE_VIEW = new Vector2(CELL_W - 80, CELL_H - 100); // Each skeleton's whole animation is fitted into this, centered in its slot
+const SPINE_CLIP = new Vector2(CELL_W - 16, CELL_H - 16);  // Each skeleton's camera viewport (and so its clip rect), centered in its slot
+const SPINE_LINE_WIDTH = 1.5;           // Screen design units, whatever the camera's zoom
+const SPINE_ORIGIN = new Transform2D(); // Skeleton2Ds are drawn at the origin at scale 1; their cameras place them
 
 const TRANSITION_SECONDS = 0.7;
 const TRANSITION_SOFTNESS = 0.15;
@@ -246,6 +253,10 @@ let gEaseHold = 0.0;    // Seconds the ease holds its end before playing again
 
 // Which page is shown; it changes every PAGE_SECONDS unless paused (space). isTurning: change at the end of this frame.
 let gPages = { current: 0, count: 1, timer: 0.0, isPaused: false, isTurning: false };
+
+// Spine's page: B shows and hides the debug lines while it's shown
+let gSpinePage = -1;    // The page the Spine items are on (-1: none loaded)
+let gSpineLines = true;
 
 // The page transition
 let gTransition = null; // ScreenTransition
@@ -317,7 +328,7 @@ window.onload = () => {
 
 window.onresize = () => WGLV.resizeToWindow();
 
-// Space pauses and resumes the page cycle, O toggles the overdraw measuring
+// Space pauses and resumes the page cycle, O toggles the overdraw measuring, B the Spine debug lines (on their page)
 window.addEventListener("keydown", (e) => {
     if (e.repeat === true)
         return;
@@ -331,6 +342,11 @@ window.addEventListener("keydown", (e) => {
 
         case KeyCode.kO:
             gStats.isOverdrawOn = !gStats.isOverdrawOn;
+            break;
+
+        case KeyCode.kB:
+            if (gPages.current === gSpinePage)
+                gSpineLines = !gSpineLines;
             break;
     }
 });
@@ -831,6 +847,7 @@ function buildScene()
 
         let spineItem = makeSpineItem(s, data, spineDebug);
         spineItem.startsPage = firstSpine; // Spine starts a page of its own
+        spineItem.isSpine = true;
         firstSpine = false;
         items.push(spineItem);
     });
@@ -862,6 +879,7 @@ function buildScene()
     }
 
     gPages.count = Math.ceil(position / ITEMS_PER_PAGE);
+    gSpinePage = items.find((item) => item.isSpine === true)?.page ?? -1;
 
     gScene.items = items;
     gScene.lights = lights;
@@ -1327,10 +1345,15 @@ function makeCachedItem()
 }
 
 /*
-    One Spine sample skeleton (see SPINE_ITEMS), drawn as SpineSkeletonDebug lines, its animation
-    looping (SpineAnimation.apply() from the setup pose each frame). Its held bone (s.hold, or the
-    root) stays where the setup pose has it, so one that travels (the tank) plays on the spot, and
-    it's scaled so everything it reaches over the whole animation fits SPINE_VIEW.
+    One Spine sample skeleton (see SPINE_ITEMS), drawn by a Skeleton2D with SpineSkeletonDebug
+    lines over it (while gSpineLines), its animation looping (SpineAnimation.apply() from the setup
+    pose each frame).
+    It has its own Camera2D and Batcher, drawn from the main batcher as a drawable: the camera's
+    viewport is SPINE_CLIP centered in its slot (so it's clipped there), and its position and zoom
+    fit everything the whole animation reaches into SPINE_VIEW; the skeleton stays at its origin at
+    scale 1. A followed bone (s.follow) is held in place while fitting; when playing, the camera
+    follows it across instead, so the world it drives through (the tank's ground and rock) scrolls
+    past. Without one, the root bone stays where the setup pose has it.
 */
 function makeSpineItem(s, data, debug)
 {
@@ -1345,8 +1368,17 @@ function makeSpineItem(s, data, debug)
 
     let skeleton = model?.getSkeleton() ?? new SpineSkeleton(data);
     const animation = data.findAnimation(s.animation);
-    const root = (s.hold !== undefined) ? (skeleton.findBone(s.hold) ?? skeleton.getRootBone()) : skeleton.getRootBone();
+    const followed = (s.follow !== undefined) ? skeleton.findBone(s.follow) : null;
+    const root = followed ?? skeleton.getRootBone(); // Held in place: while fitting, or (no followed bone) always
     let time = 0.0;
+
+    let camera = new Camera2D();
+    let batcher = new Batcher();
+    batcher.setCamera(camera); // Both layers follow it: 0 the images, 1 the lines over them
+
+    const drawable = { render: () => batcher.render() };
+    let center = new Vector2(); // The fitted bounds' center, skeleton units: where the camera looks (plus the follow)
+    let followSetupX = 0.0;     // The followed bone's world x in the setup pose
 
     if (s.skin !== undefined)
     {
@@ -1357,19 +1389,25 @@ function makeSpineItem(s, data, debug)
     if (animation === null)
         console.error(`Spine ${s.name} has no animation "${s.animation}"; showing its setup pose`);
 
-    // The slots showing the hidden attachment, if any
-    const hidden = (s.hide !== undefined) ? skeleton.slots.filter((slot) => slot.getAttachment()?.name === s.hide) : [];
-
-    // The pose at seconds, the held bone in place and the hidden attachment off
-    const poseAt = (seconds, lastSeconds) => {
+    // The pose at seconds. isFitting: the held bone in place (a followed one too) and s.fitSkip's attachments off.
+    const poseAt = (seconds, lastSeconds, isFitting) => {
         if (animation !== null)
             animation.apply(skeleton, lastSeconds, seconds, true, null, 1.0, SpineMixBlend.setup, SpineMixDirection.mixIn);
 
-        root.x = root.data.x;
-        root.y = root.data.y;
+        if (isFitting === true || followed === null)
+        {
+            root.x = root.data.x;
+            root.y = root.data.y;
+        }
 
-        for (const slot of hidden)
-            slot.setAttachment(null);
+        if (isFitting === true && s.fitSkip !== undefined)
+        {
+            for (const slot of skeleton.slots)
+            {
+                if (s.fitSkip.includes(slot.getAttachment()?.name) === true)
+                    slot.setAttachment(null);
+            }
+        }
 
         skeleton.updateWorldTransform();
     };
@@ -1385,7 +1423,7 @@ function makeSpineItem(s, data, debug)
         for (let i = 0; i < samples; ++i)
         {
             skeleton.setToSetupPose();
-            poseAt((animation !== null) ? (animation.duration * i) / samples : 0.0, 0.0);
+            poseAt((animation !== null) ? (animation.duration * i) / samples : 0.0, 0.0, true);
             skeleton.getBounds(offset, size, []);
 
             if (Number.isFinite(offset.x) === true && size.x > 0.0)
@@ -1396,42 +1434,54 @@ function makeSpineItem(s, data, debug)
         }
 
         skeleton.setToSetupPose();
+        skeleton.updateWorldTransform();
+        followSetupX = followed?.worldX ?? 0.0;
         return (min.x <= max.x) ? { min, max } : null;
     };
 
     const bounds = fitBounds();
     const label = `Spine ${s.name} - ${s.animation}: ${s.tests}`;
 
+    // The camera fits the whole animation into SPINE_VIEW (zoom 1, looking at the origin, if it has no bounds)
+    if (bounds !== null)
+    {
+        const w = bounds.max.x - bounds.min.x;
+        const h = bounds.max.y - bounds.min.y;
+
+        camera.setZoom(Math.min(SPINE_VIEW.x / w, SPINE_VIEW.y / h));
+        center.setXY((bounds.min.x + bounds.max.x) / 2.0, (bounds.min.y + bounds.max.y) / 2.0);
+    }
+
+    camera.setPosition(center.x, center.y);
+
     return { label: label,
              place: (x, y) => {
-                 // Scaled so the whole animation fits SPINE_VIEW, its bounds centered on (x, y)
-                 if (bounds === null)
-                 {
-                     skeleton.x = x;
-                     skeleton.y = y;
-                     return;
-                 }
-
-                 const w = bounds.max.x - bounds.min.x;
-                 const h = bounds.max.y - bounds.min.y;
-                 const scale = Math.min(SPINE_VIEW.x / w, SPINE_VIEW.y / h);
-
-                 skeleton.scaleX = scale;
-                 skeleton.scaleY = scale;
-                 skeleton.x = x - (((bounds.min.x + bounds.max.x) / 2.0) * scale);
-                 skeleton.y = y - (((bounds.min.y + bounds.max.y) / 2.0) * scale);
+                 // The viewport (and clip rect), centered on (x, y)
+                 camera.setViewport(x - (SPINE_CLIP.x / 2.0), y - (SPINE_CLIP.y / 2.0), SPINE_CLIP.x, SPINE_CLIP.y);
              },
              update: (dt) => {
                  const last = time;
                  time += dt;
-                 poseAt(time, last);
+                 poseAt(time, last, false);
+
+                 // Following: the camera moves across with the bone, so it keeps its place in the view
+                 if (followed !== null)
+                     camera.setPosition(center.x + (followed.worldX - followSetupX), center.y);
+
+                 camera.update(dt);
              },
              submit: () => {
-                 // The images first, so the bones (lines, another group on the layer) draw over them
+                 // The images on layer 0, the lines over them on layer 1, as thick on screen at any zoom
                  if (model !== null)
-                     gBatcher.submit(model, SPINE_ORIGIN, Layers.kParticles);
+                     batcher.submit(model, SPINE_ORIGIN, 0);
 
-                 debug.submit(gBatcher, skeleton, Layers.kParticles);
+                 if (gSpineLines === true)
+                 {
+                     debug.setLineWidth(SPINE_LINE_WIDTH / camera.getZoom());
+                     debug.submit(batcher, skeleton, 1);
+                 }
+
+                 gBatcher.submitDrawable(drawable, Layers.kParticles);
              } };
 }
 
@@ -1782,7 +1832,7 @@ function updateHud(ts)
         String(l.stateChanges),
         `${l.bindsSent} sent, ${l.bindsSkipped} skipped`,
         `${RenderTarget.getCount()} (${(RenderTarget.getTotalMemoryBytes() / 1048576).toFixed(1)} MB), ${RenderTargetPool.getCount()} pooled`,
-        "Space pause, O overdraw"
+        "Space pause, O overdraw, B Spine lines"
     ];
 
     // Labels padded to one width; the font is monospaced, so the values line up

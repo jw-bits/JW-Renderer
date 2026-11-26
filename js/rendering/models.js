@@ -165,6 +165,35 @@ class Model2D
         return (Math.abs(x) <= hw && Math.abs(y) <= hh);
     }
 
+    /*
+        The model's box with its anchor at (0, 0), unscaled and unturned, written into
+        out (a Bounds2D) and returned: its width x height placed by the alignment.
+        Subclasses whose drawing isn't their rect override it (Skeleton2D).
+    */
+    getLocalBounds(out = new Bounds2D())
+    {
+        const x = Alignment.offsetX(this.#align, this.#width);
+        const y = Alignment.offsetY(this.#align, this.#height);
+
+        out.setMinMax(x, y, x + this.#width, y + this.#height);
+            return out;
+    }
+
+    /*
+        The axis-aligned box around the model as drawn at transform (the anchor), in
+        world design units, written into out (a Bounds2D) and returned. Like draw(),
+        it scales and turns about the rect's center and ignores the transform's shear
+        (the 2D shaders don't draw it yet, see Transform2D).
+    */
+    getWorldBounds(transform, out = new Bounds2D())
+    {
+        const t = this.getDrawTransform(transform, Model2D.#kDrawTransform);
+        const hw = this.#width / 2.0;
+        const hh = this.#height / 2.0;
+
+        return Model2D._setTurnedBox(out, t.getX() + hw, t.getY() + hh, hw, hh, t.getScaleX(), t.getScaleY(), t.getRotation());
+    }
+
     // True if Batcher may draw this with its instanced shader when drawn with material (see the top of this file). Subclasses opt in.
     canInstance(material = this.#material) { return false; }
 
@@ -300,6 +329,24 @@ class Model2D
     }
 
     _setLoaded(isLoaded) { this.#isLoaded = isLoaded; }
+
+    /*
+        For getWorldBounds(): the axis-aligned box around a halfWidth x halfHeight box
+        centered on (centerX, centerY), scaled by (scaleX, scaleY) then turned by
+        rotation (radians) about that center, written into out (a Bounds2D) and returned.
+    */
+    static _setTurnedBox(out, centerX, centerY, halfWidth, halfHeight, scaleX, scaleY, rotation)
+    {
+        const s = Math.sin(rotation);
+        const c = Math.cos(rotation);
+        const hx = halfWidth * scaleX;
+        const hy = halfHeight * scaleY;
+        const ex = Math.abs(c * hx) + Math.abs(s * hy);
+        const ey = Math.abs(s * hx) + Math.abs(c * hy);
+
+        out.setMinMax(centerX - ex, centerY - ey, centerX + ex, centerY + ey);
+            return out;
+    }
 
     // Texture unit 0 if it's an AtlasSubTexture (see TextureAtlas), else null
     _getSubTexture()

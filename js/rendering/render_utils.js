@@ -497,6 +497,13 @@ class RenderState
                 gl.disable(gl.BLEND);
                 break;
 
+            case BlendMode.kScreen:
+                // color: src + dst * (1 - src), with a premultiplied src. alpha: dst alpha is
+                // kept, as for kMultiply.
+                gl.enable(gl.BLEND);
+                gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ZERO, gl.ONE);
+                break;
+
             default:
                 console.error("RenderState.setBlendMode() needs a BlendMode such as BlendMode.kAlpha");
                     return false;

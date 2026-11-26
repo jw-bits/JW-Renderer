@@ -366,6 +366,71 @@ const Skeleton2DShaderSource = {
 };
 
 /*
+    Skeleton2D with Spine's two-color tint, for skeletons with dark colors:
+    Skeleton2DShaderSource plus a second vertex color, the dark color, that
+    the texture's dark parts take on (spine-webgl's two-color shader, for
+    premultiplied color). Everything else is as above.
+
+        a_color1  The dark color (r * a, g * a, b * a, 1), with a the vertex's own alpha
+                  (not 0 for additive); (0, 0, 0, 1) for slots without one
+*/
+const Skeleton2DTwoColorShaderSource = {
+    name: "Skeleton2DTwoColor",
+    VS: `#version 300 es
+        layout(location = 0) in vec3 a_pos;
+        layout(location = 1) in vec2 a_uv0;
+        layout(location = 7) in vec4 a_color;
+        layout(location = 15) in vec4 a_color1;
+
+        ${FrameSharedSource.VS}
+        uniform vec3 u_scale;
+        uniform vec4 u_vec0;
+
+        out vec2 v_uv0;
+        out vec4 v_color;
+        out vec4 v_dark;
+
+        void main() {
+            vec2 ssPos = a_pos.xy * u_scale.xy;
+
+            float sa = sin(u_scale.z);
+            float ca = cos(u_scale.z);
+
+            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
+                             ssPos.x * sa + ssPos.y * ca);
+
+            gl_Position = worldToClip(rPos + u_vec0.xy);
+
+            v_uv0 = vec2(a_uv0.x, 1.0 - a_uv0.y);
+            v_color = a_color;
+            v_dark = a_color1;
+        }
+    `,
+    FS: `#version 300 es
+        precision highp float;
+
+        uniform sampler2D u_tex0;
+        uniform vec4 u_color;
+        uniform vec4 u_vec1;
+
+        in vec2 v_uv0;
+        in vec4 v_color;
+        in vec4 v_dark;
+        out vec4 fragColor;
+
+        void main() {
+            vec4 c = texture(u_tex0, v_uv0);
+            c.rgb *= mix(c.a, 1.0, u_vec1.x); // Straight pages premultiplied here
+
+            vec4 t;
+            t.a = c.a * v_color.a;
+            t.rgb = ((c.a - c.rgb) * v_dark.rgb) + (c.rgb * v_color.rgb);
+            fragColor = t * vec4(u_color.rgb * u_color.a, u_color.a);
+        }
+    `
+};
+
+/*
     Sprite: Rect2D's shader, drawing one rect of its texture (an atlas frame)
     instead of all of it. u_vec1 is the UV rect (u, v, width, height), with
     (u, v) its bottom-left corner and V up (see UVRect).

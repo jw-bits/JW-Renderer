@@ -36,22 +36,62 @@
     Placing it: vertices are in the skeleton's own units, as posed (its x, y
     and scale included). The draw transform then turns and scales it about
     its origin and puts the origin at the transform's position. It has no
-    size, so the alignment changes nothing and containsPoint() is always
-    false.
+    size, so the alignment changes nothing.
+
+    Hit tests: hitTest(transform, point) gives the bounding-box attachment
+    (SpineBoundingBoxAttachment, e.g. spineboy's "head") under a world point
+    with the skeleton drawn at transform, or null; containsPoint() is true when
+    there is one, so an Entity's containsPoint() picks a skeleton by its
+    bounding boxes. A skeleton with no bounding boxes is never hit. The
+    polygons (getHitBounds(), a SpineSkeletonBounds) are cached like the
+    bounds below.
+
+    Bounds: getLocalBounds() is the box around the region and mesh
+    attachments as posed, unclipped as in spine-core 4.0 (so it can be bigger
+    than what's drawn), in skeleton units (SpineSkeleton.getBounds()), and
+    getWorldBounds(transform) is that box as drawn at transform (an Entity's
+    getWorldBounds() asks it). It's worked out the first time it's asked for
+    after a pose change and kept until the next: update(), setSkin() and
+    updateAttachments() mark it stale, so call updateAttachments() after
+    posing by hand.
+
+    Attaching to a bone: an Entity that's a child of the entity holding this
+    Skeleton2D can follow one of its bones, e.g. a weapon in a hand:
+
+        holder.setModel(model);                    // holder: an Entity
+        holder.addChild(sword);                    // sword: an Entity with a Sprite
+        model.attachToBone(sword, "front-fist", new Transform2D(12, 0)); // Offset in the bone's space
+        model.attachToBone(healthBar, "head", null, { rotation: false, scale: false });
+
+    After posing, update() sets each attached entity's local transform to the
+    bone's world transform (skeleton space, see SpineBone.getWorldTransform())
+    times the offset, so the holder's transform carries it with the
+    skeleton. Options turn off following the bone's rotation or its scale
+    (and shear); the position always follows. A skeleton posed by hand calls
+    updateAttachments() after its updateWorldTransform(). An entity moved out
+    from under the holder is left where it is until it's back.
 
     Color: every vertex is skeleton color x slot color x attachment color,
     premultiplied. The color it's drawn with (an Entity's) multiplies that in
     the shader, so one pose can be drawn in many colors.
+
+    Two-color tint: a skeleton whose data has dark colors (slot "dark" in
+    Spine) streams 12 floats per vertex instead of 8, the slot's dark color
+    (premultiplied; black for slots without one) in RenderAttributes.kColor1,
+    and draws with Skeleton2DTwoColorShaderSource, where the texture's dark
+    parts take on the dark color. Skeletons without dark colors keep the
+    smaller stream and the plain shader.
 
     Blend modes (slot.data.blendMode), with the shader always giving
     premultiplied color (Skeleton2DShaderSource):
         Normal     BlendMode.kPremultiplied
         Additive   BlendMode.kPremultiplied with vertex alpha 0: adds, and shares the normal run
         Multiply   BlendMode.kMultiply
-        Screen     Not yet; drawn as Normal, reported once
+        Screen     BlendMode.kScreen
 
-    Not drawn yet: clipping attachments (reported once; what they'd clip is
-    drawn whole) and two-color tint (the dark color is ignored).
+    Clipping attachments clip the slots after them, up to their end slot, on
+    the CPU as the stream is written (SpineSkeletonClipping, one shared by
+    every Skeleton2D): each clipped triangle becomes its own vertices.
 
     Batching: draw() binds its own Materials (bindsOwnMaterials()), one per
     page and blend mode from MaterialManager, so a Batcher forgets what it
@@ -61,10 +101,18 @@
 class Skeleton2D extends Model2D
 {
     static #kQuadTriangles = [0, 1, 2, 2, 3, 0];
-    static #kFloatsPerVertex = 8; // x, y, u, v, r, g, b, a
+    static #kFloatsPerVertex = 8;          // x, y, u, v, r, g, b, a
+    static #kFloatsPerVertexTwoColor = 12; // ...then the dark color: r, g, b, a
     static #kPosition = new Vector4();
     static #kScaleRot = new Vector3();
     static #kPageFlags = new Vector4();
+    static #kBoneTransform = new Transform2D(); // Scratch for updateAttachments()
+    static #kBoundsOffset = new Vector2();      // Scratch for #refreshBounds()
+    static #kBoundsSize = new Vector2();
+    static #kBoundsCenter = new Vector2();      // Scratch for getWorldBounds()
+    static #kClipper = new SpineSkeletonClipping(); // Shared by every Skeleton2D; _fillStream() starts and ends with it unused
+    static #kLight = new Vector4();             // Scratch: the vertex colors given to the clipper
+    static #kDark = new Vector4();
 
     #skeleton;     // SpineSkeleton
     #mesh;         // DynamicMesh, given to the base
@@ -75,12 +123,19 @@ class Skeleton2D extends Model2D
     #indexCount;
     #runs;         // { page, blendMode, firstIndex, indexCount }, reused; #runCount of them are this stream's
     #runCount;
-    #materials;    // TextureAtlas (page) -> [kPremultiplied Material, kMultiply Material]
+    #materials;    // TextureAtlas (page) -> [kPremultiplied, kMultiply, kScreen Material]
     #drawCount;
-    #reported;     // Set of what's been reported once ("clipping", "screen")
-    #stateData;    // SpineAnimationStateData: the mixes
+    #twoColor;     // True if the skeleton has dark colors: the two-color stream and shader
+    #stride;       // Floats per vertex in the stream: #kFloatsPerVertex, or #kFloatsPerVertexTwoColor
+    #stateData;   // SpineAnimationStateData: the mixes
     #state;        // SpineAnimationState: what plays
     #eventCallback; // (skeleton2D, entry, SpineEventType, event) or null
+    #attachments;   // { entity, bone (SpineBone), offset (Transform2D or null), rotation, scale } (see attachToBone())
+    #bounds;        // Bounds2D: the pose's box in skeleton units, while #boundsStale is false
+    #boundsStale;
+    #boundsTemp;    // Array: getBounds()' working memory, reused
+    #hitBounds;     // SpineSkeletonBounds: the bounding-box polygons, while #hitStale is false
+    #hitStale;
 
     constructor()
     {
@@ -97,10 +152,17 @@ class Skeleton2D extends Model2D
         this.#runCount = 0;
         this.#materials = new Map();
         this.#drawCount = 0;
-        this.#reported = new Set();
+        this.#twoColor = false;
+        this.#stride = Skeleton2D.#kFloatsPerVertex;
         this.#stateData = null;
         this.#state = null;
         this.#eventCallback = null;
+        this.#attachments = [];
+        this.#bounds = new Bounds2D();
+        this.#boundsStale = true;
+        this.#boundsTemp = [];
+        this.#hitBounds = new SpineSkeletonBounds();
+        this.#hitStale = true;
     }
 
     /*
@@ -128,15 +190,24 @@ class Skeleton2D extends Model2D
                 return false;
         }
 
+        // Two-color tint only for skeletons with dark colors; the others keep the smaller stream
+        const twoColor = skeletonData.slots.some((s) => s.darkColor !== null);
+        let layout = [[RenderAttributes.kPosition, 2], [RenderAttributes.kUV0, 2], [RenderAttributes.kColor, 4]];
+
+        if (twoColor === true)
+            layout.push([RenderAttributes.kColor1, 4]);
+
         let mesh = new DynamicMesh();
 
-        if (mesh.load([[RenderAttributes.kPosition, 2], [RenderAttributes.kUV0, 2], [RenderAttributes.kColor, 4]]) === false)
+        if (mesh.load(layout) === false)
         {
             console.error("Skeleton2D.load() couldn't build its mesh");
                 return false;
         }
 
         this.#mesh = mesh;
+        this.#twoColor = twoColor;
+        this.#stride = (twoColor === true) ? Skeleton2D.#kFloatsPerVertexTwoColor : Skeleton2D.#kFloatsPerVertex;
         this.#materials.clear();
 
         // The base's own Material: the first page, normal blending (what Batcher groups it by)
@@ -161,6 +232,8 @@ class Skeleton2D extends Model2D
         });
 
         this.#skeleton = skeleton;
+        this.#boundsStale = true;
+        this.#hitStale = true;
         this._setSize(0.0, 0.0);
         this._setMaterial(material);
         this._setMesh(mesh);
@@ -192,6 +265,7 @@ class Skeleton2D extends Model2D
         this.#state.update(dt);
         this.#state.apply(this.#skeleton);
         this.#skeleton.updateWorldTransform();
+        this.updateAttachments();
     }
 
     /*
@@ -302,11 +376,212 @@ class Skeleton2D extends Model2D
 
         this.#skeleton.setSkin(skin);
         this.#skeleton.setSlotsToSetupPose();
+        this.#boundsStale = true;
+        this.#hitStale = true;
             return true;
     }
 
     // The bone named name (a SpineBone: worldX, worldY, getWorldRotationX() ...), or null
     findBone(name) { return (this.isLoaded() === true && typeof name === "string") ? this.#skeleton.findBone(name) : null; }
+
+    // *** Attaching to Bones ***
+
+    /*
+        Makes entity (an Entity, a child of an entity holding this Skeleton2D) follow
+        the bone named boneName, placed at offset (a Transform2D in the bone's space,
+        copied; null for none). options: { rotation, scale }, each true by default;
+        false stops following the bone's rotation, or its scale and shear. Attaching an
+        entity again replaces its bone, offset and options. Places it now, and from then
+        on in each update(). Returns false (changing nothing) if any of these aren't valid.
+    */
+    attachToBone(entity, boneName, offset = null, options = null)
+    {
+        if (this.isLoaded() === false)
+        {
+            console.error("Skeleton2D.attachToBone(): load() it first");
+                return false;
+        }
+
+        if ((entity instanceof Entity) === false || entity.getParent()?.getModel() !== this)
+        {
+            console.error("Skeleton2D.attachToBone() needs an Entity that's a child of an entity holding this Skeleton2D");
+                return false;
+        }
+
+        const bone = this.findBone(boneName);
+
+        if (bone === null)
+        {
+            console.error(`Skeleton2D.attachToBone(): no bone named "${boneName}"`);
+                return false;
+        }
+
+        if (offset !== null && (offset instanceof Transform2D) === false)
+        {
+            console.error("Skeleton2D.attachToBone(): offset must be a Transform2D or null");
+                return false;
+        }
+
+        const isObject = (options !== null && typeof options === "object");
+
+        if (options !== null && (isObject === false || Object.keys(options).every((k) => k === "rotation" || k === "scale") === false))
+        {
+            console.error("Skeleton2D.attachToBone(): options must be null or an object with rotation and / or scale (true or false)");
+                return false;
+        }
+
+        let a = this.#attachments.find((x) => x.entity === entity);
+
+        if (a === undefined)
+        {
+            a = { entity: entity, bone: null, offset: null, rotation: true, scale: true };
+            this.#attachments.push(a);
+        }
+
+        a.bone = bone;
+        a.offset = (offset !== null) ? new Transform2D().copy(offset) : null;
+        a.rotation = (options?.rotation !== false);
+        a.scale = (options?.scale !== false);
+
+        this.#placeAttachment(a);
+            return true;
+    }
+
+    // Stops entity following its bone; it keeps its last transform. Returns false if it wasn't attached.
+    detachFromBone(entity)
+    {
+        const i = this.#attachments.findIndex((x) => x.entity === entity);
+
+        if (i < 0)
+            return false;
+
+        this.#attachments.splice(i, 1);
+            return true;
+    }
+
+    // The bone entity follows (a SpineBone), or null if it isn't attached
+    getAttachedBone(entity) { return this.#attachments.find((x) => x.entity === entity)?.bone ?? null; }
+
+    // Places every attached entity at its bone as posed now, and marks the bounds and hit polygons stale. update() calls it; call it after posing by hand.
+    updateAttachments()
+    {
+        this.#boundsStale = true;
+        this.#hitStale = true;
+
+        for (const a of this.#attachments)
+            this.#placeAttachment(a);
+    }
+
+    // *** Bounds ***
+
+    /*
+        The box around the region and mesh attachments as posed, in skeleton units
+        (origin at the anchor), written into out (a Bounds2D) and returned. Empty if it
+        isn't loaded or nothing is showing. Cached until the pose changes (see the top
+        of this file).
+    */
+    getLocalBounds(out = new Bounds2D())
+    {
+        if (this.isLoaded() === false)
+        {
+            out.setEmpty();
+                return out;
+        }
+
+        if (this.#boundsStale === true)
+            this.#refreshBounds();
+
+        out.set(this.#bounds);
+            return out;
+    }
+
+    /*
+        The axis-aligned box around the skeleton as drawn at transform, in world design
+        units, written into out (a Bounds2D) and returned: getLocalBounds() scaled and
+        turned about the origin, then moved to transform's position. Like draw(), it
+        ignores the transform's shear.
+    */
+    getWorldBounds(transform, out = new Bounds2D())
+    {
+        const local = this.getLocalBounds(out);
+
+        if (local.isEmpty() === true)
+            return out;
+
+        const sx = transform.getScaleX();
+        const sy = transform.getScaleY();
+        const r = transform.getRotation();
+        const s = Math.sin(r);
+        const c = Math.cos(r);
+        const center = local.getCenter(Skeleton2D.#kBoundsCenter);
+        const x = center.x * sx;
+        const y = center.y * sy;
+
+        return Model2D._setTurnedBox(out, transform.getX() + (x * c) - (y * s), transform.getY() + (x * s) + (y * c),
+                                     local.getWidth() / 2.0, local.getHeight() / 2.0, sx, sy, r);
+    }
+
+    // *** Hit tests ***
+
+    /*
+        The first visible bounding-box attachment (a SpineBoundingBoxAttachment; its name
+        says which part) holding point (a Vector2, world design units) with the skeleton
+        drawn at transform, or null. Null too if it isn't loaded, has no bounding boxes
+        showing, or the transform's scale is 0. Like draw(), it ignores the transform's
+        shear. The polygons are worked out the first time it's asked after a pose
+        change, like the bounds.
+    */
+    hitTest(transform, point)
+    {
+        if (this.isLoaded() === false)
+            return null;
+
+        // Into skeleton units: undo the position, then the rotation, then the scale
+        const sx = transform.getScaleX();
+        const sy = transform.getScaleY();
+
+        if (sx === 0.0 || sy === 0.0)
+            return null;
+
+        const r = transform.getRotation();
+        const s = Math.sin(r);
+        const c = Math.cos(r);
+        const dx = point.x - transform.getX();
+        const dy = point.y - transform.getY();
+        const x = ((dx * c) + (dy * s)) / sx;
+        const y = ((dy * c) - (dx * s)) / sy;
+        const hit = this.getHitBounds();
+
+        if (hit.aabbContainsPoint(x, y) === false)
+            return null;
+
+        return hit.containsPoint(x, y);
+    }
+
+    // True if point (a Vector2, world design units) is in a visible bounding box with the skeleton drawn at transform (see hitTest())
+    containsPoint(transform, point)
+    {
+        return (this.hitTest(transform, point) !== null);
+    }
+
+    /*
+        The visible bounding boxes' polygons as posed, in skeleton units (a
+        SpineSkeletonBounds, read-only: polygons, boundingBoxes, aabb), for other tests,
+        e.g. intersectsSegment(). Worked out when stale; null if it isn't loaded.
+    */
+    getHitBounds()
+    {
+        if (this.isLoaded() === false)
+            return null;
+
+        if (this.#hitStale === true)
+        {
+            this.#hitBounds.update(this.#skeleton, true);
+            this.#hitStale = false;
+        }
+
+        return this.#hitBounds;
+    }
 
     // True: draw() binds its own Materials, one per page and blend mode (see Batcher)
     bindsOwnMaterials() { return true; }
@@ -363,6 +638,7 @@ class Skeleton2D extends Model2D
         this.#state = null;
         this.#stateData = null;
         this.#skeleton = null;
+        this.#attachments.length = 0; // Their bones were this skeleton's
         this.#mesh = null;
         this.#materials.clear();
         this.#vertexCount = 0;
@@ -377,17 +653,27 @@ class Skeleton2D extends Model2D
         return ShaderManager.get(Skeleton2DShaderSource);
     }
 
+    // The two-color tint variant (see Skeleton2DTwoColorShaderSource), for skeletons with dark colors
+    static getTwoColorShader()
+    {
+        return ShaderManager.get(Skeleton2DTwoColorShaderSource);
+    }
+
     /*
         For draw() and tests: writes the skeleton's triangles, as posed now, into the
         stream, on the CPU only. Returns it, read-only: { vertices (x, y, u, v, r, g, b, a
-        each; u, v in Spine's terms, V down), vertexCount, indices, indexCount, runs
-        (runCount of { page, blendMode, firstIndex, indexCount }), runCount }.
+        each, then the dark color's r, g, b, a for a two-color skeleton; u, v in Spine's
+        terms, V down), vertexCount, floatsPerVertex (8, or 12 with two colors), indices,
+        indexCount, runs (runCount of { page, blendMode, firstIndex, indexCount }),
+        runCount }.
     */
     _fillStream()
     {
         const skeleton = this.#skeleton;
         const sc = skeleton.color;
-        const stride = Skeleton2D.#kFloatsPerVertex;
+        const stride = this.#stride;
+        const twoColor = this.#twoColor;
+        const clipper = Skeleton2D.#kClipper;
 
         this.#vertexCount = 0;
         this.#indexCount = 0;
@@ -398,7 +684,10 @@ class Skeleton2D extends Model2D
         for (const slot of skeleton.drawOrder)
         {
             if (slot.bone.active === false)
+            {
+                clipper.clipEndWithSlot(slot);
                 continue;
+            }
 
             const a = slot.getAttachment();
             let count = 0;
@@ -421,16 +710,22 @@ class Skeleton2D extends Model2D
                 triangles = a.triangles;
                 a.computeWorldVertices(slot, 0, n, this.#world, 0, 2);
             }
+            else if (a instanceof SpineClippingAttachment)
+            {
+                clipper.clipStart(slot, a); // Clips the slots after it, up to its end slot
+                continue;
+            }
             else
             {
-                if (a instanceof SpineClippingAttachment)
-                    this.#reportOnce("clipping", `Skeleton2D: "${skeleton.data.name}" has clipping attachments, which aren't drawn yet; what they clip is drawn whole`);
-
+                clipper.clipEndWithSlot(slot);
                 continue;
             }
 
             if ((a.region instanceof AtlasSubTexture) === false)
+            {
+                clipper.clipEndWithSlot(slot);
                 continue; // No image (Spine's "if (texture)")
+            }
 
             // skeleton x slot x attachment, premultiplied
             const slotColor = slot.color;
@@ -453,8 +748,33 @@ class Skeleton2D extends Model2D
                     break;
 
                 case SpineBlendMode.Screen:
-                    this.#reportOnce("screen", `Skeleton2D: "${skeleton.data.name}" has screen-blended slots, which draw as normal for now`);
+                    blendMode = BlendMode.kScreen;
                     break;
+            }
+
+            // Two-color: the slot's dark color, premultiplied by the alpha (not the additive 0); black without one
+            const dark = slot.darkColor;
+            const dr = (dark !== null) ? dark.x * alpha : 0.0;
+            const dg = (dark !== null) ? dark.y * alpha : 0.0;
+            const db = (dark !== null) ? dark.z * alpha : 0.0;
+
+            // Clipped: the clipper's vertices (already in the stream's layout) and triangles instead
+            let clipped = false;
+
+            if (clipper.isClipping())
+            {
+                Skeleton2D.#kLight.setXYZW(r, g, b, vertexAlpha);
+                Skeleton2D.#kDark.setXYZW(dr, dg, db, 1.0);
+                clipper.clipTriangles(this.#world, count * 2, triangles, triangles.length, a.uvs, Skeleton2D.#kLight, Skeleton2D.#kDark, twoColor);
+                count = clipper.clippedVertices.length / stride;
+                triangles = clipper.clippedTriangles;
+                clipped = true;
+
+                if (count === 0)
+                {
+                    clipper.clipEndWithSlot(slot);
+                    continue; // All clipped away
+                }
             }
 
             const page = a.region.getAtlas();
@@ -465,21 +785,40 @@ class Skeleton2D extends Model2D
             this.#reserve(count, triangles.length);
 
             // Vertices
-            const uvs = a.uvs;
-            const world = this.#world;
             let v = this.#vertices;
             let o = this.#vertexCount * stride;
 
-            for (let i = 0; i < count; ++i)
+            if (clipped === true)
             {
-                v[o++] = world[i * 2];
-                v[o++] = world[(i * 2) + 1];
-                v[o++] = uvs[i * 2];
-                v[o++] = uvs[(i * 2) + 1];
-                v[o++] = r;
-                v[o++] = g;
-                v[o++] = b;
-                v[o++] = vertexAlpha;
+                const cv = clipper.clippedVertices;
+
+                for (let i = 0; i < cv.length; ++i)
+                    v[o++] = cv[i];
+            }
+            else
+            {
+                const uvs = a.uvs;
+                const world = this.#world;
+
+                for (let i = 0; i < count; ++i)
+                {
+                    v[o++] = world[i * 2];
+                    v[o++] = world[(i * 2) + 1];
+                    v[o++] = uvs[i * 2];
+                    v[o++] = uvs[(i * 2) + 1];
+                    v[o++] = r;
+                    v[o++] = g;
+                    v[o++] = b;
+                    v[o++] = vertexAlpha;
+
+                    if (twoColor === true)
+                    {
+                        v[o++] = dr;
+                        v[o++] = dg;
+                        v[o++] = db;
+                        v[o++] = 1.0;
+                    }
+                }
             }
 
             // Indices, after the vertices so far
@@ -492,16 +831,59 @@ class Skeleton2D extends Model2D
             this.#vertexCount += count;
             this.#indexCount += triangles.length;
             run.indexCount += triangles.length;
+
+            clipper.clipEndWithSlot(slot);
         }
 
+        clipper.clipEnd();
+
         return {
-            vertices: this.#vertices, vertexCount: this.#vertexCount,
+            vertices: this.#vertices, vertexCount: this.#vertexCount, floatsPerVertex: stride,
             indices: this.#indices, indexCount: this.#indexCount,
             runs: this.#runs, runCount: this.#runCount
         };
     }
 
     // *** Internal Methods ***
+
+    // Works out #bounds from the pose (SpineSkeleton.getBounds()); empty if nothing is showing
+    #refreshBounds()
+    {
+        const offset = Skeleton2D.#kBoundsOffset;
+        const size = Skeleton2D.#kBoundsSize;
+
+        this.#skeleton.getBounds(offset, size, this.#boundsTemp);
+
+        if (Number.isFinite(offset.x) === true && Number.isFinite(offset.y) === true)
+            this.#bounds.setMinMax(offset.x, offset.y, offset.x + size.x, offset.y + size.y);
+        else
+            this.#bounds.setEmpty();
+
+        this.#boundsStale = false;
+    }
+
+    // Sets a's entity's local transform to its bone (as its options allow) times its offset; skipped while the entity isn't under a holder
+    #placeAttachment(a)
+    {
+        if (a.entity.getParent()?.getModel() !== this)
+            return;
+
+        let t = a.bone.getWorldTransform(Skeleton2D.#kBoneTransform);
+
+        if (a.rotation === false)
+            t.setRotation(0.0);
+
+        if (a.scale === false)
+        {
+            t.setScale(1.0, 1.0);
+            t.setShear(0.0);
+        }
+
+        if (a.offset !== null)
+            Transform2D.multiply(t, t, a.offset);
+
+        a.entity.setTransform(t); // Copied
+    }
 
     // A run from the current index, reusing an old object
     #startRun(page, blendMode)
@@ -520,12 +902,12 @@ class Skeleton2D extends Model2D
     // Room for vertexCount more vertices and indexCount more indices, keeping what's there
     #reserve(vertexCount, indexCount)
     {
-        const floats = (this.#vertexCount + vertexCount) * Skeleton2D.#kFloatsPerVertex;
+        const floats = (this.#vertexCount + vertexCount) * this.#stride;
 
         if (floats > this.#vertices.length)
         {
             let grown = new Float32Array(Math.max(floats, this.#vertices.length * 2));
-            grown.set(this.#vertices.subarray(0, this.#vertexCount * Skeleton2D.#kFloatsPerVertex));
+            grown.set(this.#vertices.subarray(0, this.#vertexCount * this.#stride));
             this.#vertices = grown;
         }
 
@@ -539,22 +921,26 @@ class Skeleton2D extends Model2D
         }
     }
 
-    // The Material for page (a Spine page's TextureAtlas) and blendMode, made once (shared through MaterialManager); null on failure
+    /*
+        The Material for page (a Spine page's TextureAtlas) and blendMode (kPremultiplied,
+        kMultiply or kScreen), with this skeleton's shader (two-color or not), made once
+        (shared through MaterialManager); null on failure
+    */
     #getMaterial(page, blendMode)
     {
-        let pair = this.#materials.get(page);
+        let set = this.#materials.get(page);
 
-        if (pair === undefined)
+        if (set === undefined)
         {
-            pair = [null, null];
-            this.#materials.set(page, pair);
+            set = [null, null, null];
+            this.#materials.set(page, set);
         }
 
-        const i = (blendMode === BlendMode.kMultiply) ? 1 : 0;
+        const i = (blendMode === BlendMode.kMultiply) ? 1 : (blendMode === BlendMode.kScreen) ? 2 : 0;
 
-        if (pair[i] === null)
+        if (set[i] === null)
         {
-            const shader = Skeleton2D.getDefaultShader();
+            const shader = (this.#twoColor === true) ? Skeleton2D.getTwoColorShader() : Skeleton2D.getDefaultShader();
 
             if (shader === null)
             {
@@ -562,13 +948,13 @@ class Skeleton2D extends Model2D
                     return null;
             }
 
-            pair[i] = MaterialManager.load(shader, [page.getTexture()], [page.getSampler()], blendMode);
+            set[i] = MaterialManager.load(shader, [page.getTexture()], [page.getSampler()], blendMode);
 
-            if (pair[i] === null)
+            if (set[i] === null)
                 return null;
         }
 
-        return pair[i];
+        return set[i];
     }
 
     // The animation named name, or null (reported, naming methodName) if it isn't loaded or there's none
@@ -589,15 +975,6 @@ class Skeleton2D extends Model2D
 
         console.error(`Skeleton2D.${methodName}() needs a track of 0 or more`);
             return false;
-    }
-
-    #reportOnce(kind, message)
-    {
-        if (this.#reported.has(kind) === true)
-            return;
-
-        this.#reported.add(kind);
-        console.error(message);
     }
 
     // The atlas page of the first region or mesh attachment in any skin, or null

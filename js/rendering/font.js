@@ -26,7 +26,7 @@ class Font
     #url;
     #family;
     #cssFamily;
-    #face;
+    #fontFace;
     #isLoaded;
     #loadPromise;
 
@@ -35,7 +35,7 @@ class Font
         this.#url = null;
         this.#family = null;
         this.#cssFamily = null;
-        this.#face = null;
+        this.#fontFace = null;
         this.#isLoaded = false;
         this.#loadPromise = null;
     }
@@ -92,10 +92,10 @@ class Font
 
     unload()
     {
-        if (this.#face !== null)
+        if (this.#fontFace !== null)
         {
-            document.fonts.delete(this.#face);
-            this.#face = null;
+            document.fonts.delete(this.#fontFace);
+            this.#fontFace = null;
         }
 
         this.#url = null;
@@ -132,7 +132,7 @@ class Font
             await face.load();
             document.fonts.add(face);
 
-            this.#face = face;
+            this.#fontFace = face;
             this.#family = family;
             this.#cssFamily = `"${family}"`; // Quoted, since names can have spaces
             this.#isLoaded = true;

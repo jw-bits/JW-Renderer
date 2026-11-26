@@ -31,7 +31,8 @@
 
 /*
     Spine skeletons, ported from spine-core 4.0.31 (Bone.ts, Slot.ts,
-    IkConstraint.ts, TransformConstraint.ts, PathConstraint.ts, Skeleton.ts);
+    IkConstraint.ts, TransformConstraint.ts, PathConstraint.ts, Skeleton.ts,
+    SkeletonBounds.ts);
     see docs/spine_plan.md. What changes while a skeleton plays; its
     SpineSkeletonData is shared and read-only.
 
@@ -41,6 +42,7 @@
         SpineTransformConstraint  Copies another bone's transform onto bones
         SpinePathConstraint       Moves bones along a path attachment
         SpineSkeleton             The bones, slots and constraints in update order
+        SpineSkeletonBounds       The visible bounding-box polygons, for hit tests (uses the engine's Bounds2D)
 
     Usage:
         let skeleton = new SpineSkeleton(data);   // A SpineSkeletonData (see SpineSkeletonData.load())
@@ -133,6 +135,8 @@ class SpineBone
     worldX = 0;
     sorted = false;
     active = false;
+
+    static #kMatrix = new Matrix2(); // Scratch for getWorldTransform()
 
     /** @param parent May be null. */
     constructor(data, skeleton, parent)
@@ -321,6 +325,30 @@ class SpineBone
     getWorldScaleY()
     {
         return Math.sqrt(this.b * this.b + this.d * this.d);
+    }
+
+    /*
+        Engine addition: the world rotation, scale and shear (a, b, c, d) as a
+        Matrix2 (row vectors, so m = [a, c, b, d]), written into out and returned.
+        Skeleton space: relative to the skeleton's model, not the engine's world.
+    */
+    getWorldMatrix(out = new Matrix2())
+    {
+        out.set(this.a, this.c,
+                this.b, this.d);
+        return out;
+    }
+
+    /*
+        Engine addition: the world transform as a Transform2D, written into out
+        and returned: position (worldX, worldY), with rotation, scale and shear
+        split from (a, b, c, d) in radians (see Transform2D.setFromMatrix()).
+        Skeleton space, like getWorldMatrix().
+    */
+    getWorldTransform(out = new Transform2D())
+    {
+        out.setPosition(this.worldX, this.worldY);
+        return out.setFromMatrix(this.getWorldMatrix(SpineBone.#kMatrix));
     }
 
     /** Computes the applied transform values from the world transform.
@@ -2270,5 +2298,219 @@ class SpineSkeleton
     update(delta)
     {
         this.time += delta;
+    }
+}
+
+/*
+    Collects each visible SpineBoundingBoxAttachment and computes the world vertices
+    for its polygon, for hit tests (ported from SkeletonBounds.ts).
+
+    Changed from upstream: the box around all the polygons is aabb, an engine
+    Bounds2D, instead of minX / minY / maxX / maxY fields; it's empty when
+    update() is told not to work it out, or nothing is visible. The aabb...()
+    tests keep upstream's edge rules (aabbIntersectsSkeleton() doesn't count
+    touching), and getWidth() / getHeight() are 0 when it's empty.
+*/
+class SpineSkeletonBounds
+{
+    /** The axis aligned bounding box around the polygons (read-only). */
+    aabb = new Bounds2D();
+
+    /** The visible bounding boxes. */
+    boundingBoxes = new Array();
+
+    /** The world vertices for the bounding box polygons. */
+    polygons = new Array();
+
+    polygonPool = new SpinePool(() => new Float32Array(16));
+
+    /** Clears any previous polygons, finds all visible bounding box attachments, and computes the world vertices for each bounding
+     * box's polygon.
+     * @param updateAabb If true, the axis aligned bounding box containing all the polygons is computed. If false, it's left
+     *           empty and the AABB methods return false. */
+    update(skeleton, updateAabb)
+    {
+        if (!skeleton)
+            throw new Error("skeleton cannot be null.");
+        let boundingBoxes = this.boundingBoxes;
+        let polygons = this.polygons;
+        let polygonPool = this.polygonPool;
+        let slots = skeleton.slots;
+        let slotCount = slots.length;
+
+        boundingBoxes.length = 0;
+        polygonPool.freeAll(polygons);
+        polygons.length = 0;
+
+        for (let i = 0; i < slotCount; i++)
+        {
+            let slot = slots[i];
+            if (!slot.bone.active)
+                continue;
+            let attachment = slot.getAttachment();
+            if (attachment instanceof SpineBoundingBoxAttachment)
+            {
+                let boundingBox = attachment;
+                boundingBoxes.push(boundingBox);
+
+                let polygon = polygonPool.obtain();
+                if (polygon.length != boundingBox.worldVerticesLength)
+                    polygon = new Float32Array(boundingBox.worldVerticesLength);
+                polygons.push(polygon);
+                boundingBox.computeWorldVertices(slot, 0, boundingBox.worldVerticesLength, polygon, 0, 2);
+            }
+        }
+
+        if (updateAabb)
+            this.aabbCompute();
+        else
+            this.aabb.setEmpty();
+    }
+
+    aabbCompute()
+    {
+        let aabb = this.aabb;
+        let polygons = this.polygons;
+        aabb.setEmpty();
+        for (let i = 0, n = polygons.length; i < n; i++)
+        {
+            let polygon = polygons[i];
+            for (let ii = 0, nn = polygon.length; ii < nn; ii += 2)
+                aabb.expandByXY(polygon[ii], polygon[ii + 1]);
+        }
+    }
+
+    /** Returns true if the axis aligned bounding box contains the point. */
+    aabbContainsPoint(x, y)
+    {
+        let b = this.aabb;
+        return x >= b.minX && x <= b.maxX && y >= b.minY && y <= b.maxY;
+    }
+
+    /** Returns true if the axis aligned bounding box intersects the line segment. */
+    aabbIntersectsSegment(x1, y1, x2, y2)
+    {
+        let minX = this.aabb.minX;
+        let minY = this.aabb.minY;
+        let maxX = this.aabb.maxX;
+        let maxY = this.aabb.maxY;
+        if ((x1 <= minX && x2 <= minX) || (y1 <= minY && y2 <= minY) || (x1 >= maxX && x2 >= maxX) || (y1 >= maxY && y2 >= maxY))
+            return false;
+        let m = (y2 - y1) / (x2 - x1);
+        let y = m * (minX - x1) + y1;
+        if (y > minY && y < maxY)
+            return true;
+        y = m * (maxX - x1) + y1;
+        if (y > minY && y < maxY)
+            return true;
+        let x = (minY - y1) / m + x1;
+        if (x > minX && x < maxX)
+            return true;
+        x = (maxY - y1) / m + x1;
+        if (x > minX && x < maxX)
+            return true;
+        return false;
+    }
+
+    /** Returns true if the axis aligned bounding box intersects the axis aligned bounding box of the specified bounds. */
+    aabbIntersectsSkeleton(bounds)
+    {
+        let a = this.aabb, b = bounds.aabb;
+        return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
+    }
+
+    /** Returns the first bounding box attachment that contains the point, or null. When doing many checks, it is usually more
+     * efficient to only call this method if {@link #aabbContainsPoint(float, float)} returns true. */
+    containsPoint(x, y)
+    {
+        let polygons = this.polygons;
+        for (let i = 0, n = polygons.length; i < n; i++)
+            if (this.containsPointPolygon(polygons[i], x, y))
+                return this.boundingBoxes[i];
+        return null;
+    }
+
+    /** Returns true if the polygon contains the point. */
+    containsPointPolygon(polygon, x, y)
+    {
+        let vertices = polygon;
+        let nn = polygon.length;
+
+        let prevIndex = nn - 2;
+        let inside = false;
+        for (let ii = 0; ii < nn; ii += 2)
+        {
+            let vertexY = vertices[ii + 1];
+            let prevY = vertices[prevIndex + 1];
+            if ((vertexY < y && prevY >= y) || (prevY < y && vertexY >= y))
+            {
+                let vertexX = vertices[ii];
+                if (vertexX + (y - vertexY) / (prevY - vertexY) * (vertices[prevIndex] - vertexX) < x)
+                    inside = !inside;
+            }
+            prevIndex = ii;
+        }
+        return inside;
+    }
+
+    /** Returns the first bounding box attachment that contains any part of the line segment, or null. When doing many checks, it
+     * is usually more efficient to only call this method if {@link #aabbIntersectsSegment()} returns
+     * true. */
+    intersectsSegment(x1, y1, x2, y2)
+    {
+        let polygons = this.polygons;
+        for (let i = 0, n = polygons.length; i < n; i++)
+            if (this.intersectsSegmentPolygon(polygons[i], x1, y1, x2, y2))
+                return this.boundingBoxes[i];
+        return null;
+    }
+
+    /** Returns true if the polygon contains any part of the line segment. */
+    intersectsSegmentPolygon(polygon, x1, y1, x2, y2)
+    {
+        let vertices = polygon;
+        let nn = polygon.length;
+
+        let width12 = x1 - x2, height12 = y1 - y2;
+        let det1 = x1 * y2 - y1 * x2;
+        let x3 = vertices[nn - 2], y3 = vertices[nn - 1];
+        for (let ii = 0; ii < nn; ii += 2)
+        {
+            let x4 = vertices[ii], y4 = vertices[ii + 1];
+            let det2 = x3 * y4 - y3 * x4;
+            let width34 = x3 - x4, height34 = y3 - y4;
+            let det3 = width12 * height34 - height12 * width34;
+            let x = (det1 * width34 - width12 * det2) / det3;
+            if (((x >= x3 && x <= x4) || (x >= x4 && x <= x3)) && ((x >= x1 && x <= x2) || (x >= x2 && x <= x1)))
+            {
+                let y = (det1 * height34 - height12 * det2) / det3;
+                if (((y >= y3 && y <= y4) || (y >= y4 && y <= y3)) && ((y >= y1 && y <= y2) || (y >= y2 && y <= y1)))
+                    return true;
+            }
+            x3 = x4;
+            y3 = y4;
+        }
+        return false;
+    }
+
+    /** Returns the polygon for the specified bounding box, or null. */
+    getPolygon(boundingBox)
+    {
+        if (!boundingBox)
+            throw new Error("boundingBox cannot be null.");
+        let index = this.boundingBoxes.indexOf(boundingBox);
+        return index == -1 ? null : this.polygons[index];
+    }
+
+    /** The width of the axis aligned bounding box (0 when empty). */
+    getWidth()
+    {
+        return this.aabb.getWidth();
+    }
+
+    /** The height of the axis aligned bounding box (0 when empty). */
+    getHeight()
+    {
+        return this.aabb.getHeight();
     }
 }

@@ -399,6 +399,18 @@ class Entity
         return this.#model.containsPoint(this.getWorldTransform(), point);
     }
 
+    // The axis-aligned box around its model as drawn (see Model2D.getWorldBounds()), written into out (a Bounds2D) and returned; empty with no loaded model. Children aren't included.
+    getWorldBounds(out = new Bounds2D())
+    {
+        if (this.#model === null || this.#model.isLoaded() === false)
+        {
+            out.setEmpty();
+                return out;
+        }
+
+        return this.#model.getWorldBounds(this.getWorldTransform(), out);
+    }
+
     // *** Motion, Updating and Drawing ***
 
     // The entity's MotionController, made the first time this is called
