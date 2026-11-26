@@ -182,10 +182,13 @@ const HIERARCHY_BREATHE_TIME = 2.9;       // ...taking this many seconds each wa
 // Spine (page 4): each sample skeleton drawn by a Skeleton2D, with its bones (and paths, clipping) as SpineSkeletonDebug lines over it, animated.
 // follow: a bone its camera follows across (the tank drives about 4,100 units; its ground tiles and rock scroll past).
 // fitSkip: attachments left out when fitting the animation into the slot (the tank's ground and rock).
+// sequence: animations played in turn by the Skeleton2D's state, each once, SPINE_MIX seconds of crossfade between, round and round.
+//           A step is a name, or { name, wait }: its last pose is held wait seconds before the next starts.
 const SPINE_ASSETS = "./tools/Spine/demos/assets/";
 const SPINE_JSON = SPINE_ASSETS + "demos.json";   // Holds every sample skeleton, by name
 const SPINE_ITEMS = [{ name: "dragon", atlas: "atlas1", animation: "flying", tests: "regions only" },
-                     { name: "raptor", atlas: "atlas1", animation: "walk", tests: "IK, weighted meshes" },
+                     { name: "raptor", atlas: "atlas1", animation: "walk", tests: "IK, weighted meshes",
+                       sequence: ["walk", "walk", "jump", "roar", { name: "gun-grab", wait: 1.0 }, "gun-holster"] },
                      { name: "spineboy", atlas: "atlas1", animation: "run", tests: "IK, transform, clipping" },
                      { name: "owl", atlas: "atlas2", animation: "idle", tests: "meshes, deform" },
                      { name: "tank", atlas: "atlas2", animation: "drive", tests: "145 slots, path",
@@ -196,6 +199,7 @@ const SPINE_ITEMS = [{ name: "dragon", atlas: "atlas1", animation: "flying", tes
 const SPINE_VIEW = new Vector2(CELL_W - 80, CELL_H - 100); // Each skeleton's whole animation is fitted into this, centered in its slot
 const SPINE_CLIP = new Vector2(CELL_W - 16, CELL_H - 16);  // Each skeleton's camera viewport (and so its clip rect), centered in its slot
 const SPINE_LINE_WIDTH = 1.5;           // Screen design units, whatever the camera's zoom
+const SPINE_MIX = 0.2;                  // Seconds of crossfade between a sequence's animations
 const SPINE_ORIGIN = new Transform2D(); // Skeleton2Ds are drawn at the origin at scale 1; their cameras place them
 
 const TRANSITION_SECONDS = 0.7;
@@ -1354,6 +1358,9 @@ function makeCachedItem()
     scale 1. A followed bone (s.follow) is held in place while fitting; when playing, the camera
     follows it across instead, so the world it drives through (the tank's ground and rock) scrolls
     past. Without one, the root bone stays where the setup pose has it.
+    With s.sequence (and a Skeleton2D), its animations play in turn through the model's
+    SpineAnimationState instead (model.update()), each once with SPINE_MIX seconds of crossfade into
+    the next, queued again as the last starts; the fit covers every one of them.
 */
 function makeSpineItem(s, data, debug)
 {
@@ -1368,6 +1375,12 @@ function makeSpineItem(s, data, debug)
 
     let skeleton = model?.getSkeleton() ?? new SpineSkeleton(data);
     const animation = data.findAnimation(s.animation);
+    // Played by the model's state (needs the Skeleton2D): { name, wait } each, wait being seconds its last pose is held
+    const sequence = (s.sequence !== undefined && model !== null)
+        ? s.sequence.map((step) => (typeof step === "string") ? { name: step, wait: 0.0 } : { name: step.name, wait: step.wait ?? 0.0 })
+        : null;
+    const fitAnimations = (sequence !== null) ? [...new Set(sequence.map((step) => step.name))].map((name) => data.findAnimation(name)).filter((a) => a !== null)
+                                              : [animation];
     const followed = (s.follow !== undefined) ? skeleton.findBone(s.follow) : null;
     const root = followed ?? skeleton.getRootBone(); // Held in place: while fitting, or (no followed bone) always
     let time = 0.0;
@@ -1389,10 +1402,10 @@ function makeSpineItem(s, data, debug)
     if (animation === null)
         console.error(`Spine ${s.name} has no animation "${s.animation}"; showing its setup pose`);
 
-    // The pose at seconds. isFitting: the held bone in place (a followed one too) and s.fitSkip's attachments off.
-    const poseAt = (seconds, lastSeconds, isFitting) => {
-        if (animation !== null)
-            animation.apply(skeleton, lastSeconds, seconds, true, null, 1.0, SpineMixBlend.setup, SpineMixDirection.mixIn);
+    // anim's pose at seconds. isFitting: the held bone in place (a followed one too) and s.fitSkip's attachments off.
+    const poseAt = (anim, seconds, lastSeconds, isFitting) => {
+        if (anim !== null)
+            anim.apply(skeleton, lastSeconds, seconds, true, null, 1.0, SpineMixBlend.setup, SpineMixDirection.mixIn);
 
         if (isFitting === true || followed === null)
         {
@@ -1412,24 +1425,28 @@ function makeSpineItem(s, data, debug)
         skeleton.updateWorldTransform();
     };
 
-    // The bounds over the whole animation (sampled), at scale 1 with the root at the origin
+    // The bounds over the whole animation (each in a sequence), sampled, at scale 1 with the root at the origin
     const fitBounds = () => {
         let min = new Vector2(Infinity, Infinity);
         let max = new Vector2(-Infinity, -Infinity);
         let offset = new Vector2();
         let size = new Vector2();
-        const samples = (animation !== null) ? 12 : 1;
 
-        for (let i = 0; i < samples; ++i)
+        for (const anim of fitAnimations)
         {
-            skeleton.setToSetupPose();
-            poseAt((animation !== null) ? (animation.duration * i) / samples : 0.0, 0.0, true);
-            skeleton.getBounds(offset, size, []);
+            const samples = (anim !== null) ? 12 : 1;
 
-            if (Number.isFinite(offset.x) === true && size.x > 0.0)
+            for (let i = 0; i < samples; ++i)
             {
-                min.setXY(Math.min(min.x, offset.x), Math.min(min.y, offset.y));
-                max.setXY(Math.max(max.x, offset.x + size.x), Math.max(max.y, offset.y + size.y));
+                skeleton.setToSetupPose();
+                poseAt(anim, (anim !== null) ? (anim.duration * i) / samples : 0.0, 0.0, true);
+                skeleton.getBounds(offset, size, []);
+
+                if (Number.isFinite(offset.x) === true && size.x > 0.0)
+                {
+                    min.setXY(Math.min(min.x, offset.x), Math.min(min.y, offset.y));
+                    max.setXY(Math.max(max.x, offset.x + size.x), Math.max(max.y, offset.y + size.y));
+                }
             }
         }
 
@@ -1440,7 +1457,30 @@ function makeSpineItem(s, data, debug)
     };
 
     const bounds = fitBounds();
-    const label = `Spine ${s.name} - ${s.animation}: ${s.tests}`;
+    const label = (sequence !== null) ? `Spine ${s.name} - all ${fitAnimations.length} in turn, ${SPINE_MIX} s mixes: ${s.tests}`
+                                      : `Spine ${s.name} - ${s.animation}: ${s.tests}`;
+
+    /*
+        A sequence: queued on track 0 of the model's state, each once and mixing into the next;
+        queued again as its last starts. After a step with a wait, the next starts that long
+        after it ends (a delay from its start: its duration plus the wait), its last pose held
+        meanwhile; otherwise at its end, less the mix (delay 0).
+    */
+    const queueSequence = () => {
+        sequence.forEach((step, i) => {
+            const before = sequence[(i + sequence.length - 1) % sequence.length]; // The step before, round the end
+            const beforeAnimation = data.findAnimation(before.name);
+            const delay = (before.wait > 0.0 && beforeAnimation !== null) ? beforeAnimation.duration + before.wait : 0.0;
+
+            model.addAnimation(0, step.name, false, delay);
+        });
+    };
+
+    if (sequence !== null)
+    {
+        model.setDefaultMix(SPINE_MIX);
+        queueSequence();
+    }
 
     // The camera fits the whole animation into SPINE_VIEW (zoom 1, looking at the origin, if it has no bounds)
     if (bounds !== null)
@@ -1460,9 +1500,19 @@ function makeSpineItem(s, data, debug)
                  camera.setViewport(x - (SPINE_CLIP.x / 2.0), y - (SPINE_CLIP.y / 2.0), SPINE_CLIP.x, SPINE_CLIP.y);
              },
              update: (dt) => {
-                 const last = time;
-                 time += dt;
-                 poseAt(time, last, false);
+                 if (sequence !== null)
+                 {
+                     model.update(dt); // The state moves on and poses the skeleton, mixing as it goes
+
+                     if (model.getAnimationState().getCurrent(0)?.next === null)
+                         queueSequence(); // The last one is playing: the next round after it
+                 }
+                 else
+                 {
+                     const last = time;
+                     time += dt;
+                     poseAt(animation, time, last, false);
+                 }
 
                  // Following: the camera moves across with the bone, so it keeps its place in the view
                  if (followed !== null)
