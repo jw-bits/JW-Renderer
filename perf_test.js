@@ -56,7 +56,7 @@
         FPS            Frames per second, averaged over the last half second
         Vertices       Vertex shader runs: each draw call's index (or vertex) count times its instances
         Materials      Different Materials bound
-        Objects        Models drawn: each Model2D.draw() (Skeleton2D's included, culled ones not),
+        Objects        Models drawn: each Model2D.draw(), each Skeleton2D drawn (alone or merged; culled ones not),
                        plus each instance of the batcher's instanced draws (Rect2D, Text2D, Sprite);
                        a Particles2D counts once, not once per particle
         Overdraw       The share of the view drawn 2 or more times; 0 while off or not yet sampled (O)
@@ -77,7 +77,8 @@
 
     The counts come from wrapping, from here, the GL context's draw calls,
     Material.prototype.bind, BatchBinder.prototype.bindMaterial,
-    Model2D.prototype.draw, Skeleton2D.prototype.draw, Particles2D.prototype.render,
+    Model2D.prototype.draw, Skeleton2D.prototype's draw and _fillStream, the Skeleton2D
+    batch drawer's end, Particles2D.prototype.render,
     RenderTargets.push, RenderTargetPool.acquire and Batcher.prototype's
     setLayerCulled and render; the batchers' Binds come from their own counts.
 
@@ -307,6 +308,7 @@ let gStats = {
     materials: new Set(),
 
     inParticles: false,     // In Particles2D.render(), so its instanced draw counts as one object
+    skeletonBinding: 0,     // Above 0 in Skeleton2D.draw() or its batch drawer's end(): their Material.bind()s count as binds sent
 
     // This frame, while counting
     vertices: 0,
@@ -1942,7 +1944,7 @@ function installHooks()
             gStats.materials.add(this);
 
             // Skeleton2D binds its Materials itself, past the batcher's BatchBinder: every GL call is sent, none skipped
-            if (gStats.drawingModel instanceof Skeleton2D)
+            if (gStats.skeletonBinding > 0)
                 gStats.bindsSent += materialBindCalls(this, args[0] !== false, args[1] !== false);
         }
 
@@ -1975,10 +1977,10 @@ function installHooks()
         gStats.drawingModel = outer;
     };
 
-    // Skeleton2D has its own draw(); the batcher doesn't call it for a culled one
-    const skeletonDraw = Skeleton2D.prototype.draw;
+    // Every Skeleton2D drawn writes its stream once, drawn alone (draw()) or merged (its batch drawer); a culled one doesn't
+    const fillStream = Skeleton2D.prototype._fillStream;
 
-    Skeleton2D.prototype.draw = function(...args)
+    Skeleton2D.prototype._fillStream = function(...args)
     {
         if (gStats.isCounting === true)
         {
@@ -1990,10 +1992,31 @@ function installHooks()
                 gStats.bones += skeleton.bones.length;
         }
 
+        return fillStream.apply(this, args);
+    };
+
+    // Skeleton2D binds its own Materials in draw() and in its batch drawer's end() (shared by every Skeleton2D)
+    const skeletonDraw = Skeleton2D.prototype.draw;
+
+    Skeleton2D.prototype.draw = function(...args)
+    {
         const outer = gStats.drawingModel;
         gStats.drawingModel = this;
+        ++gStats.skeletonBinding;
         const result = skeletonDraw.apply(this, args);
+        --gStats.skeletonBinding;
         gStats.drawingModel = outer;
+            return result;
+    };
+
+    let drawer = Skeleton2D.prototype.getBatchDrawer(); // Doesn't read this
+    const drawerEnd = drawer.end;
+
+    drawer.end = function(...args)
+    {
+        ++gStats.skeletonBinding;
+        const result = drawerEnd.apply(this, args);
+        --gStats.skeletonBinding;
             return result;
     };
 

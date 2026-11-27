@@ -215,6 +215,16 @@ class Model2D
     // Draw calls the last draw() made; 1 unless a subclass that binds its own Materials says otherwise
     getDrawCount() { return 1; }
 
+    /*
+        An object that draws many models of this kind together, or null (the default)
+        to be drawn one at a time. Batcher hands consecutive models of a group with the
+        same drawer to it: drawer.begin(), then drawer.add(model, transform, color) for
+        each (the batcher's copies, read-only), then drawer.end(), which draws them
+        in that order and returns its draw calls. Only for models that bind their own
+        Materials (bindsOwnMaterials()). See Skeleton2D.
+    */
+    getBatchDrawer() { return null; }
+
     // The part of the texture drawn, as a UVRect. Shared and read-only for models that draw all of it; don't change it.
     getUVRect() { return this.#getTextureUVRect(); }
 

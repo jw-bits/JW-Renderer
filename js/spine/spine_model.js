@@ -35,8 +35,9 @@
 
     Placing it: vertices are in the skeleton's own units, as posed (its x, y
     and scale included). The draw transform then turns and scales it about
-    its origin and puts the origin at the transform's position. It has no
-    size, so the alignment changes nothing.
+    its origin and puts the origin at the transform's position, in the
+    shader, through the Transforms uniform block (DrawTransforms; shear
+    isn't drawn). It has no size, so the alignment changes nothing.
 
     Hit tests: hitTest(transform, point) gives the bounding-box attachment
     (SpineBoundingBoxAttachment, e.g. spineboy's "head") under a world point
@@ -78,9 +79,10 @@
     updateAttachments() after its updateWorldTransform(). An entity moved out
     from under the holder is left where it is until it's back.
 
-    Color: every vertex is skeleton color x slot color x attachment color,
-    premultiplied. The color it's drawn with (an Entity's) multiplies that in
-    the shader, so one pose can be drawn in many colors.
+    Color: every vertex is skeleton color x slot color x attachment color x
+    the color it's drawn with (an Entity's), premultiplied, written into the
+    stream on the CPU (the dark color is tinted too), so skeletons drawn in
+    different colors can still share a draw.
 
     Two-color tint: a skeleton whose data has dark colors (slot "dark" in
     Spine) streams 12 floats per vertex instead of 8, the slot's dark color
@@ -104,14 +106,25 @@
     page and blend mode from MaterialManager, so a Batcher forgets what it
     had bound after drawing one. getDrawCount() is the draws its last draw()
     made. Each draw() rebuilds the stream from the pose as it is then.
+
+    Merged draws: every Skeleton2D has the same getBatchDrawer(), so a
+    Batcher hands it skeletons that are next to each other in a group (the
+    same first page and shader, in submission order). It puts each one's
+    stream, as posed and tinted, into one shared stream with the skeleton's
+    item index after each vertex (RenderAttributes.kVector1), its draw
+    transform as that DrawTransforms item, and joins runs where one
+    skeleton's last meets the next one's first with the same Material. So
+    40 spineboys on one page, normal blending, are one draw call. Up to
+    DrawTransforms.kMaxItems (512) skeletons go in each draw; plain and
+    two-color skeletons never share one (they're in different groups
+    anyway). A skeleton drawn on its own (draw()) uses its own mesh, as item
+    0, without the index.
 */
 class Skeleton2D extends Model2D
 {
     static #kQuadTriangles = [0, 1, 2, 2, 3, 0];
     static #kFloatsPerVertex = 8;          // x, y, u, v, r, g, b, a
     static #kFloatsPerVertexTwoColor = 12; // ...then the dark color: r, g, b, a
-    static #kPosition = new Vector4();
-    static #kScaleRot = new Vector3();
     static #kPageFlags = new Vector4();
     static #kBoneTransform = new Transform2D(); // Scratch for updateAttachments()
     static #kBoundsOffset = new Vector2();      // Scratch for #refreshBounds()
@@ -120,6 +133,27 @@ class Skeleton2D extends Model2D
     static #kClipper = new SpineSkeletonClipping(); // Shared by every Skeleton2D; _fillStream() starts and ends with it unused
     static #kLight = new Vector4();             // Scratch: the vertex colors given to the clipper
     static #kDark = new Vector4();
+
+    // Merged draws (see Batching above): what Batcher hands consecutive Skeleton2Ds to
+    static #kBatchDrawer = {
+        begin() { Skeleton2D.#batchBegin(); },
+        add(model, transform, color) { Skeleton2D.#batchAdd(model, transform, color); },
+        end() { return Skeleton2D.#batchEnd(); }
+    };
+
+    // The merged stream: each skeleton's stream with its item index after every vertex, its runs joined where they meet
+    static #batch = {
+        meshes: [null, null],  // DynamicMesh: plain, two-color; made on first use (false if they couldn't be)
+        vertices: new Float32Array(4096 * 9),
+        indices: new Uint32Array(12288),
+        vertexCount: 0,
+        indexCount: 0,
+        runs: [],              // { material, page, firstIndex, indexCount }, reused; runCount of them are this draw's
+        runCount: 0,
+        items: 0,              // Skeletons in it (DrawTransforms items 0 - items - 1)
+        stride: 0,             // Floats per vertex in, before the index: 8, or 12 with two colors
+        draws: 0               // Draw calls since begin()
+    };
 
     #skeleton;     // SpineSkeleton
     #mesh;         // DynamicMesh, given to the base
@@ -619,6 +653,9 @@ class Skeleton2D extends Model2D
     // Draw calls the last draw() made
     getDrawCount() { return this.#drawCount; }
 
+    // The drawer every Skeleton2D shares, so Batcher draws skeletons next to each other in a group together (see Model2D.getBatchDrawer())
+    getBatchDrawer() { return Skeleton2D.#kBatchDrawer; }
+
     /*
         Draws the skeleton as it's posed now, its origin at transform's position,
         turned and scaled by it, tinted color. uvRect and material are ignored: it
@@ -631,13 +668,16 @@ class Skeleton2D extends Model2D
         if (this.isLoaded() === false)
             return;
 
-        this._fillStream();
+        this._fillStream(color ?? Vector4.kWhite);
 
         if (this.#indexCount === 0 || this.#mesh.setData(this.#vertices, this.#vertexCount, this.#indices, this.#indexCount) === false)
             return;
 
-        Skeleton2D.#kPosition.setXYZW(transform.getX(), transform.getY(), 0.0, 0.0);
-        Skeleton2D.#kScaleRot.setXYZ(transform.getScaleX(), transform.getScaleY(), transform.getRotation());
+        // Item 0 of the Transforms block; its own mesh streams no item index, so the shader reads the attribute's value, set to 0 here
+        if (DrawTransforms.set(0, transform) === false || DrawTransforms.upload(1) === false)
+            return;
+
+        WGLV.context.vertexAttrib1f(RenderAttributes.getLocation(RenderAttributes.kVector1), 0.0);
 
         for (let i = 0; i < this.#runCount; ++i)
         {
@@ -647,14 +687,7 @@ class Skeleton2D extends Model2D
             if (m === null)
                 continue;
 
-            Skeleton2D.#kPageFlags.setXYZW(run.page.isPremultiplied() ? 1.0 : 0.0, 0.0, 0.0, 0.0);
-
-            m.bind();
-            m.setUniform("u_color", color ?? Vector4.kWhite);
-            m.setUniform("u_vec0", Skeleton2D.#kPosition);
-            m.setUniform("u_scale", Skeleton2D.#kScaleRot);
-            m.setUniform("u_vec1", Skeleton2D.#kPageFlags);
-
+            Skeleton2D.#bindRunMaterial(m, run.page);
             this.#mesh.render(run.firstIndex, run.indexCount);
             ++this.#drawCount;
         }
@@ -692,13 +725,14 @@ class Skeleton2D extends Model2D
 
     /*
         For draw() and tests: writes the skeleton's triangles, as posed now, into the
-        stream, on the CPU only. Returns it, read-only: { vertices (x, y, u, v, r, g, b, a
-        each, then the dark color's r, g, b, a for a two-color skeleton; u, v in Spine's
-        terms, V down), vertexCount, floatsPerVertex (8, or 12 with two colors), indices,
-        indexCount, runs (runCount of { page, blendMode, firstIndex, indexCount }),
-        runCount }.
+        stream, on the CPU only, tinted by tint (a straight-alpha Vector4, the draw's
+        color; white changes nothing). Returns it, read-only: { vertices (x, y, u, v, r,
+        g, b, a each, then the dark color's r, g, b, a for a two-color skeleton; u, v in
+        Spine's terms, V down), vertexCount, floatsPerVertex (8, or 12 with two colors),
+        indices, indexCount, runs (runCount of { page, blendMode, firstIndex,
+        indexCount }), runCount }.
     */
-    _fillStream()
+    _fillStream(tint = Vector4.kWhite)
     {
         const skeleton = this.#skeleton;
         const sc = skeleton.color;
@@ -758,13 +792,13 @@ class Skeleton2D extends Model2D
                 continue; // No image (Spine's "if (texture)")
             }
 
-            // skeleton x slot x attachment, premultiplied
+            // skeleton x slot x attachment x tint, premultiplied
             const slotColor = slot.color;
             const ac = a.color;
-            const alpha = sc.w * slotColor.w * ac.w;
-            const r = sc.x * slotColor.x * ac.x * alpha;
-            const g = sc.y * slotColor.y * ac.y * alpha;
-            const b = sc.z * slotColor.z * ac.z * alpha;
+            const alpha = sc.w * slotColor.w * ac.w * tint.w;
+            const r = sc.x * slotColor.x * ac.x * tint.x * alpha;
+            const g = sc.y * slotColor.y * ac.y * tint.y * alpha;
+            const b = sc.z * slotColor.z * ac.z * tint.z * alpha;
             let vertexAlpha = alpha;
             let blendMode = BlendMode.kPremultiplied;
 
@@ -783,11 +817,11 @@ class Skeleton2D extends Model2D
                     break;
             }
 
-            // Two-color: the slot's dark color, premultiplied by the alpha (not the additive 0); black without one
+            // Two-color: the slot's dark color, premultiplied by the alpha (not the additive 0) and tinted; black without one
             const dark = slot.darkColor;
-            const dr = (dark !== null) ? dark.x * alpha : 0.0;
-            const dg = (dark !== null) ? dark.y * alpha : 0.0;
-            const db = (dark !== null) ? dark.z * alpha : 0.0;
+            const dr = (dark !== null) ? dark.x * tint.x * alpha : 0.0;
+            const dg = (dark !== null) ? dark.y * tint.y * alpha : 0.0;
+            const db = (dark !== null) ? dark.z * tint.z * alpha : 0.0;
 
             // Clipped: the clipper's vertices (already in the stream's layout) and triangles instead
             let clipped = false;
@@ -1028,6 +1062,208 @@ class Skeleton2D extends Model2D
 
         console.error(`Skeleton2D.${methodName}() needs a track of 0 or more`);
             return false;
+    }
+
+    // Binds m (a run's Material) and tells the shader whether page is already premultiplied
+    static #bindRunMaterial(m, page)
+    {
+        Skeleton2D.#kPageFlags.setXYZW(page.isPremultiplied() ? 1.0 : 0.0, 0.0, 0.0, 0.0);
+
+        m.bind();
+        m.setUniform(RenderUniforms.kVector1, Skeleton2D.#kPageFlags);
+    }
+
+    // *** Merged draws (#kBatchDrawer) ***
+
+    static #batchBegin()
+    {
+        let b = Skeleton2D.#batch;
+        b.vertexCount = 0;
+        b.indexCount = 0;
+        b.runCount = 0;
+        b.items = 0;
+        b.stride = 0;
+        b.draws = 0;
+    }
+
+    // Adds model's stream, as posed now and tinted color, as the next item at transform; draws what's gathered first if it's full or the stream differs
+    static #batchAdd(model, transform, color)
+    {
+        if ((model instanceof Skeleton2D) === false || model.isLoaded() === false)
+            return;
+
+        let b = Skeleton2D.#batch;
+
+        if (b.items === DrawTransforms.kMaxItems || (b.items > 0 && b.stride !== model.#stride))
+            Skeleton2D.#batchFlush();
+
+        const s = model._fillStream(color ?? Vector4.kWhite);
+
+        if (s.indexCount === 0)
+            return; // Nothing showing
+
+        const item = b.items;
+
+        if (DrawTransforms.set(item, transform) === false)
+            return;
+
+        ++b.items;
+        b.stride = s.floatsPerVertex;
+        Skeleton2D.#batchReserve(s.vertexCount, s.indexCount);
+
+        // Vertices, each followed by the item index
+        const inStride = s.floatsPerVertex;
+        const src = s.vertices;
+        let v = b.vertices;
+        let o = b.vertexCount * (inStride + 1);
+
+        for (let i = 0; i < s.vertexCount; ++i)
+        {
+            const first = i * inStride;
+
+            for (let k = 0; k < inStride; ++k)
+                v[o++] = src[first + k];
+
+            v[o++] = item;
+        }
+
+        // Indices, after the vertices so far
+        const base = b.vertexCount;
+        const firstIndex = b.indexCount;
+        let ind = b.indices;
+
+        for (let i = 0; i < s.indexCount; ++i)
+            ind[firstIndex + i] = base + s.indices[i];
+
+        // Runs, joined to the last one when they meet with the same Material
+        for (let i = 0; i < s.runCount; ++i)
+        {
+            const run = s.runs[i];
+            const m = model.#getMaterial(run.page, run.blendMode);
+
+            if (m === null || run.indexCount === 0)
+                continue;
+
+            const start = firstIndex + run.firstIndex;
+            const last = (b.runCount > 0) ? b.runs[b.runCount - 1] : null;
+
+            if (last !== null && last.material === m && (last.firstIndex + last.indexCount) === start)
+            {
+                last.indexCount += run.indexCount;
+                continue;
+            }
+
+            if (b.runCount === b.runs.length)
+                b.runs.push({ material: null, page: null, firstIndex: 0, indexCount: 0 });
+
+            let r = b.runs[b.runCount++];
+            r.material = m;
+            r.page = run.page;
+            r.firstIndex = start;
+            r.indexCount = run.indexCount;
+        }
+
+        b.vertexCount += s.vertexCount;
+        b.indexCount += s.indexCount;
+    }
+
+    // Draws what's gathered and empties it; returns the draw calls since begin()
+    static #batchEnd()
+    {
+        Skeleton2D.#batchFlush();
+
+        let b = Skeleton2D.#batch;
+
+        for (let i = 0; i < b.runs.length; ++i)
+        {
+            b.runs[i].material = null; // Don't keep Materials alive
+            b.runs[i].page = null;
+        }
+
+        return b.draws;
+    }
+
+    // Draws the gathered items, a draw call per run, then starts over (the draw count is kept)
+    static #batchFlush()
+    {
+        let b = Skeleton2D.#batch;
+
+        if (b.items > 0 && b.indexCount > 0)
+        {
+            const mesh = Skeleton2D.#batchMesh(b.stride === Skeleton2D.#kFloatsPerVertexTwoColor);
+
+            if (mesh !== null && mesh.setData(b.vertices, b.vertexCount, b.indices, b.indexCount) === true && DrawTransforms.upload(b.items) === true)
+            {
+                for (let i = 0; i < b.runCount; ++i)
+                {
+                    const run = b.runs[i];
+
+                    Skeleton2D.#bindRunMaterial(run.material, run.page);
+                    mesh.render(run.firstIndex, run.indexCount);
+                    ++b.draws;
+                }
+            }
+        }
+
+        b.vertexCount = 0;
+        b.indexCount = 0;
+        b.runCount = 0;
+        b.items = 0;
+        b.stride = 0;
+    }
+
+    // The merged stream's mesh, plain or two-color, with the item index streamed (kVector1); made the first time, null if it can't be
+    static #batchMesh(twoColor)
+    {
+        let meshes = Skeleton2D.#batch.meshes;
+        const i = (twoColor === true) ? 1 : 0;
+
+        if (meshes[i] === null)
+        {
+            let layout = [[RenderAttributes.kPosition, 2], [RenderAttributes.kUV0, 2], [RenderAttributes.kColor, 4]];
+
+            if (twoColor === true)
+                layout.push([RenderAttributes.kVector0, 4]);
+
+            layout.push([RenderAttributes.kVector1, 1]);
+
+            let mesh = new DynamicMesh();
+
+            if (mesh.load(layout) === false)
+            {
+                console.error("Skeleton2D couldn't build the merged draws' mesh");
+                meshes[i] = false;
+                    return null;
+            }
+
+            meshes[i] = mesh;
+        }
+
+        return (meshes[i] === false) ? null : meshes[i];
+    }
+
+    // Room in the merged stream for vertexCount more vertices (with their index) and indexCount more indices, keeping what's there
+    static #batchReserve(vertexCount, indexCount)
+    {
+        let b = Skeleton2D.#batch;
+        const stride = b.stride + 1;
+        const floats = (b.vertexCount + vertexCount) * stride;
+
+        if (floats > b.vertices.length)
+        {
+            let grown = new Float32Array(Math.max(floats, b.vertices.length * 2));
+            grown.set(b.vertices.subarray(0, b.vertexCount * stride));
+            b.vertices = grown;
+        }
+
+        const indices = b.indexCount + indexCount;
+
+        if (indices > b.indices.length)
+        {
+            let grown = new Uint32Array(Math.max(indices, b.indices.length * 2));
+            grown.set(b.indices.subarray(0, b.indexCount));
+            b.indices = grown;
+        }
     }
 
     // The atlas page of the first region or mesh attachment in any skin, or null

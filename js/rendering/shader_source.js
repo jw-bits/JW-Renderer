@@ -31,6 +31,30 @@ const FrameSharedSource = {
     `
 };
 
+/*
+    Vertex shader code for shaders that draw many models in one call: the
+    Transforms uniform block (see RenderUniformBlocks, filled by
+    DrawTransforms) and itemToWorld(), which takes a position in item's own
+    units through that item's draw transform: scaled and turned about its
+    origin, then moved to its position.
+*/
+const TransformsSharedSource = {
+    name: "TransformsShared", // Code shared by shaders, not a shader of its own
+    VS: `
+        layout(std140) uniform Transforms {
+            vec4 u_transforms[1024]; // Per item: (x, y, sx, sy), (sin, cos, 0, 0)
+        };
+
+        vec2 itemToWorld(float item, vec2 p) {
+            int i = int(item + 0.5) * 2;
+            vec4 placeScale = u_transforms[i];
+            vec2 sinCos = u_transforms[i + 1].xy;
+            vec2 s = p * placeScale.zw;
+            return vec2((s.x * sinCos.y) - (s.y * sinCos.x), (s.x * sinCos.x) + (s.y * sinCos.y)) + placeScale.xy;
+        }
+    `
+};
+
 const Rect2DShaderSource = {
     name: "Rect2D",
     VS: `#version 300 es
@@ -309,12 +333,13 @@ const TextGlyphs2DShaderSource = {
 
         a_pos     (x, y) in the skeleton's own units (its world, before the draw transform)
         a_uv0     Spine's UVs, V running down the page; flipped here, as engine textures are uploaded flipped
-        a_color   Premultiplied (r * a, g * a, b * a, a); alpha 0 draws additive under kPremultiplied
+        a_color   Premultiplied (r * a, g * a, b * a, a), the draw's tint (the Entity's color)
+                  included; alpha 0 draws additive under kPremultiplied
+        a_vec1    (item) Which skeleton of the draw: its DrawTransforms item. Not streamed
+                  for a skeleton drawn alone, so it's the attribute's default, 0.
 
-    The draw transform turns, scales and places the skeleton's origin:
-        u_vec0   (x, y, 0, 0)       Where the skeleton's origin goes, world design units
-        u_scale  (sx, sy, rotation) About the origin
-        u_color  Straight-alpha tint (the Entity's color), premultiplied here
+    The draw transform (the Transforms block, see TransformsSharedSource)
+    turns, scales and places each skeleton's origin.
         u_vec1   (1 if the page is already premultiplied (pma) else 0, 0, 0, 0)
 */
 const Skeleton2DShaderSource = {
@@ -323,24 +348,16 @@ const Skeleton2DShaderSource = {
         layout(location = 0) in vec3 a_pos;
         layout(location = 1) in vec2 a_uv0;
         layout(location = 5) in vec4 a_color;
+        layout(location = 7) in float a_vec1;
 
         ${FrameSharedSource.VS}
-        uniform vec3 u_scale;
-        uniform vec4 u_vec0;
+        ${TransformsSharedSource.VS}
 
         out vec2 v_uv0;
         out vec4 v_color;
 
         void main() {
-            vec2 ssPos = a_pos.xy * u_scale.xy;
-
-            float sa = sin(u_scale.z);
-            float ca = cos(u_scale.z);
-
-            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
-                             ssPos.x * sa + ssPos.y * ca);
-
-            gl_Position = worldToClip(rPos + u_vec0.xy);
+            gl_Position = worldToClip(itemToWorld(a_vec1, a_pos.xy));
 
             v_uv0 = vec2(a_uv0.x, 1.0 - a_uv0.y);
             v_color = a_color;
@@ -350,7 +367,6 @@ const Skeleton2DShaderSource = {
         precision highp float;
 
         uniform sampler2D u_tex0;
-        uniform vec4 u_color;
         uniform vec4 u_vec1;
 
         in vec2 v_uv0;
@@ -360,7 +376,7 @@ const Skeleton2DShaderSource = {
         void main() {
             vec4 c = texture(u_tex0, v_uv0);
             c.rgb *= mix(c.a, 1.0, u_vec1.x); // Straight pages premultiplied here
-            fragColor = c * v_color * vec4(u_color.rgb * u_color.a, u_color.a);
+            fragColor = c * v_color;
         }
     `
 };
@@ -372,7 +388,8 @@ const Skeleton2DShaderSource = {
     premultiplied color). Everything else is as above.
 
         a_vec0    The dark color (r * a, g * a, b * a, 1), with a the vertex's own alpha
-                  (not 0 for additive); (0, 0, 0, 1) for slots without one
+                  (not 0 for additive), times the draw's premultiplied tint; (0, 0, 0, 1)
+                  for slots without one
 */
 const Skeleton2DTwoColorShaderSource = {
     name: "Skeleton2DTwoColor",
@@ -381,25 +398,17 @@ const Skeleton2DTwoColorShaderSource = {
         layout(location = 1) in vec2 a_uv0;
         layout(location = 5) in vec4 a_color;
         layout(location = 6) in vec4 a_vec0;
+        layout(location = 7) in float a_vec1;
 
         ${FrameSharedSource.VS}
-        uniform vec3 u_scale;
-        uniform vec4 u_vec0;
+        ${TransformsSharedSource.VS}
 
         out vec2 v_uv0;
         out vec4 v_color;
         out vec4 v_dark;
 
         void main() {
-            vec2 ssPos = a_pos.xy * u_scale.xy;
-
-            float sa = sin(u_scale.z);
-            float ca = cos(u_scale.z);
-
-            vec2 rPos = vec2(ssPos.x * ca - ssPos.y * sa,
-                             ssPos.x * sa + ssPos.y * ca);
-
-            gl_Position = worldToClip(rPos + u_vec0.xy);
+            gl_Position = worldToClip(itemToWorld(a_vec1, a_pos.xy));
 
             v_uv0 = vec2(a_uv0.x, 1.0 - a_uv0.y);
             v_color = a_color;
@@ -410,7 +419,6 @@ const Skeleton2DTwoColorShaderSource = {
         precision highp float;
 
         uniform sampler2D u_tex0;
-        uniform vec4 u_color;
         uniform vec4 u_vec1;
 
         in vec2 v_uv0;
@@ -425,7 +433,7 @@ const Skeleton2DTwoColorShaderSource = {
             vec4 t;
             t.a = c.a * v_color.a;
             t.rgb = ((c.a - c.rgb) * v_dark.rgb) + (c.rgb * v_color.rgb);
-            fragColor = t * vec4(u_color.rgb * u_color.a, u_color.a);
+            fragColor = t;
         }
     `
 };

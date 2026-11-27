@@ -95,6 +95,13 @@
     and the record is forgotten after it; its getDrawCount() is added to the
     draw calls.
 
+    Merged draws: models that bind their own Materials and share a
+    Model2D.getBatchDrawer() (every Skeleton2D does) are handed to that
+    drawer when they're next to each other in a group (the same Material,
+    in submission order), and it draws them all at once, e.g. 40 skeletons
+    on one atlas page in one draw call. Models of other groups in between
+    keep them apart.
+
     CachedLayer (below) draws a batch once into a RenderTarget and shows it
     each frame as one textured rect.
 */
@@ -644,6 +651,7 @@ class Batcher
         Binds the Material once (skipping what's already bound), then draws each model
         with its captured values. A model that binds its own Materials (Skeleton2D) gets
         no bind; the binder forgets what's bound after it, so the next model binds again.
+        Consecutive ones with the same Model2D.getBatchDrawer() are drawn by it together.
     */
     #drawEach(list, start, end)
     {
@@ -655,10 +663,31 @@ class Batcher
 
             if (e.model.bindsOwnMaterials() === true)
             {
-                e.model.draw(e.transform, e.color, e.uvRect, e.material);
+                const drawer = e.model.getBatchDrawer();
+                let last = i + 1; // After the last entry for this drawer
+
+                while (drawer !== null && last < end && list[last].model.getBatchDrawer() === drawer)
+                    ++last;
+
+                if (last - i > 1)
+                {
+                    // Consecutive models with the same drawer: drawn together, in order
+                    drawer.begin();
+
+                    for (let j = i; j < last; ++j)
+                        drawer.add(list[j].model, list[j].transform, list[j].color);
+
+                    this.#drawCalls += drawer.end();
+                    i = last - 1;
+                }
+                else
+                {
+                    e.model.draw(e.transform, e.color, e.uvRect, e.material);
+                    this.#drawCalls += e.model.getDrawCount();
+                }
+
                 this.#binder.reset();
                 isBound = false;
-                this.#drawCalls += e.model.getDrawCount();
                 continue;
             }
 

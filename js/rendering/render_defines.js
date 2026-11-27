@@ -244,11 +244,19 @@ class RenderUniforms
             vec4 u_lightPos[4]      A point light's (x, y, z, range), range > 0, or the
                                     direction toward a directional light (x, y, z, 0)
             vec4 u_lightColor[4]    (r, g, b, intensity)
+
+        Transforms (binding 2, see DrawTransforms in render_utils.js), std140, 4,096 floats (16 KB,
+        WebGL2's guaranteed block size):
+            vec4 u_transforms[1024] A draw transform per item, for shaders that draw many models in
+                                    one call and pick each vertex's item by an index: item i is
+                                    [2i] (x, y, scaleX, scaleY) and [2i + 1] (sin, cos of the
+                                    rotation, 0, 0); 512 items
 */
 class RenderUniformBlocks
 {
     static kFrame = "Frame";
     static kLights = "Lights";
+    static kTransforms = "Transforms";
 
     static allBlocks = new Map(); // Name -> { binding, bufferProvider }; bufferProvider is a function or null
 
@@ -320,6 +328,7 @@ class RenderUniformBlocks
     static {
         RenderUniformBlocks.allBlocks.set(RenderUniformBlocks.kFrame, { binding: 0, bufferProvider: null });
         RenderUniformBlocks.allBlocks.set(RenderUniformBlocks.kLights, { binding: 1, bufferProvider: null });
+        RenderUniformBlocks.allBlocks.set(RenderUniformBlocks.kTransforms, { binding: 2, bufferProvider: null });
     }
 }
 

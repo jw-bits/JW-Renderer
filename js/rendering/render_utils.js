@@ -984,3 +984,110 @@ class ClipSpace
 
 // The Frame block's buffer is made by WGLV.init(), so every shader declaring it finds it at the binding point (see RenderUniformBlocks)
 RenderUniformBlocks.setBufferProvider(RenderUniformBlocks.kFrame, ClipSpace.uploadBuffer);
+
+/*
+    DrawTransforms - The Transforms uniform block's values (see
+    RenderUniformBlocks): a draw transform per item, for shaders that draw
+    many models in one call and pick each vertex's item by an index (e.g.
+    Skeleton2D's merged draws, see TransformsSharedSource). Up to kMaxItems
+    per draw.
+
+        DrawTransforms.set(0, transformA);  // Item 0
+        DrawTransforms.set(1, transformB);
+        DrawTransforms.upload(2);           // Items 0 - 1, then draw
+
+    Each item is a Transform2D's position, scale and rotation (shear isn't
+    drawn): a vertex p of the item goes to position + rotate(p * scale).
+    Items stay as set until set again; upload() before each draw that needs
+    new ones, as the buffer is shared by every shader declaring the block.
+*/
+class DrawTransforms
+{
+    static kMaxItems = 512;
+    static #kFloatsPerItem = 8;  // (x, y, sx, sy), (sin, cos, 0, 0)
+
+    static #buffer = null;       // UniformBuffer, made by uploadBuffer()
+    static #data = new Float32Array(DrawTransforms.kMaxItems * DrawTransforms.#kFloatsPerItem);
+
+    // Writes transform (a Transform2D) as item index. Returns false if index isn't 0 - kMaxItems - 1 or it isn't a Transform2D.
+    static set(index, transform)
+    {
+        if (Number.isInteger(index) === false || index < 0 || index >= DrawTransforms.kMaxItems)
+        {
+            console.error(`DrawTransforms.set(): index must be 0 - ${DrawTransforms.kMaxItems - 1}`);
+                return false;
+        }
+
+        if ((transform instanceof Transform2D) === false)
+        {
+            console.error("DrawTransforms.set() needs a Transform2D");
+                return false;
+        }
+
+        const r = transform.getRotation();
+        let d = DrawTransforms.#data;
+        let o = index * DrawTransforms.#kFloatsPerItem;
+
+        d[o++] = transform.getX();
+        d[o++] = transform.getY();
+        d[o++] = transform.getScaleX();
+        d[o++] = transform.getScaleY();
+        d[o++] = Math.sin(r);
+        d[o++] = Math.cos(r);
+        d[o++] = 0.0;
+        d[o] = 0.0;
+            return true;
+    }
+
+    // Sends items 0 - count - 1 to the block's buffer. Returns false if count is out of range or there's no buffer.
+    static upload(count)
+    {
+        if (Number.isInteger(count) === false || count < 1 || count > DrawTransforms.kMaxItems)
+        {
+            console.error(`DrawTransforms.upload(): count must be 1 - ${DrawTransforms.kMaxItems}`);
+                return false;
+        }
+
+        if (DrawTransforms.uploadBuffer() === false)
+            return false;
+
+        return DrawTransforms.#buffer.update(DrawTransforms.#data.subarray(0, count * DrawTransforms.#kFloatsPerItem));
+    }
+
+    /*
+        The Transforms block's buffer provider (see RenderUniformBlocks), called by WGLV.init():
+        the first time, creates the buffer (all zeros) at the block's binding point; afterwards
+        returns right away.
+    */
+    static uploadBuffer()
+    {
+        if (DrawTransforms.#buffer !== null)
+            return true;
+
+        if (WGLV.context === null)
+        {
+            console.error("DrawTransforms needs WGLV.init() first");
+                return false;
+        }
+
+        let buffer = new UniformBuffer();
+
+        if (buffer.load(RenderUniformBlocks.kTransforms, DrawTransforms.#data.length) === false)
+            return false;
+
+        DrawTransforms.#buffer = buffer;
+            return true;
+    }
+
+    // Frees the block's buffer; the next upload() makes it again
+    static unload()
+    {
+        if (DrawTransforms.#buffer !== null)
+            DrawTransforms.#buffer.unload();
+
+        DrawTransforms.#buffer = null;
+    }
+}
+
+// The Transforms block's buffer is made by WGLV.init(), so every shader declaring it finds it at the binding point (see RenderUniformBlocks)
+RenderUniformBlocks.setBufferProvider(RenderUniformBlocks.kTransforms, DrawTransforms.uploadBuffer);
